@@ -1,0 +1,1244 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extratos Contábeis - Monitor</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0f0f1a;
+            --bg-secondary: #1a1a2e;
+            --bg-card: #252540;
+            --accent-primary: #6366f1;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-error: #ef4444;
+            --accent-info: #3b82f6;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --border-color: #334155;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 1.5rem;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            margin-bottom: 1.5rem;
+            padding-bottom: 1rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .header h1 {
+            font-size: 1.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-primary), #a855f7);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .connection-status {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1rem;
+            background: var(--bg-card);
+            border-radius: 2rem;
+            font-size: 0.875rem;
+        }
+
+        .status-dot {
+            width: 10px;
+            height: 10px;
+            border-radius: 50%;
+            background: var(--accent-error);
+            animation: pulse 2s infinite;
+        }
+
+        .status-dot.connected {
+            background: var(--accent-success);
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                opacity: 1;
+            }
+
+            50% {
+                opacity: 0.5;
+            }
+        }
+
+        /* Stats Grid */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        @media (max-width: 1024px) {
+            .stats-grid {
+                grid-template-columns: repeat(3, 1fr);
+            }
+        }
+
+        @media (max-width: 640px) {
+            .stats-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            border: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+        }
+
+        .stat-card .icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 12px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.25rem;
+            flex-shrink: 0;
+        }
+
+        .stat-card.total .icon {
+            background: linear-gradient(135deg, #6366f1, #8b5cf6);
+        }
+
+        .stat-card.success .icon {
+            background: linear-gradient(135deg, #10b981, #34d399);
+        }
+
+        .stat-card.warning .icon {
+            background: linear-gradient(135deg, #f59e0b, #fbbf24);
+        }
+
+        .stat-card.error .icon {
+            background: linear-gradient(135deg, #ef4444, #f87171);
+        }
+
+        .stat-card.processing .icon {
+            background: linear-gradient(135deg, #3b82f6, #60a5fa);
+        }
+
+        .stat-card .info {
+            flex: 1;
+        }
+
+        .stat-card .value {
+            font-size: 1.75rem;
+            font-weight: 700;
+        }
+
+        .stat-card .label {
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+        }
+
+        /* Main Content */
+        .main-content {
+            display: grid;
+            grid-template-columns: 1fr 350px;
+            gap: 1.5rem;
+        }
+
+        @media (max-width: 1200px) {
+            .main-content {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        /* Panel */
+        .panel {
+            background: var(--bg-card);
+            border-radius: 1rem;
+            border: 1px solid var(--border-color);
+            overflow: hidden;
+        }
+
+        .panel-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+
+        .panel-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .panel-body {
+            padding: 1rem;
+            max-height: 600px;
+            overflow-y: auto;
+        }
+
+        /* Table */
+        .extratos-table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        .extratos-table th,
+        .extratos-table td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .extratos-table th {
+            background: var(--bg-secondary);
+            font-size: 0.75rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            position: sticky;
+            top: 0;
+        }
+
+        .extratos-table tr:hover {
+            background: var(--bg-secondary);
+        }
+
+        .extratos-table .empresa {
+            font-weight: 600;
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .extratos-table .arquivo {
+            font-size: 0.875rem;
+            color: var(--text-secondary);
+            max-width: 200px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .extratos-table .banco {
+            font-size: 0.875rem;
+        }
+
+        .extratos-table .periodo {
+            font-size: 0.875rem;
+            white-space: nowrap;
+        }
+
+        .extratos-table .hora {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+            white-space: nowrap;
+        }
+
+        .extratos-table .path {
+            font-size: 0.7rem;
+            color: var(--text-secondary);
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: monospace;
+        }
+
+        /* Delete Button */
+        .extratos-table .delete-btn {
+            opacity: 0;
+            background: none;
+            border: none;
+            color: var(--accent-error);
+            cursor: pointer;
+            font-size: 1rem;
+            padding: 0.25rem;
+            transition: opacity 0.2s, transform 0.2s;
+        }
+
+        .extratos-table tr:hover .delete-btn {
+            opacity: 1;
+        }
+
+        .extratos-table .delete-btn:hover {
+            transform: scale(1.2);
+        }
+
+        .extratos-table .action-col {
+            width: 40px;
+            text-align: center;
+        }
+
+        /* Status Badge */
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.25rem 0.75rem;
+            border-radius: 1rem;
+            font-size: 0.75rem;
+            font-weight: 600;
+        }
+
+        .status-badge.success {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-success);
+        }
+
+        .status-badge.warning {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--accent-warning);
+        }
+
+        .status-badge.error {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--accent-error);
+        }
+
+        .status-badge.processing {
+            background: rgba(99, 102, 241, 0.2);
+            color: var(--accent-primary);
+        }
+
+        /* Metodo Badge */
+        .metodo-badge {
+            font-size: 0.7rem;
+            padding: 0.125rem 0.5rem;
+            border-radius: 0.25rem;
+            background: var(--bg-primary);
+            color: var(--text-secondary);
+        }
+
+        /* Event Log */
+        .event-item {
+            display: flex;
+            gap: 0.75rem;
+            padding: 0.5rem 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 0.5rem;
+            background: var(--bg-secondary);
+            font-size: 0.8rem;
+            animation: slideIn 0.3s ease;
+        }
+
+        @keyframes slideIn {
+            from {
+                opacity: 0;
+                transform: translateX(-10px);
+            }
+
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        .event-item .time {
+            color: var(--text-secondary);
+            font-size: 0.7rem;
+            white-space: nowrap;
+        }
+
+        .event-item .content {
+            flex: 1;
+            word-break: break-word;
+        }
+
+        .event-item .type {
+            display: inline-block;
+            padding: 0.1rem 0.4rem;
+            border-radius: 0.25rem;
+            font-size: 0.65rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            margin-right: 0.5rem;
+        }
+
+        .event-item .type.info {
+            background: var(--accent-info);
+        }
+
+        .event-item .type.success {
+            background: var(--accent-success);
+        }
+
+        .event-item .type.warning {
+            background: var(--accent-warning);
+            color: #000;
+        }
+
+        .event-item .type.error {
+            background: var(--accent-error);
+        }
+
+        /* Current Processing */
+        .current-processing {
+            padding: 1rem;
+        }
+
+        .processing-card {
+            background: var(--bg-secondary);
+            border-radius: 0.75rem;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+            border-left: 3px solid var(--accent-primary);
+        }
+
+        .processing-card .filename {
+            font-weight: 600;
+            font-size: 0.875rem;
+            margin-bottom: 0.75rem;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .processing-card .step-current {
+            font-size: 0.8rem;
+            color: var(--accent-info);
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .no-processing {
+            color: var(--text-secondary);
+            text-align: center;
+            padding: 2rem 1rem;
+        }
+
+        .no-processing .icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+            opacity: 0.5;
+        }
+
+        /* Progress Bar */
+        .progress-bar {
+            height: 6px;
+            background: var(--bg-primary);
+            border-radius: 3px;
+            overflow: hidden;
+            margin: 0.75rem 0;
+        }
+
+        .progress-bar .fill {
+            height: 100%;
+            background: linear-gradient(90deg, var(--accent-primary), #a855f7);
+            border-radius: 3px;
+            transition: width 0.3s ease;
+        }
+
+        /* Scrollbar */
+        ::-webkit-scrollbar {
+            width: 6px;
+            height: 6px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: var(--bg-secondary);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 3px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-primary);
+        }
+
+        /* Spinner */
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--bg-primary);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+
+        @keyframes spin {
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        /* Empty State */
+        .empty-state {
+            text-align: center;
+            padding: 3rem 1rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state .icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Filter Buttons */
+        .filter-buttons {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .filter-btn {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-secondary);
+            padding: 0.375rem 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.75rem;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+
+        .filter-btn:hover,
+        .filter-btn.active {
+            background: var(--accent-primary);
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        /* Tabs */
+        .tabs {
+            display: flex;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .tab {
+            padding: 0.75rem 1.5rem;
+            border: none;
+            background: none;
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+            cursor: pointer;
+            border-bottom: 2px solid transparent;
+            transition: all 0.2s;
+        }
+
+        .tab:hover {
+            color: var(--text-primary);
+        }
+
+        .tab.active {
+            color: var(--accent-primary);
+            border-bottom-color: var(--accent-primary);
+        }
+
+        .tab-content {
+            display: none;
+        }
+
+        .tab-content.active {
+            display: block;
+        }
+
+        .filter-input {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            color: var(--text-primary);
+            padding: 0.375rem 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.75rem;
+            outline: none;
+        }
+
+        .filter-input:focus {
+            border-color: var(--accent-primary);
+        }
+
+        .filters-container {
+            display: flex;
+            gap: 1rem;
+            align-items: center;
+            flex-wrap: wrap;
+            width: 100%;
+        }
+
+        .filter-group {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+    </style>
+</head>
+
+<body>
+    <div class="container">
+        <!-- Header -->
+        <header class="header">
+            <h1>📄 Extratos Contábeis - Monitor</h1>
+            <div class="connection-status">
+                <div class="status-dot" id="statusDot"></div>
+                <span id="statusText">Sistema Parado</span>
+            </div>
+        </header>
+
+        <!-- Stats Grid -->
+        <div class="stats-grid">
+            <div class="stat-card total">
+                <div class="icon">📊</div>
+                <div class="info">
+                    <div class="value" id="statTotal">0</div>
+                    <div class="label">Total Processados</div>
+                </div>
+            </div>
+            <div class="stat-card success">
+                <div class="icon">✅</div>
+                <div class="info">
+                    <div class="value" id="statSuccess">0</div>
+                    <div class="label">Sucesso</div>
+                </div>
+            </div>
+            <div class="stat-card warning" title="Arquivos acumulados na pasta NAO_IDENTIFICADOS">
+                <div class="icon">⚠️</div>
+                <div class="info">
+                    <div class="value" id="statFolderUnidentified"
+                        style="min-height: 2rem; display: block; color: #f8fafc;">0</div>
+                    <div class="label">Não Identificados (Pasta)</div>
+                </div>
+            </div>
+            <div class="stat-card error">
+                <div class="icon">❌</div>
+                <div class="info">
+                    <div class="value" id="statError">0</div>
+                    <div class="label">Falhas</div>
+                </div>
+            </div>
+            <div class="stat-card processing">
+                <div class="icon">⚡</div>
+                <div class="info">
+                    <div class="value" id="statProcessing">0</div>
+                    <div class="label">Em Processamento</div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Extratos Processados -->
+            <div class="panel">
+                <div class="panel-header" style="flex-direction: column; align-items: stretch; gap: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h2>📋 Extratos Processados</h2>
+                    </div>
+                    <div class="filters-container">
+                        <div class="filter-group">
+                            <button class="filter-btn active" onclick="filterExtratos('all')">Todos</button>
+                            <button class="filter-btn" onclick="filterExtratos('success')">✅ Sucesso</button>
+                            <button class="filter-btn" onclick="filterExtratos('warning')">⚠️ Não ID</button>
+                            <button class="filter-btn" onclick="filterExtratos('error')">❌ Falha</button>
+                        </div>
+                        <div class="filter-group" style="flex: 1; justify-content: flex-end;">
+                            <input type="text" id="searchName" class="filter-input" placeholder="Buscar Empresa..."
+                                style="min-width: 200px;">
+                            <input type="number" id="searchYear" class="filter-input" placeholder="Ano"
+                                style="width: 80px;">
+                            <select id="searchMonth" class="filter-input">
+                                <option value="">Mês</option>
+                                <option value="1">Jan</option>
+                                <option value="2">Fev</option>
+                                <option value="3">Mar</option>
+                                <option value="4">Abr</option>
+                                <option value="5">Mai</option>
+                                <option value="6">Jun</option>
+                                <option value="7">Jul</option>
+                                <option value="8">Ago</option>
+                                <option value="9">Set</option>
+                                <option value="10">Out</option>
+                                <option value="11">Nov</option>
+                                <option value="12">Dez</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel-body" style="padding: 0; max-height: 500px;">
+                    <table class="extratos-table" id="extratosTable">
+                        <thead>
+                            <tr>
+                                <th class="action-col"></th>
+                                <th>Data/Hora</th>
+                                <th>Empresa</th>
+                                <th>Arquivo</th>
+                                <th>Tipo</th>
+                                <th>Banco</th>
+                                <th>Período</th>
+                                <th>Status</th>
+                                <th>Caminho Salvo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="extratosBody">
+                            <tr>
+                                <td colspan="9">
+                                    <div class="empty-state">
+                                        <div class="icon">📭</div>
+                                        <p>Nenhum extrato processado ainda</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+
+            <!-- Right Column -->
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                <!-- Current Processing -->
+                <div class="panel">
+                    <div class="panel-header">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <h2>🔄 Processando Agora</h2>
+                            <button id="btnStopProcessing" onclick="resetProcessing()"
+                                title="Encerrar processamento atual (Emergência)"
+                                style="background: #ef4444; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 0.75rem; padding: 4px 8px; display: none; font-weight: bold;">
+                                PARAR
+                            </button>
+                        </div>
+                        <div class="spinner" id="processingSpinner" style="display: none;"></div>
+                    </div>
+                    <div class="current-processing" id="currentProcessing">
+                        <div class="no-processing">
+                            <div class="icon">📭</div>
+                            <p>Aguardando...</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Event Log -->
+                <div class="panel" style="flex: 1;">
+                    <div class="panel-header">
+                        <h2>📝 Log</h2>
+                        <button onclick="clearLog()"
+                            style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 0.75rem;">Limpar</button>
+                    </div>
+                    <div class="panel-body" id="eventLog" style="max-height: 300px;">
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Estado
+        let processedExtratos = [];
+        let currentFilter = 'all';
+        let currentProcessingFiles = {};
+
+        // WebSocket
+        let ws = null;
+        let reconnectAttempts = 0;
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                reconnectAttempts = 0;
+                updateConnectionStatus(true);
+                addEvent('info', 'Conectado ao servidor');
+            };
+
+            ws.onclose = () => {
+                updateConnectionStatus(false);
+                if (reconnectAttempts < 10) {
+                    reconnectAttempts++;
+                    setTimeout(connect, Math.min(1000 * reconnectAttempts, 10000));
+                }
+            };
+
+            ws.onerror = () => addEvent('error', 'Erro de conexão');
+
+            ws.onmessage = (event) => {
+                try {
+                    handleEvent(JSON.parse(event.data));
+                } catch (e) {
+                    console.error('Erro ao processar mensagem:', e);
+                }
+            };
+        }
+
+        function updateConnectionStatus(connected) {
+            document.getElementById('statusDot').classList.toggle('connected', connected);
+            document.getElementById('statusText').textContent = connected ? 'Sistema Rodando' : 'Sistema Parado';
+        }
+
+        function handleEvent(data) {
+            const { event_type, filename, message, details, progress } = data;
+
+            // Atualizar estatísticas
+            if (details?.stats) updateStats(details.stats);
+
+            switch (event_type) {
+                case 'connected':
+                    addEvent('success', 'Conectado ao sistema');
+                    break;
+
+                case 'file_received':
+                case 'pdf_processing_start':
+                    startProcessing(filename);
+                    break;
+
+                case 'pdf_text_extracting':
+                    updateProcessingStep(filename, 'Extraindo texto...', 10);
+                    break;
+
+                case 'pdf_text_extracted':
+                    updateProcessingStep(filename, 'Texto extraído', 25);
+                    break;
+
+                case 'llm_analyzing':
+                    updateProcessingStep(filename, '🤖 Analisando com IA...', 30);
+                    break;
+
+                case 'llm_completed':
+                    updateProcessingStep(filename, `IA: ${details?.cliente || 'N/A'}`, 50);
+                    addEvent('info', `IA identificou: ${details?.cliente || 'N/A'}`);
+                    break;
+
+                case 'matching_start':
+                    updateProcessingStep(filename, 'Buscando cliente...', 55);
+                    break;
+
+                case 'matching_completed':
+                    updateProcessingStep(filename, details?.found ? `✅ ${details.cliente}` : '⚠️ Não encontrado', 70);
+                    break;
+
+                case 'file_saving':
+                    updateProcessingStep(filename, 'Salvando...', 80);
+                    break;
+
+                case 'file_saved':
+                    updateProcessingStep(filename, 'Salvo!', 90);
+                    break;
+
+                case 'processing_completed':
+                    endProcessing(filename, details);
+                    addEvent(details?.status === 'SUCESSO' ? 'success' : 'warning',
+                        `${filename}: ${details?.status} - ${details?.cliente || 'Não identificado'}`);
+                    break;
+
+                case 'processing_error':
+                    endProcessingError(filename, message);
+                    addEvent('error', `Erro: ${filename} - ${message}`);
+                    break;
+
+                case 'stats_update':
+                    break;
+
+                default:
+                    if (message) addEvent('info', message);
+            }
+        }
+
+        function updateStats(stats) {
+            document.getElementById('statTotal').textContent = stats.total_processados || 0;
+            document.getElementById('statSuccess').textContent = stats.sucesso || 0;
+            document.getElementById('statWarning').textContent = stats.nao_identificados || 0;
+            document.getElementById('statError').textContent = stats.falhas || 0;
+
+            const processingCount = stats.em_processamento || 0;
+            document.getElementById('statProcessing').textContent = processingCount;
+
+            // Mostra/Oculta botão de parar
+            const btnStop = document.getElementById('btnStopProcessing');
+            if (btnStop) {
+                btnStop.style.display = processingCount > 0 ? 'block' : 'none';
+            }
+        }
+
+        function startProcessing(filename) {
+            currentProcessingFiles[filename] = { step: 'Iniciando...', progress: 0 };
+            renderCurrentProcessing();
+            document.getElementById('processingSpinner').style.display = 'block';
+        }
+
+        function updateProcessingStep(filename, step, progress) {
+            if (currentProcessingFiles[filename]) {
+                currentProcessingFiles[filename] = { step, progress };
+                renderCurrentProcessing();
+            }
+        }
+
+        function renderCurrentProcessing() {
+            const container = document.getElementById('currentProcessing');
+            const files = Object.entries(currentProcessingFiles);
+
+            if (files.length === 0) {
+                container.innerHTML = `
+                    <div class="no-processing">
+                        <div class="icon">📭</div>
+                        <p>Aguardando...</p>
+                    </div>
+                `;
+                document.getElementById('processingSpinner').style.display = 'none';
+                return;
+            }
+
+            container.innerHTML = files.map(([filename, data]) => `
+                <div class="processing-card">
+                    <div class="filename">📄 ${filename}</div>
+                    <div class="progress-bar">
+                        <div class="fill" style="width: ${data.progress}%"></div>
+                    </div>
+                    <div class="step-current">
+                        <div class="spinner"></div>
+                        ${data.step}
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        function endProcessing(filename, details) {
+            delete currentProcessingFiles[filename];
+            renderCurrentProcessing();
+
+            // Adiciona à tabela
+            const extrato = {
+                hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                empresa: details?.cliente || 'NÃO IDENTIFICADO',
+                arquivo: filename,
+                tipo: details?.tipo || '-',
+                banco: details?.banco || '-',
+                ano: details?.ano || '-',
+                mes: details?.mes || '-',
+                status: details?.status || 'SUCESSO',
+                metodo: details?.metodo || '-',
+                path: details?.path || '-',
+                statusClass: details?.status === 'SUCESSO' ? 'success' :
+                    (details?.status === 'FALHA' ? 'error' : 'warning')
+            };
+
+            processedExtratos.unshift(extrato);
+            renderExtratosTable();
+        }
+
+        function endProcessingError(filename, message) {
+            delete currentProcessingFiles[filename];
+            renderCurrentProcessing();
+
+            const extrato = {
+                hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                empresa: 'ERRO',
+                arquivo: filename,
+                tipo: '-',
+                banco: '-',
+                ano: '-',
+                mes: '-',
+                status: 'FALHA',
+                metodo: '-',
+                path: '-',
+                statusClass: 'error',
+                erro: message
+            };
+
+            processedExtratos.unshift(extrato);
+            renderExtratosTable();
+        }
+
+        function renderExtratosTable() {
+            const tbody = document.getElementById('extratosBody');
+
+            // Get filter values
+            const searchName = document.getElementById('searchName').value.toLowerCase();
+            const searchYear = document.getElementById('searchYear').value;
+            const searchMonth = document.getElementById('searchMonth').value;
+
+            let filtered = processedExtratos;
+
+            // Filter by Status
+            if (currentFilter !== 'all') {
+                filtered = filtered.filter(e => e.statusClass === currentFilter);
+            }
+
+            // Filter by Name
+            if (searchName) {
+                filtered = filtered.filter(e => e.empresa.toLowerCase().includes(searchName));
+            }
+
+            // Filter by Year
+            if (searchYear) {
+                filtered = filtered.filter(e => String(e.ano) == searchYear);
+            }
+
+            // Filter by Month
+            if (searchMonth) {
+                filtered = filtered.filter(e => String(e.mes) == searchMonth);
+            }
+
+            if (filtered.length === 0) {
+                tbody.innerHTML = `
+                    <tr>
+                        <td colspan="9">
+                            <div class="empty-state">
+                                <div class="icon">📭</div>
+                                <p>Nenhum extrato encontrado com os filtros atuais</p>
+                            </div>
+                        </td>
+                    </tr>
+                `;
+                return;
+            }
+
+            const meses = ['', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+
+            tbody.innerHTML = filtered.map((e, index) => {
+                // Encontra o índice real no array original para poder deletar corretamente
+                const realIndex = processedExtratos.indexOf(e);
+                return `
+                <tr data-status="${e.statusClass}" data-index="${realIndex}">
+                    <td class="action-col">
+                        <button class="delete-btn" onclick="deleteExtrato(${realIndex})" title="Remover da lista">❌</button>
+                    </td>
+                    <td class="hora">${e.hora}</td>
+                    <td class="empresa" title="${e.empresa}">${e.empresa}</td>
+                    <td class="arquivo" title="${e.arquivo}">${e.arquivo}</td>
+                    <td class="banco">${e.tipo || '-'}</td>
+                    <td class="banco">${e.banco}</td>
+                    <td class="periodo">${e.mes !== '-' && meses[e.mes] ? meses[e.mes] : e.mes}/${e.ano}</td>
+                    <td>
+                        <span class="status-badge ${e.statusClass}">
+                            ${e.status === 'SUCESSO' ? '✅' : (e.status === 'FALHA' ? '❌' : '⚠️')}
+                            ${e.status}
+                        </span>
+                    </td>
+                    <td class="path" title="${e.path}">${e.path}</td>
+                </tr>
+            `}).join('');
+        }
+
+        // Add Listeners
+        document.getElementById('searchName').addEventListener('input', renderExtratosTable);
+        document.getElementById('searchYear').addEventListener('input', renderExtratosTable);
+        document.getElementById('searchMonth').addEventListener('change', renderExtratosTable);
+
+        function filterExtratos(filter) {
+            currentFilter = filter;
+
+            // Atualiza botões
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            renderExtratosTable();
+        }
+
+        function deleteExtrato(index) {
+            if (index >= 0 && index < processedExtratos.length) {
+                processedExtratos.splice(index, 1);
+                renderExtratosTable();
+            }
+        }
+
+        function addEvent(type, message) {
+            const log = document.getElementById('eventLog');
+            const time = new Date().toLocaleTimeString('pt-BR');
+
+            const eventHtml = `
+                <div class="event-item">
+                    <div class="time">${time}</div>
+                    <div class="content">
+                        <span class="type ${type}">${type}</span>
+                        ${message}
+                    </div>
+                </div>
+            `;
+
+            log.insertAdjacentHTML('afterbegin', eventHtml);
+
+            // Limita a 30 eventos
+            while (log.children.length > 30) {
+                log.removeChild(log.lastChild);
+            }
+        }
+
+        function clearLog() {
+            document.getElementById('eventLog').innerHTML = '';
+            addEvent('info', 'Log limpo');
+        }
+
+        // Iniciar conexão
+        connect();
+
+        // Carregar jobs existentes via API
+        fetch('/jobs')
+            .then(r => r.json())
+            .then(data => {
+                if (data.jobs) {
+                    data.jobs.forEach(job => {
+                        if (job.results?.resultados) {
+                            job.results.resultados.forEach(r => {
+                                processedExtratos.push({
+                                    hora: new Date(job.completed_at || job.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                                    empresa: r.cliente_identificado || 'NÃO IDENTIFICADO',
+                                    arquivo: r.nome_arquivo_original,
+                                    banco: '-',
+                                    ano: r.ano || '-',
+                                    mes: r.mes || '-',
+                                    status: r.status,
+                                    metodo: r.metodo_identificacao || '-',
+                                    path: r.nome_arquivo_final || '-',
+                                    statusClass: r.status === 'SUCESSO' ? 'success' :
+                                        (r.status === 'FALHA' ? 'error' : 'warning')
+                                });
+                            });
+                        }
+                    });
+                    renderExtratosTable();
+                }
+            })
+            .catch(console.error);
+
+        async function resetProcessing() {
+            if (!confirm('Tem certeza que deseja forçar a parada de todos os processamentos? Isso pode deixar arquivos incompletos.')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/monitor/reset', { method: 'POST' });
+                const result = await response.json();
+                console.log(result.message);
+
+                // Força limpeza visual imediata
+                currentProcessingFiles = {};
+                renderProcessing();
+                document.getElementById('processingSpinner').style.display = 'none';
+                document.getElementById('btnStopProcessing').style.display = 'none';
+
+            } catch (e) {
+                console.error("Erro ao resetar processamento:", e);
+                alert("Erro ao tentar parar processamento.");
+            }
+        }
+
+        async function fetchFolderStats() {
+            try {
+                const response = await fetch('/monitor/stats');
+                const data = await response.json();
+
+                // Atualiza o valor
+                const elValue = document.getElementById('statFolderUnidentified');
+                if (elValue) {
+                    const count = data.unidentified_files_count ?? 0;
+                    elValue.innerText = String(count); // Usa innerText e conversão explícita
+                }
+
+                // Atualiza o tooltip do card pai com o caminho
+                const card = elValue?.closest('.stat-card');
+                if (card) card.title = `Pasta: ${data.unidentified_path}`;
+
+            } catch (e) {
+                console.error("Erro ao buscar stats da pasta:", e);
+            }
+        }
+
+        // Atualiza a cada 30 segundos
+        setInterval(fetchFolderStats, 30000);
+
+        async function loadHistory() {
+            try {
+                const response = await fetch('/monitor/history');
+                const history = await response.json();
+
+                if (!Array.isArray(history)) return;
+
+                // Mapeia para o formato usado na tabela
+                const mappedHistory = history.map(item => ({
+                    filename: item.filename,
+                    originalName: item.filename,
+                    cliente: item.cliente,
+                    status: item.status,
+                    formattedDate: item.data_hora_formatada,
+                    savedPath: item.full_path,
+                    periodo: item.periodo,
+                    // Campos auxiliares para filtros
+                    banco: item.tipo // Usando tipo como info extra já que banco não tem no log simples
+                }));
+
+                // Substitui ou adiciona ao início? Como é histórico, substitui o estado inicial.
+                processedExtratos = mappedHistory;
+                renderExtratos(currentFilter);
+
+                // Atualiza contadores baseados no histórico
+                updateStatsFromHistory(mappedHistory);
+
+            } catch (e) {
+                console.error("Erro ao carregar histórico:", e);
+            }
+        }
+
+        function updateStatsFromHistory(history) {
+            // Recalcula stats baseado no historico carregado
+            const stats = {
+                total_processados: history.length,
+                sucesso: history.filter(i => i.status === 'SUCESSO').length,
+                nao_identificados: history.filter(i => i.status === 'NAO_IDENTIFICADO').length,
+                falhas: history.filter(i => i.status === 'FALHA' || i.status === 'ERRO').length,
+                em_processamento: 0 // Historico é estático
+            };
+
+            // Só atualiza os cards de contagem TOTAL, mantendo o "em processamento" zerado ou gerenciado pelo WS
+            document.getElementById('statTotal').textContent = stats.total_processados;
+            // document.getElementById('statSuccess').textContent = stats.sucesso; // Opcional: atualizar cards com histórico
+            // document.getElementById('statError').textContent = stats.falhas;
+
+            // Nota: Os cards superiores geralmente mostram o estado "da sessão" ou "do dia". 
+            // Se o usuário quer histórico de dias anteriores, talvez os cards devam refletir isso ou ter cards separados.
+            // Por padrão, vou deixar os cards refletirem o que está na tabela.
+            document.getElementById('statSuccess').textContent = stats.sucesso;
+            document.getElementById('statError').textContent = stats.falhas;
+            // O card de "Não Identificados (Pasta)" é gerado pelo backend (scan de pasta), então não mexo nele aqui.
+        }
+
+        // Chama ao iniciar
+        fetchFolderStats();
+        loadHistory(); // Carrega histórico persistente
+
+        // Conexão WebSocket iniciada no onload ou similar se houver, ou:
+        if (!ws) connect();
+    </script>
+</body>
+
+</html>
