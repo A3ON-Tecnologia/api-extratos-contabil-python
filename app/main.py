@@ -10,7 +10,7 @@ import logging
 import uuid
 from datetime import datetime
 from pathlib import Path
-from typing import Annotated
+from typing import Annotated, List
 from concurrent.futures import ThreadPoolExecutor
 
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status, BackgroundTasks
@@ -30,6 +30,9 @@ from app.services import (
     StorageService,
     ZIPService,
 )
+from app.services.db_log_service import get_db_log_service
+from app.services.db_log_teste_service import get_db_log_teste_service
+from app.services.reversao_service import get_reversao_service
 from app.utils.hash import compute_hash
 
 # Configuracao de logging
@@ -38,12 +41,32 @@ logging.basicConfig(
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
 )
 logger = logging.getLogger(__name__)
+from contextlib import asynccontextmanager
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Gerencia o ciclo de vida da aplicação."""
+    # Startup: inicializa banco de dados
+    try:
+        from app.database import init_db
+        init_db()
+        logger.info("Banco de dados inicializado com sucesso")
+    except Exception as e:
+        logger.error(f"Erro ao inicializar banco de dados: {e}")
+    
+    yield
+    
+    # Shutdown: limpeza se necessário
+    logger.info("Encerrando aplicação...")
+
 
 # Aplicacao FastAPI
 app = FastAPI(
     title="Extratos Contabeis API",
     description="Sistema de automacao para processamento de extratos bancarios e documentos contabeis",
     version="1.0.0",
+    lifespan=lifespan,
 )
 
 # CORS - permitir requisicoes do Make e outras origens
@@ -54,6 +77,12 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Servir arquivos estáticos (CSS, JS)
+from fastapi.staticfiles import StaticFiles
+static_dir = Path(__file__).parent / "static"
+if static_dir.exists():
+    app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 # Cache de hashes processados para idempotencia
 _processed_hashes: set[str] = set()
@@ -540,11 +569,9 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         ))
         
         storage_service = get_storage_service()
-        saved_path = storage_service.save_file(
+        saved_path, ano, mes = storage_service.save_file(
             pdf_data=pdf_data,
             match_result=match_result,
-            ano=extraction.ano,
-            mes=extraction.mes,
             original_filename=filename,
             tipo_documento=extraction.tipo_documento,
             banco=extraction.banco,
@@ -578,8 +605,8 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         audit_service.log_result(
             nome_cliente=cliente_nome,
             tipo_extrato=extraction.tipo_documento,
-            ano=extraction.ano,
-            mes=extraction.mes,
+            ano=ano,
+            mes=mes,
             status=proc_status,
             nome_arquivo_final=saved_path,
         )
@@ -601,8 +628,8 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                 "path": saved_path,
                 "banco": extraction.banco,
                 "tipo": extraction.tipo_documento,
-                "ano": extraction.ano,
-                "mes": extraction.mes,
+                "ano": ano,
+                "mes": mes,
                 "metodo": match_result.metodo.value,
             },
             progress=100
@@ -615,6 +642,30 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         event_manager.end_processing()
         await event_manager.emit_stats()
         
+        # Salva log no banco de dados
+        try:
+            db_log_service = get_db_log_service()
+            db_log_service.log_extrato(
+                arquivo_original=filename,
+                status=proc_status.value,
+                arquivo_salvo=saved_path,
+                hash_arquivo=file_hash,
+                cliente_nome=cliente_nome,
+                cliente_cod=match_result.cliente.cod if match_result.identificado else None,
+                cliente_cnpj=extraction.cnpj,
+                banco=extraction.banco,
+                tipo_documento=extraction.tipo_documento,
+                agencia=extraction.agencia,
+                conta=extraction.conta,
+                ano=ano,
+                mes=mes,
+                metodo_identificacao=match_result.metodo.value,
+                confianca_ia=extraction.confianca,
+                erro=match_result.motivo_fallback if not match_result.identificado else None,
+            )
+        except Exception as e:
+            logger.error(f"Erro ao salvar log no banco de dados: {e}")
+        
         logger.info(f"Processamento concluido: {filename} -> {proc_status.value} (cliente: {cliente_nome or 'N/A'})")
         
         return ProcessingResult(
@@ -624,8 +675,8 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
             cliente_identificado=cliente_nome,
             metodo_identificacao=match_result.metodo,
             tipo_documento=extraction.tipo_documento,
-            ano=extraction.ano,
-            mes=extraction.mes,
+            ano=ano,
+            mes=mes,
             hash_arquivo=file_hash,
             erro=match_result.motivo_fallback if not match_result.identificado else None,
         )
@@ -805,6 +856,525 @@ async def reset_processing():
         await event_manager.emit_stats()
         
     return {"message": f"{count} processamentos encerrados manualmente.", "count": count}
+
+
+# ====== ENDPOINTS DE LOGS DO BANCO DE DADOS ======
+
+@app.get("/logs")
+async def get_logs(
+    limit: int = 100,
+    offset: int = 0,
+    status: str = None,
+    cliente: str = None,
+    ano: int = None,
+    mes: int = None,
+):
+    """
+    Consulta logs de extratos processados.
+    
+    Args:
+        limit: Quantidade máxima de registros (padrão: 100)
+        offset: Offset para paginação
+        status: Filtrar por status (SUCESSO, NAO_IDENTIFICADO, FALHA)
+        cliente: Buscar por nome do cliente (parcial)
+        ano: Filtrar por ano
+        mes: Filtrar por mês
+    """
+    try:
+        db_service = get_db_log_service()
+        logs = db_service.get_logs(
+            limit=limit,
+            offset=offset,
+            status=status,
+            cliente_nome=cliente,
+            ano=ano,
+            mes=mes,
+        )
+        return {
+            "total": len(logs),
+            "offset": offset,
+            "limit": limit,
+            "logs": [log.to_dict() for log in logs]
+        }
+    except Exception as e:
+        logger.error(f"Erro ao consultar logs: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/logs/stats")
+async def get_logs_stats():
+    """Retorna estatísticas gerais dos logs."""
+    try:
+        db_service = get_db_log_service()
+        return db_service.get_stats()
+    except Exception as e:
+        logger.error(f"Erro ao obter estatísticas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/logs/{log_id}")
+async def get_log_detail(log_id: int):
+    """Busca detalhes de um log específico."""
+    try:
+        db_service = get_db_log_service()
+        log = db_service.get_log_by_id(log_id)
+        if not log:
+            raise HTTPException(status_code=404, detail="Log não encontrado")
+        return log.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar log: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+# ====== ENDPOINTS DE TESTE (NÃO SALVA ARQUIVOS) ======
+
+@app.get("/test", response_class=HTMLResponse)
+async def test_monitor_page():
+    """Página de monitoramento de TESTES."""
+    from pathlib import Path
+    
+    html_path = Path(__file__).parent / "templates" / "test_monitor.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+@app.post("/test/upload")
+async def test_upload_file(
+    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP para teste")],
+):
+    """
+    MODO TESTE: Processa o arquivo mas NÃO salva efetivamente.
+    
+    Suporta PDF individual ou ZIP contendo múltiplos PDFs.
+    Simula todo o processamento (extração de texto, análise IA, matching)
+    mas não salva o arquivo no sistema de arquivos.
+    O resultado é salvo na tabela de TESTE no banco de dados.
+    """
+    event_manager = get_event_manager()
+    
+    # Validação básica
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Nome do arquivo não fornecido")
+    
+    content = await file.read()
+    filename = file.filename
+    
+    logger.info(f"[TESTE] Recebido arquivo: {filename} ({len(content)} bytes)")
+    
+    # Detecta se é ZIP
+    is_zip = filename.lower().endswith('.zip') or content[:4] == b'PK\x03\x04'
+    
+    if is_zip:
+        # Processa ZIP com múltiplos PDFs
+        return await _process_test_zip(content, filename, event_manager)
+    else:
+        # Processa PDF individual
+        return await _process_test_pdf(content, filename, event_manager)
+
+
+async def _process_test_zip(zip_content: bytes, zip_filename: str, event_manager):
+    """Processa um ZIP com múltiplos PDFs no modo teste."""
+    import zipfile
+    import io
+    
+    results = []
+    errors = []
+    
+    try:
+        # Emite evento de início
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PROCESSING_STARTED,
+            filename=zip_filename,
+            message="Extraindo arquivos do ZIP...",
+            progress=0
+        ))
+        
+        # Extrai PDFs do ZIP
+        with zipfile.ZipFile(io.BytesIO(zip_content), 'r') as zip_file:
+            pdf_files = [
+                name for name in zip_file.namelist()
+                if name.lower().endswith('.pdf') and not name.startswith('__MACOSX')
+            ]
+            
+            total_pdfs = len(pdf_files)
+            logger.info(f"[TESTE] ZIP contém {total_pdfs} PDFs para processar")
+            
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.ZIP_EXTRACTED,
+                filename=zip_filename,
+                message=f"Encontrados {total_pdfs} PDFs no ZIP",
+                details={"total_pdfs": total_pdfs},
+                progress=5
+            ))
+            
+            # Processa cada PDF
+            for idx, pdf_name in enumerate(pdf_files):
+                try:
+                    pdf_content = zip_file.read(pdf_name)
+                    progress = 5 + int((idx + 1) / total_pdfs * 90)
+                    
+                    # Processa o PDF individual
+                    result = await _process_single_test_pdf(
+                        pdf_content, 
+                        pdf_name.split('/')[-1],  # Remove path do ZIP
+                        event_manager,
+                        progress_base=progress,
+                        emit_events=False  # Não emite eventos individuais
+                    )
+                    results.append(result)
+                    
+                    # Emite progresso
+                    await event_manager.emit(ProcessingEvent(
+                        event_type=EventType.PROCESSING_COMPLETED,
+                        filename=pdf_name.split('/')[-1],
+                        message=f"Processado: {result['status']}",
+                        details=result,
+                        progress=progress
+                    ))
+                    
+                except Exception as e:
+                    error_msg = f"Erro ao processar {pdf_name}: {str(e)}"
+                    logger.error(f"[TESTE] {error_msg}")
+                    errors.append({"arquivo": pdf_name, "erro": str(e)})
+        
+        # Estatísticas finais
+        sucesso = sum(1 for r in results if r.get('status') == 'SUCESSO')
+        nao_id = sum(1 for r in results if r.get('status') == 'NAO_IDENTIFICADO')
+        falhas = len(errors)
+        
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.STATS_UPDATE,
+            filename=zip_filename,
+            message=f"ZIP processado: {sucesso} sucesso, {nao_id} não identificados, {falhas} falhas",
+            details={
+                "total": total_pdfs,
+                "sucesso": sucesso,
+                "nao_identificado": nao_id,
+                "falhas": falhas
+            },
+            progress=100
+        ))
+        
+        return {
+            "modo": "TESTE",
+            "tipo": "ZIP",
+            "arquivo_original": zip_filename,
+            "total_pdfs": total_pdfs,
+            "processados": len(results),
+            "sucesso": sucesso,
+            "nao_identificado": nao_id,
+            "falhas": falhas,
+            "resultados": results,
+            "erros": errors,
+            "mensagem": "TESTE: Arquivos NÃO foram salvos no sistema de arquivos"
+        }
+        
+    except zipfile.BadZipFile:
+        raise HTTPException(status_code=400, detail="Arquivo ZIP inválido ou corrompido")
+    except Exception as e:
+        logger.error(f"[TESTE] Erro ao processar ZIP: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+async def _process_test_pdf(pdf_content: bytes, filename: str, event_manager):
+    """Processa um PDF individual no modo teste."""
+    result = await _process_single_test_pdf(pdf_content, filename, event_manager, emit_events=True)
+    return {
+        "modo": "TESTE",
+        "tipo": "PDF",
+        **result,
+        "mensagem": "TESTE: Arquivo NÃO foi salvo no sistema de arquivos"
+    }
+
+
+async def _process_single_test_pdf(
+    pdf_content: bytes, 
+    filename: str, 
+    event_manager, 
+    progress_base: int = 0,
+    emit_events: bool = True
+):
+    """Processa um único PDF no modo teste e retorna o resultado."""
+    file_hash = compute_hash(pdf_content)
+    
+    try:
+        if emit_events:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.PROCESSING_STARTED,
+                filename=filename,
+                message="Iniciando processamento de teste...",
+                progress=0
+            ))
+        
+        # 1. Extrai texto do PDF
+        if emit_events:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.EXTRACTING_TEXT,
+                filename=filename,
+                message="Extraindo texto do PDF...",
+                progress=20
+            ))
+        pdf_service = get_pdf_service()
+        text = pdf_service.extract_text(pdf_content)
+        
+        # 2. Analisa com IA
+        if emit_events:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.ANALYZING,
+                filename=filename,
+                message="Analisando com IA...",
+                progress=40
+            ))
+        llm_service = get_llm_service()
+        extraction = llm_service.extract_info_with_fallback(text)
+        
+        # 3. Matching de cliente
+        if emit_events:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.MATCHING,
+                filename=filename,
+                message="Identificando cliente...",
+                progress=60
+            ))
+        matching_service = get_matching_service()
+        match_result = matching_service.match(extraction)
+        
+        # 4. Calcula caminho que SERIA usado (sem salvar)
+        storage_service = get_storage_service()
+        ano, mes = storage_service._get_previous_month()
+        
+        if match_result.identificado:
+            client_base_path = storage_service._resolve_client_path(match_result.cliente)
+            if client_base_path:
+                target_path = storage_service._build_path_structure(client_base_path, ano, mes)
+                simulated_path = str(target_path / f"{extraction.tipo_documento}_{extraction.banco}.pdf")
+            else:
+                simulated_path = str(storage_service.settings.unidentified_path / filename)
+            proc_status = ProcessingStatus.SUCESSO
+            cliente_nome = match_result.cliente.nome
+        else:
+            simulated_path = str(storage_service.settings.unidentified_path / filename)
+            proc_status = ProcessingStatus.NAO_IDENTIFICADO
+            cliente_nome = None
+        
+        # 5. Salva apenas no banco de TESTE
+        db_teste_service = get_db_log_teste_service()
+        log_entry = db_teste_service.log_extrato_teste(
+            arquivo_original=filename,
+            status=proc_status.value,
+            arquivo_salvo=simulated_path,
+            hash_arquivo=file_hash,
+            cliente_nome=cliente_nome,
+            cliente_cod=match_result.cliente.cod if match_result.identificado else None,
+            cliente_cnpj=extraction.cnpj,
+            banco=extraction.banco,
+            tipo_documento=extraction.tipo_documento,
+            agencia=extraction.agencia,
+            conta=extraction.conta,
+            ano=ano,
+            mes=mes,
+            metodo_identificacao=match_result.metodo.value,
+            confianca_ia=extraction.confianca,
+            erro=match_result.motivo_fallback if not match_result.identificado else None,
+        )
+        
+        # Emite evento de conclusão
+        if emit_events:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.PROCESSING_COMPLETED,
+                filename=filename,
+                message=f"Processamento concluído: {proc_status.value}",
+                details={
+                    "status": proc_status.value,
+                    "cliente": cliente_nome,
+                    "path": simulated_path,
+                    "banco": extraction.banco,
+                    "tipo": extraction.tipo_documento,
+                    "ano": ano,
+                    "mes": mes,
+                },
+                progress=100
+            ))
+        
+        logger.info(f"[TESTE] Processamento simulado: {filename} -> {proc_status.value}")
+        
+        return {
+            "arquivo": filename,
+            "status": proc_status.value,
+            "cliente_identificado": cliente_nome,
+            "banco": extraction.banco,
+            "tipo_documento": extraction.tipo_documento,
+            "caminho_simulado": simulated_path,
+            "ano": ano,
+            "mes": mes,
+            "metodo": match_result.metodo.value,
+            "confianca": extraction.confianca,
+            "log_id": log_entry.id,
+        }
+        
+    except Exception as e:
+        logger.error(f"[TESTE] Erro ao processar {filename}: {e}")
+        raise
+
+
+@app.get("/test/logs")
+async def get_test_logs(
+    limit: int = 100,
+    offset: int = 0,
+    status: str = None,
+    cliente: str = None,
+):
+    """Consulta logs de TESTE."""
+    try:
+        db_teste_service = get_db_log_teste_service()
+        logs = db_teste_service.get_logs_teste(
+            limit=limit,
+            offset=offset,
+            status=status,
+            cliente_nome=cliente,
+        )
+        return {
+            "modo": "TESTE",
+            "total": len(logs),
+            "logs": [log.to_dict() for log in logs]
+        }
+    except Exception as e:
+        logger.error(f"Erro ao consultar logs de teste: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/test/stats")
+async def get_test_stats():
+    """Estatísticas dos logs de TESTE."""
+    try:
+        db_teste_service = get_db_log_teste_service()
+        return db_teste_service.get_stats_teste()
+    except Exception as e:
+        logger.error(f"Erro ao obter estatísticas de teste: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/test/logs")
+async def clear_test_logs():
+    """Limpa todos os logs de TESTE."""
+    try:
+        db_teste_service = get_db_log_teste_service()
+        count = db_teste_service.limpar_logs_teste()
+        return {"message": f"{count} logs de teste removidos", "count": count}
+    except Exception as e:
+        logger.error(f"Erro ao limpar logs de teste: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.websocket("/ws/test")
+async def websocket_test_endpoint(websocket: WebSocket):
+    """WebSocket para monitoramento de TESTES em tempo real."""
+    await websocket.accept()
+    event_manager = get_event_manager()
+    event_manager.add_client(websocket)
+    
+    try:
+        while True:
+            # Mantém a conexão viva
+            data = await websocket.receive_text()
+            if data == "ping":
+                await websocket.send_text('{"type": "pong"}')
+    except WebSocketDisconnect:
+        event_manager.remove_client(websocket)
+    except Exception as e:
+        logger.error(f"Erro no WebSocket de teste: {e}")
+        event_manager.remove_client(websocket)
+
+
+# ====== ENDPOINTS DE REVERSÃO ======
+
+@app.get("/reversao", response_class=HTMLResponse)
+async def reversao_page():
+    """Página de gestão de reversões."""
+    from pathlib import Path
+    
+    html_path = Path(__file__).parent / "templates" / "reversao.html"
+    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+
+
+@app.get("/reversao/listar")
+async def listar_para_reversao(
+    limit: int = 100,
+    offset: int = 0,
+    status: str = None,
+    cliente: str = None,
+    apenas_existentes: bool = False,
+):
+    """Lista processamentos que podem ser revertidos."""
+    try:
+        reversao_service = get_reversao_service()
+        logs = reversao_service.listar_processamentos(
+            limit=limit,
+            offset=offset,
+            status=status,
+            cliente=cliente,
+            apenas_existentes=apenas_existentes,
+        )
+        return {
+            "total": len(logs),
+            "logs": logs
+        }
+    except Exception as e:
+        logger.error(f"Erro ao listar para reversão: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.delete("/reversao/{log_id}")
+async def reverter_por_id(log_id: int, deletar_arquivo: bool = True):
+    """Reverte um único processamento pelo ID."""
+    try:
+        reversao_service = get_reversao_service()
+        resultado = reversao_service.reverter_por_id(log_id, deletar_arquivo)
+        
+        if not resultado["success"]:
+            raise HTTPException(status_code=400, detail=resultado["message"])
+        
+        return resultado
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao reverter: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/reversao/lote")
+async def reverter_lote(ids: List[int], deletar_arquivos: bool = True):
+    """Reverte múltiplos processamentos."""
+    try:
+        reversao_service = get_reversao_service()
+        resultado = reversao_service.reverter_lote(ids, deletar_arquivos)
+        return resultado
+    except Exception as e:
+        logger.error(f"Erro ao reverter lote: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/reversao/ultimos/{quantidade}")
+async def reverter_ultimos(quantidade: int, deletar_arquivos: bool = True):
+    """Reverte os últimos N processamentos."""
+    try:
+        reversao_service = get_reversao_service()
+        resultado = reversao_service.reverter_ultimos(quantidade, deletar_arquivos)
+        return resultado
+    except Exception as e:
+        logger.error(f"Erro ao reverter últimos: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/reversao/stats")
+async def stats_reversao():
+    """Estatísticas para a página de reversão."""
+    try:
+        reversao_service = get_reversao_service()
+        return reversao_service.get_estatisticas()
+    except Exception as e:
+        logger.error(f"Erro ao obter estatísticas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 @app.exception_handler(Exception)

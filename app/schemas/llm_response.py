@@ -18,9 +18,7 @@ class LLMExtractionResult(BaseModel):
         banco: Nome do banco identificado
         agencia: Número da agência bancária
         conta: Número da conta bancária
-        tipo_documento: Tipo do documento (ex: "extrato bancário")
-        ano: Ano do período do documento
-        mes: Mês do período do documento (1-12)
+        tipo_documento: Tipo do documento (ex: "CC", "POUPANCA")
         confianca: Nível de confiança da extração (0.0 a 1.0)
     """
     
@@ -51,21 +49,7 @@ class LLMExtractionResult(BaseModel):
     
     tipo_documento: str = Field(
         default="documento",
-        description="Tipo do documento identificado"
-    )
-    
-    ano: int | None = Field(
-        default=None,
-        ge=2000,
-        le=2100,
-        description="Ano do período do documento"
-    )
-    
-    mes: int | None = Field(
-        default=None,
-        ge=1,
-        le=12,
-        description="Mês do período do documento"
+        description="Tipo do documento identificado (CC, POUPANCA, INVESTIMENTO, etc.)"
     )
     
     confianca: float = Field(
@@ -74,3 +58,4 @@ class LLMExtractionResult(BaseModel):
         le=1.0,
         description="Nível de confiança da extração"
     )
+

@@ -34,10 +34,24 @@ class Settings(BaseSettings):
     # Servidor
     port: int = 8000
     
+    # Banco de Dados MySQL
+    db_host: str = "localhost"
+    db_port: int = 3306
+    db_user: str = "ROOT"
+    db_password: str = ""
+    db_name: str = "extratos_contabil_python"
+    
     @property
     def unidentified_path(self) -> Path:
         """Caminho para arquivos não identificados."""
         return self.base_path / "000 - NAO_IDENTIFICADOS"
+    
+    @property
+    def database_url(self) -> str:
+        """URL de conexão com o banco de dados MySQL."""
+        from urllib.parse import quote_plus
+        password_escaped = quote_plus(self.db_password)
+        return f"mysql+pymysql://{self.db_user}:{password_escaped}@{self.db_host}:{self.db_port}/{self.db_name}"
 
 
 @lru_cache

@@ -1,0 +1,385 @@
+/**
+ * Tech Navbar Component
+ * Navbar lateral tecnológica com clip-path e animações
+ */
+
+/* Navbar Container */
+.tech-navbar {
+    position: fixed;
+    left: 0;
+    top: 0;
+    height: 100vh;
+    background: linear-gradient(180deg, #0d0d12 0%, #151520 50%, #0d0d12 100%);
+    border-right: 1px solid rgba(99, 102, 241, 0.2);
+    z-index: 1000;
+    display: flex;
+    flex-direction: column;
+    transition: width 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+    overflow: visible;
+    box-shadow: 4px 0 30px rgba(0, 0, 0, 0.5);
+}
+
+.tech-navbar.collapsed {
+    width: 70px;
+}
+
+.tech-navbar.expanded {
+    width: 240px;
+}
+
+/* Decorative Elements */
+.tech-navbar::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 3px;
+    background: linear-gradient(90deg, #6366f1, #a855f7, #6366f1);
+    animation: gradientFlow 3s ease infinite;
+}
+
+@keyframes gradientFlow {
+
+    0%,
+    100% {
+        background-position: 0% 50%;
+    }
+
+    50% {
+        background-position: 100% 50%;
+    }
+}
+
+.tech-navbar::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 100px;
+    background: linear-gradient(0deg, rgba(99, 102, 241, 0.1) 0%, transparent 100%);
+    pointer-events: none;
+}
+
+/* Header/Logo */
+.navbar-header {
+    padding: 1.5rem 1rem;
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+    min-height: 80px;
+}
+
+.navbar-logo {
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    flex-shrink: 0;
+    clip-path: polygon(15% 0%, 100% 0%, 100% 85%, 85% 100%, 0% 100%, 0% 15%);
+    box-shadow: 0 4px 15px rgba(99, 102, 241, 0.3);
+}
+
+.navbar-title {
+    font-size: 1rem;
+    font-weight: 700;
+    color: #f1f5f9;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.tech-navbar.expanded .navbar-title {
+    opacity: 1;
+}
+
+/* Navigation Items */
+.navbar-nav {
+    flex: 1;
+    padding: 1rem 0;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.nav-item {
+    position: relative;
+    margin: 0 0.75rem;
+    border-radius: 12px;
+    overflow: hidden;
+    transition: all 0.2s ease;
+}
+
+.nav-item::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 3px;
+    height: 100%;
+    background: transparent;
+    transition: background 0.2s ease;
+}
+
+.nav-item:hover::before,
+.nav-item.active::before {
+    background: linear-gradient(180deg, #6366f1, #a855f7);
+}
+
+.nav-item:hover {
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.nav-item.active {
+    background: rgba(99, 102, 241, 0.15);
+}
+
+.nav-link {
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    padding: 0.875rem 1rem;
+    color: #94a3b8;
+    text-decoration: none;
+    font-size: 0.9rem;
+    font-weight: 500;
+    transition: color 0.2s ease;
+    white-space: nowrap;
+}
+
+.nav-item:hover .nav-link,
+.nav-item.active .nav-link {
+    color: #f1f5f9;
+}
+
+.nav-icon {
+    width: 24px;
+    height: 24px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.25rem;
+    flex-shrink: 0;
+}
+
+.nav-text {
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.tech-navbar.expanded .nav-text {
+    opacity: 1;
+}
+
+/* Status Indicator */
+.nav-status {
+    margin-left: auto;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: #10b981;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+    animation: pulse 2s infinite;
+}
+
+@keyframes pulse {
+
+    0%,
+    100% {
+        box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.4);
+    }
+
+    50% {
+        box-shadow: 0 0 0 6px rgba(16, 185, 129, 0);
+    }
+}
+
+.tech-navbar.expanded .nav-status {
+    opacity: 1;
+}
+
+/* Toggle Button */
+.navbar-toggle {
+    position: absolute;
+    right: -20px;
+    top: 30px;
+    width: 40px;
+    height: 40px;
+    background: linear-gradient(135deg, #1e1e2e 0%, #2a2a3a 100%);
+    border: 2px solid #6366f1;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    color: #a855f7;
+    font-size: 1.1rem;
+    transition: all 0.3s ease;
+    z-index: 1001;
+    box-shadow: 0 4px 20px rgba(99, 102, 241, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.1);
+}
+
+.navbar-toggle:hover {
+    background: linear-gradient(135deg, #6366f1, #a855f7);
+    color: white;
+    border-color: #a855f7;
+    transform: scale(1.15);
+    box-shadow: 0 6px 30px rgba(99, 102, 241, 0.6);
+}
+
+.navbar-toggle .arrow {
+    transition: transform 0.3s ease;
+    font-weight: bold;
+}
+
+.tech-navbar.collapsed .navbar-toggle .arrow {
+    transform: rotate(0deg);
+}
+
+.tech-navbar.expanded .navbar-toggle .arrow {
+    transform: rotate(180deg);
+}
+
+/* Footer */
+.navbar-footer {
+    padding: 1rem;
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+}
+
+.footer-status {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    background: #10b981;
+    flex-shrink: 0;
+}
+
+.footer-text {
+    font-size: 0.75rem;
+    color: #64748b;
+    white-space: nowrap;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.tech-navbar.expanded .footer-text {
+    opacity: 1;
+}
+
+/* Content Offset */
+.page-wrapper {
+    transition: margin-left 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.page-wrapper.navbar-collapsed {
+    margin-left: 70px;
+}
+
+.page-wrapper.navbar-expanded {
+    margin-left: 240px;
+}
+
+/* Tooltip for collapsed state */
+.nav-tooltip {
+    position: absolute;
+    left: 100%;
+    top: 50%;
+    transform: translateY(-50%);
+    margin-left: 10px;
+    padding: 0.5rem 0.75rem;
+    background: #1a1a24;
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    border-radius: 8px;
+    color: #f1f5f9;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    opacity: 0;
+    visibility: hidden;
+    transition: all 0.2s ease;
+    z-index: 100;
+}
+
+.tech-navbar.collapsed .nav-item:hover .nav-tooltip {
+    opacity: 1;
+    visibility: visible;
+}
+
+/* Decorative Circuit Lines */
+.circuit-lines {
+    position: absolute;
+    left: 10px;
+    top: 100px;
+    bottom: 100px;
+    width: 2px;
+    background: linear-gradient(180deg,
+            transparent 0%,
+            rgba(99, 102, 241, 0.2) 20%,
+            rgba(99, 102, 241, 0.2) 80%,
+            transparent 100%);
+    opacity: 0.5;
+}
+
+.circuit-dot {
+    position: absolute;
+    left: 6px;
+    width: 10px;
+    height: 10px;
+    background: rgba(99, 102, 241, 0.3);
+    border-radius: 50%;
+    animation: circuitPulse 3s ease-in-out infinite;
+}
+
+.circuit-dot:nth-child(1) {
+    top: 30%;
+    animation-delay: 0s;
+}
+
+.circuit-dot:nth-child(2) {
+    top: 50%;
+    animation-delay: 1s;
+}
+
+.circuit-dot:nth-child(3) {
+    top: 70%;
+    animation-delay: 2s;
+}
+
+@keyframes circuitPulse {
+
+    0%,
+    100% {
+        opacity: 0.3;
+        transform: scale(1);
+    }
+
+    50% {
+        opacity: 1;
+        transform: scale(1.2);
+    }
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .tech-navbar {
+        transform: translateX(-100%);
+    }
+
+    .tech-navbar.mobile-open {
+        transform: translateX(0);
+    }
+
+    .main-content {
+        margin-left: 0 !important;
+    }
+}

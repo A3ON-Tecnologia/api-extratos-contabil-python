@@ -33,6 +33,13 @@ class EventType(str, Enum):
     PDF_TEXT_EXTRACTING = "pdf_text_extracting"
     PDF_TEXT_EXTRACTED = "pdf_text_extracted"
     
+    # Modo teste - eventos simplificados
+    PROCESSING_STARTED = "processing_started"
+    EXTRACTING_TEXT = "extracting_text"
+    ANALYZING = "analyzing"
+    MATCHING = "matching"
+    SAVING = "saving"
+    
     # LLM
     LLM_ANALYZING = "llm_analyzing"
     LLM_COMPLETED = "llm_completed"

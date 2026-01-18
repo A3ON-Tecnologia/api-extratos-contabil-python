@@ -4,23 +4,28 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Extratos Contábeis - Monitor</title>
+    <title>📺 Monitor | Extratos Contábeis</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
-            --bg-primary: #0f0f1a;
-            --bg-secondary: #1a1a2e;
-            --bg-card: #252540;
-            --accent-primary: #6366f1;
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #0d1520;
+            --bg-card: #111827;
+            --bg-card-hover: #1a2332;
+            --accent-primary: #0ea5e9;
+            --accent-secondary: #38bdf8;
+            --accent-monitor: #06b6d4;
             --accent-success: #10b981;
             --accent-warning: #f59e0b;
             --accent-error: #ef4444;
             --accent-info: #3b82f6;
-            --text-primary: #f8fafc;
+            --text-primary: #f1f5f9;
             --text-secondary: #94a3b8;
-            --border-color: #334155;
+            --text-muted: #64748b;
+            --border-color: #1e3a5f;
+            --glow-monitor: rgba(6, 182, 212, 0.3);
         }
 
         * {
@@ -36,7 +41,21 @@
             min-height: 100vh;
         }
 
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            background: radial-gradient(circle at 30% 20%, var(--glow-monitor) 0%, transparent 50%),
+                radial-gradient(circle at 70% 80%, rgba(14, 165, 233, 0.15) 0%, transparent 50%);
+        }
+
         .container {
+            position: relative;
+            z-index: 1;
             max-width: 1600px;
             margin: 0 auto;
             padding: 1.5rem;
@@ -55,7 +74,7 @@
         .header h1 {
             font-size: 1.5rem;
             font-weight: 700;
-            background: linear-gradient(135deg, var(--accent-primary), #a855f7);
+            background: linear-gradient(135deg, var(--accent-monitor), var(--accent-secondary));
             background-clip: text;
             -webkit-background-clip: text;
             -webkit-text-fill-color: transparent;
@@ -601,322 +620,364 @@
             align-items: center;
         }
     </style>
+    <link rel="stylesheet" href="/static/css/tech-navbar.css">
 </head>
 
 <body>
-    <div class="container">
-        <!-- Header -->
-        <header class="header">
-            <h1>📄 Extratos Contábeis - Monitor</h1>
-            <div class="connection-status">
-                <div class="status-dot" id="statusDot"></div>
-                <span id="statusText">Sistema Parado</span>
-            </div>
-        </header>
+    <div class="bg-animation"></div>
 
-        <!-- Stats Grid -->
-        <div class="stats-grid">
-            <div class="stat-card total">
-                <div class="icon">📊</div>
-                <div class="info">
-                    <div class="value" id="statTotal">0</div>
-                    <div class="label">Total Processados</div>
-                </div>
+    <!-- Tech Navbar -->
+    <nav class="tech-navbar collapsed" id="techNavbar">
+        <div class="navbar-header">
+            <span class="navbar-title">Extratos API</span>
+        </div>
+        <div class="navbar-nav">
+            <div class="nav-item active">
+                <a href="/monitor" class="nav-link">
+                    <span class="nav-icon">📺</span>
+                    <span class="nav-text">Monitor</span>
+                    <span class="nav-status"></span>
+                </a>
+                <span class="nav-tooltip">Monitor</span>
             </div>
-            <div class="stat-card success">
-                <div class="icon">✅</div>
-                <div class="info">
-                    <div class="value" id="statSuccess">0</div>
-                    <div class="label">Sucesso</div>
-                </div>
+            <div class="nav-item">
+                <a href="/test" class="nav-link">
+                    <span class="nav-icon">🧪</span>
+                    <span class="nav-text">Modo Teste</span>
+                </a>
+                <span class="nav-tooltip">Modo Teste</span>
             </div>
-            <div class="stat-card warning" title="Arquivos acumulados na pasta NAO_IDENTIFICADOS">
-                <div class="icon">⚠️</div>
-                <div class="info">
-                    <div class="value" id="statFolderUnidentified"
-                        style="min-height: 2rem; display: block; color: #f8fafc;">0</div>
-                    <div class="label">Não Identificados (Pasta)</div>
-                </div>
-            </div>
-            <div class="stat-card error">
-                <div class="icon">❌</div>
-                <div class="info">
-                    <div class="value" id="statError">0</div>
-                    <div class="label">Falhas</div>
-                </div>
-            </div>
-            <div class="stat-card processing">
-                <div class="icon">⚡</div>
-                <div class="info">
-                    <div class="value" id="statProcessing">0</div>
-                    <div class="label">Em Processamento</div>
-                </div>
+            <div class="nav-item">
+                <a href="/reversao" class="nav-link">
+                    <span class="nav-icon">🔄</span>
+                    <span class="nav-text">Reversão</span>
+                </a>
+                <span class="nav-tooltip">Reversão</span>
             </div>
         </div>
+        <div class="navbar-footer">
+            <div class="footer-status"></div>
+            <span class="footer-text">Sistema Online</span>
+        </div>
+        <button class="navbar-toggle" id="navbarToggle">
+            <span class="arrow">❯</span>
+        </button>
+    </nav>
 
-        <!-- Main Content -->
-        <div class="main-content">
-            <!-- Extratos Processados -->
-            <div class="panel">
-                <div class="panel-header" style="flex-direction: column; align-items: stretch; gap: 1rem;">
-                    <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <h2>📋 Extratos Processados</h2>
-                    </div>
-                    <div class="filters-container">
-                        <div class="filter-group">
-                            <button class="filter-btn active" onclick="filterExtratos('all')">Todos</button>
-                            <button class="filter-btn" onclick="filterExtratos('success')">✅ Sucesso</button>
-                            <button class="filter-btn" onclick="filterExtratos('warning')">⚠️ Não ID</button>
-                            <button class="filter-btn" onclick="filterExtratos('error')">❌ Falha</button>
-                        </div>
-                        <div class="filter-group" style="flex: 1; justify-content: flex-end;">
-                            <input type="text" id="searchName" class="filter-input" placeholder="Buscar Empresa..."
-                                style="min-width: 200px;">
-                            <input type="number" id="searchYear" class="filter-input" placeholder="Ano"
-                                style="width: 80px;">
-                            <select id="searchMonth" class="filter-input">
-                                <option value="">Mês</option>
-                                <option value="1">Jan</option>
-                                <option value="2">Fev</option>
-                                <option value="3">Mar</option>
-                                <option value="4">Abr</option>
-                                <option value="5">Mai</option>
-                                <option value="6">Jun</option>
-                                <option value="7">Jul</option>
-                                <option value="8">Ago</option>
-                                <option value="9">Set</option>
-                                <option value="10">Out</option>
-                                <option value="11">Nov</option>
-                                <option value="12">Dez</option>
-                            </select>
-                        </div>
+    <div class="page-wrapper navbar-collapsed" id="mainContent">
+        <div class="container">
+            <!-- Header -->
+            <header class="header">
+                <h1><span style="-webkit-text-fill-color: initial;">📄</span> Extratos Contábeis - Monitor</h1>
+                <div class="connection-status">
+                    <div class="status-dot" id="statusDot"></div>
+                    <span id="statusText">Sistema Parado</span>
+                </div>
+            </header>
+
+            <!-- Stats Grid -->
+            <div class="stats-grid">
+                <div class="stat-card total">
+                    <div class="icon">📊</div>
+                    <div class="info">
+                        <div class="value" id="statTotal">0</div>
+                        <div class="label">Total Processados</div>
                     </div>
                 </div>
-                <div class="panel-body" style="padding: 0; max-height: 500px;">
-                    <table class="extratos-table" id="extratosTable">
-                        <thead>
-                            <tr>
-                                <th class="action-col"></th>
-                                <th>Data/Hora</th>
-                                <th>Empresa</th>
-                                <th>Arquivo</th>
-                                <th>Tipo</th>
-                                <th>Banco</th>
-                                <th>Período</th>
-                                <th>Status</th>
-                                <th>Caminho Salvo</th>
-                            </tr>
-                        </thead>
-                        <tbody id="extratosBody">
-                            <tr>
-                                <td colspan="9">
-                                    <div class="empty-state">
-                                        <div class="icon">📭</div>
-                                        <p>Nenhum extrato processado ainda</p>
-                                    </div>
-                                </td>
-                            </tr>
-                        </tbody>
-                    </table>
+                <div class="stat-card success">
+                    <div class="icon">✅</div>
+                    <div class="info">
+                        <div class="value" id="statSuccess">0</div>
+                        <div class="label">Sucesso</div>
+                    </div>
+                </div>
+                <div class="stat-card warning" title="Arquivos acumulados na pasta NAO_IDENTIFICADOS">
+                    <div class="icon">⚠️</div>
+                    <div class="info">
+                        <div class="value" id="statFolderUnidentified"
+                            style="min-height: 2rem; display: block; color: #f8fafc;">0</div>
+                        <div class="label">Não Identificados (Pasta)</div>
+                    </div>
+                </div>
+                <div class="stat-card error">
+                    <div class="icon">❌</div>
+                    <div class="info">
+                        <div class="value" id="statError">0</div>
+                        <div class="label">Falhas</div>
+                    </div>
+                </div>
+                <div class="stat-card processing">
+                    <div class="icon">⚡</div>
+                    <div class="info">
+                        <div class="value" id="statProcessing">0</div>
+                        <div class="label">Em Processamento</div>
+                    </div>
                 </div>
             </div>
 
-            <!-- Right Column -->
-            <div style="display: flex; flex-direction: column; gap: 1rem;">
-                <!-- Current Processing -->
+            <!-- Main Content -->
+            <div class="main-content">
+                <!-- Extratos Processados -->
                 <div class="panel">
-                    <div class="panel-header">
-                        <div style="display: flex; align-items: center; gap: 0.5rem;">
-                            <h2>🔄 Processando Agora</h2>
-                            <button id="btnStopProcessing" onclick="resetProcessing()"
-                                title="Encerrar processamento atual (Emergência)"
-                                style="background: #ef4444; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 0.75rem; padding: 4px 8px; display: none; font-weight: bold;">
-                                PARAR
-                            </button>
+                    <div class="panel-header" style="flex-direction: column; align-items: stretch; gap: 1rem;">
+                        <div style="display: flex; justify-content: space-between; align-items: center;">
+                            <h2>📋 Extratos Processados</h2>
                         </div>
-                        <div class="spinner" id="processingSpinner" style="display: none;"></div>
+                        <div class="filters-container">
+                            <div class="filter-group">
+                                <button class="filter-btn active" onclick="filterExtratos('all')">Todos</button>
+                                <button class="filter-btn" onclick="filterExtratos('success')">✅ Sucesso</button>
+                                <button class="filter-btn" onclick="filterExtratos('warning')">⚠️ Não ID</button>
+                                <button class="filter-btn" onclick="filterExtratos('error')">❌ Falha</button>
+                            </div>
+                            <div class="filter-group" style="flex: 1; justify-content: flex-end;">
+                                <input type="text" id="searchName" class="filter-input" placeholder="Buscar Empresa..."
+                                    style="min-width: 200px;">
+                                <input type="number" id="searchYear" class="filter-input" placeholder="Ano"
+                                    style="width: 80px;">
+                                <select id="searchMonth" class="filter-input">
+                                    <option value="">Mês</option>
+                                    <option value="1">Jan</option>
+                                    <option value="2">Fev</option>
+                                    <option value="3">Mar</option>
+                                    <option value="4">Abr</option>
+                                    <option value="5">Mai</option>
+                                    <option value="6">Jun</option>
+                                    <option value="7">Jul</option>
+                                    <option value="8">Ago</option>
+                                    <option value="9">Set</option>
+                                    <option value="10">Out</option>
+                                    <option value="11">Nov</option>
+                                    <option value="12">Dez</option>
+                                </select>
+                            </div>
+                        </div>
                     </div>
-                    <div class="current-processing" id="currentProcessing">
-                        <div class="no-processing">
-                            <div class="icon">📭</div>
-                            <p>Aguardando...</p>
-                        </div>
+                    <div class="panel-body" style="padding: 0; max-height: 500px;">
+                        <table class="extratos-table" id="extratosTable">
+                            <thead>
+                                <tr>
+                                    <th class="action-col"></th>
+                                    <th>Data/Hora</th>
+                                    <th>Empresa</th>
+                                    <th>Arquivo</th>
+                                    <th>Tipo</th>
+                                    <th>Banco</th>
+                                    <th>Período</th>
+                                    <th>Status</th>
+                                    <th>Caminho Salvo</th>
+                                </tr>
+                            </thead>
+                            <tbody id="extratosBody">
+                                <tr>
+                                    <td colspan="9">
+                                        <div class="empty-state">
+                                            <div class="icon">📭</div>
+                                            <p>Nenhum extrato processado ainda</p>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
                     </div>
                 </div>
 
-                <!-- Event Log -->
-                <div class="panel" style="flex: 1;">
-                    <div class="panel-header">
-                        <h2>📝 Log</h2>
-                        <button onclick="clearLog()"
-                            style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 0.75rem;">Limpar</button>
+                <!-- Right Column -->
+                <div style="display: flex; flex-direction: column; gap: 1rem;">
+                    <!-- Current Processing -->
+                    <div class="panel">
+                        <div class="panel-header">
+                            <div style="display: flex; align-items: center; gap: 0.5rem;">
+                                <h2>🔄 Processando Agora</h2>
+                                <button id="btnStopProcessing" onclick="resetProcessing()"
+                                    title="Encerrar processamento atual (Emergência)"
+                                    style="background: #ef4444; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 0.75rem; padding: 4px 8px; display: none; font-weight: bold;">
+                                    PARAR
+                                </button>
+                            </div>
+                            <div class="spinner" id="processingSpinner" style="display: none;"></div>
+                        </div>
+                        <div class="current-processing" id="currentProcessing">
+                            <div class="no-processing">
+                                <div class="icon">📭</div>
+                                <p>Aguardando...</p>
+                            </div>
+                        </div>
                     </div>
-                    <div class="panel-body" id="eventLog" style="max-height: 300px;">
+
+                    <!-- Event Log -->
+                    <div class="panel" style="flex: 1;">
+                        <div class="panel-header">
+                            <h2>📝 Log</h2>
+                            <button onclick="clearLog()"
+                                style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 0.75rem;">Limpar</button>
+                        </div>
+                        <div class="panel-body" id="eventLog" style="max-height: 300px;">
+                        </div>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
 
-    <script>
-        // Estado
-        let processedExtratos = [];
-        let currentFilter = 'all';
-        let currentProcessingFiles = {};
+        <script>
+            // Estado
+            let processedExtratos = [];
+            let currentFilter = 'all';
+            let currentProcessingFiles = {};
 
-        // WebSocket
-        let ws = null;
-        let reconnectAttempts = 0;
+            // WebSocket
+            let ws = null;
+            let reconnectAttempts = 0;
 
-        function connect() {
-            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            function connect() {
+                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const wsUrl = `${protocol}//${window.location.host}/ws`;
 
-            ws = new WebSocket(wsUrl);
+                ws = new WebSocket(wsUrl);
 
-            ws.onopen = () => {
-                reconnectAttempts = 0;
-                updateConnectionStatus(true);
-                addEvent('info', 'Conectado ao servidor');
-            };
+                ws.onopen = () => {
+                    reconnectAttempts = 0;
+                    updateConnectionStatus(true);
+                    addEvent('info', 'Conectado ao servidor');
+                };
 
-            ws.onclose = () => {
-                updateConnectionStatus(false);
-                if (reconnectAttempts < 10) {
-                    reconnectAttempts++;
-                    setTimeout(connect, Math.min(1000 * reconnectAttempts, 10000));
-                }
-            };
+                ws.onclose = () => {
+                    updateConnectionStatus(false);
+                    if (reconnectAttempts < 10) {
+                        reconnectAttempts++;
+                        setTimeout(connect, Math.min(1000 * reconnectAttempts, 10000));
+                    }
+                };
 
-            ws.onerror = () => addEvent('error', 'Erro de conexão');
+                ws.onerror = () => addEvent('error', 'Erro de conexão');
 
-            ws.onmessage = (event) => {
-                try {
-                    handleEvent(JSON.parse(event.data));
-                } catch (e) {
-                    console.error('Erro ao processar mensagem:', e);
-                }
-            };
-        }
-
-        function updateConnectionStatus(connected) {
-            document.getElementById('statusDot').classList.toggle('connected', connected);
-            document.getElementById('statusText').textContent = connected ? 'Sistema Rodando' : 'Sistema Parado';
-        }
-
-        function handleEvent(data) {
-            const { event_type, filename, message, details, progress } = data;
-
-            // Atualizar estatísticas
-            if (details?.stats) updateStats(details.stats);
-
-            switch (event_type) {
-                case 'connected':
-                    addEvent('success', 'Conectado ao sistema');
-                    break;
-
-                case 'file_received':
-                case 'pdf_processing_start':
-                    startProcessing(filename);
-                    break;
-
-                case 'pdf_text_extracting':
-                    updateProcessingStep(filename, 'Extraindo texto...', 10);
-                    break;
-
-                case 'pdf_text_extracted':
-                    updateProcessingStep(filename, 'Texto extraído', 25);
-                    break;
-
-                case 'llm_analyzing':
-                    updateProcessingStep(filename, '🤖 Analisando com IA...', 30);
-                    break;
-
-                case 'llm_completed':
-                    updateProcessingStep(filename, `IA: ${details?.cliente || 'N/A'}`, 50);
-                    addEvent('info', `IA identificou: ${details?.cliente || 'N/A'}`);
-                    break;
-
-                case 'matching_start':
-                    updateProcessingStep(filename, 'Buscando cliente...', 55);
-                    break;
-
-                case 'matching_completed':
-                    updateProcessingStep(filename, details?.found ? `✅ ${details.cliente}` : '⚠️ Não encontrado', 70);
-                    break;
-
-                case 'file_saving':
-                    updateProcessingStep(filename, 'Salvando...', 80);
-                    break;
-
-                case 'file_saved':
-                    updateProcessingStep(filename, 'Salvo!', 90);
-                    break;
-
-                case 'processing_completed':
-                    endProcessing(filename, details);
-                    addEvent(details?.status === 'SUCESSO' ? 'success' : 'warning',
-                        `${filename}: ${details?.status} - ${details?.cliente || 'Não identificado'}`);
-                    break;
-
-                case 'processing_error':
-                    endProcessingError(filename, message);
-                    addEvent('error', `Erro: ${filename} - ${message}`);
-                    break;
-
-                case 'stats_update':
-                    break;
-
-                default:
-                    if (message) addEvent('info', message);
+                ws.onmessage = (event) => {
+                    try {
+                        handleEvent(JSON.parse(event.data));
+                    } catch (e) {
+                        console.error('Erro ao processar mensagem:', e);
+                    }
+                };
             }
-        }
 
-        function updateStats(stats) {
-            document.getElementById('statTotal').textContent = stats.total_processados || 0;
-            document.getElementById('statSuccess').textContent = stats.sucesso || 0;
-            document.getElementById('statWarning').textContent = stats.nao_identificados || 0;
-            document.getElementById('statError').textContent = stats.falhas || 0;
-
-            const processingCount = stats.em_processamento || 0;
-            document.getElementById('statProcessing').textContent = processingCount;
-
-            // Mostra/Oculta botão de parar
-            const btnStop = document.getElementById('btnStopProcessing');
-            if (btnStop) {
-                btnStop.style.display = processingCount > 0 ? 'block' : 'none';
+            function updateConnectionStatus(connected) {
+                document.getElementById('statusDot').classList.toggle('connected', connected);
+                document.getElementById('statusText').textContent = connected ? 'Sistema Rodando' : 'Sistema Parado';
             }
-        }
 
-        function startProcessing(filename) {
-            currentProcessingFiles[filename] = { step: 'Iniciando...', progress: 0 };
-            renderCurrentProcessing();
-            document.getElementById('processingSpinner').style.display = 'block';
-        }
+            function handleEvent(data) {
+                const { event_type, filename, message, details, progress } = data;
 
-        function updateProcessingStep(filename, step, progress) {
-            if (currentProcessingFiles[filename]) {
-                currentProcessingFiles[filename] = { step, progress };
+                // Atualizar estatísticas
+                if (details?.stats) updateStats(details.stats);
+
+                switch (event_type) {
+                    case 'connected':
+                        addEvent('success', 'Conectado ao sistema');
+                        break;
+
+                    case 'file_received':
+                    case 'pdf_processing_start':
+                        startProcessing(filename);
+                        break;
+
+                    case 'pdf_text_extracting':
+                        updateProcessingStep(filename, 'Extraindo texto...', 10);
+                        break;
+
+                    case 'pdf_text_extracted':
+                        updateProcessingStep(filename, 'Texto extraído', 25);
+                        break;
+
+                    case 'llm_analyzing':
+                        updateProcessingStep(filename, '🤖 Analisando com IA...', 30);
+                        break;
+
+                    case 'llm_completed':
+                        updateProcessingStep(filename, `IA: ${details?.cliente || 'N/A'}`, 50);
+                        addEvent('info', `IA identificou: ${details?.cliente || 'N/A'}`);
+                        break;
+
+                    case 'matching_start':
+                        updateProcessingStep(filename, 'Buscando cliente...', 55);
+                        break;
+
+                    case 'matching_completed':
+                        updateProcessingStep(filename, details?.found ? `✅ ${details.cliente}` : '⚠️ Não encontrado', 70);
+                        break;
+
+                    case 'file_saving':
+                        updateProcessingStep(filename, 'Salvando...', 80);
+                        break;
+
+                    case 'file_saved':
+                        updateProcessingStep(filename, 'Salvo!', 90);
+                        break;
+
+                    case 'processing_completed':
+                        endProcessing(filename, details);
+                        addEvent(details?.status === 'SUCESSO' ? 'success' : 'warning',
+                            `${filename}: ${details?.status} - ${details?.cliente || 'Não identificado'}`);
+                        break;
+
+                    case 'processing_error':
+                        endProcessingError(filename, message);
+                        addEvent('error', `Erro: ${filename} - ${message}`);
+                        break;
+
+                    case 'stats_update':
+                        break;
+
+                    default:
+                        if (message) addEvent('info', message);
+                }
+            }
+
+            function updateStats(stats) {
+                document.getElementById('statTotal').textContent = stats.total_processados || 0;
+                document.getElementById('statSuccess').textContent = stats.sucesso || 0;
+                document.getElementById('statWarning').textContent = stats.nao_identificados || 0;
+                document.getElementById('statError').textContent = stats.falhas || 0;
+
+                const processingCount = stats.em_processamento || 0;
+                document.getElementById('statProcessing').textContent = processingCount;
+
+                // Mostra/Oculta botão de parar
+                const btnStop = document.getElementById('btnStopProcessing');
+                if (btnStop) {
+                    btnStop.style.display = processingCount > 0 ? 'block' : 'none';
+                }
+            }
+
+            function startProcessing(filename) {
+                currentProcessingFiles[filename] = { step: 'Iniciando...', progress: 0 };
                 renderCurrentProcessing();
+                document.getElementById('processingSpinner').style.display = 'block';
             }
-        }
 
-        function renderCurrentProcessing() {
-            const container = document.getElementById('currentProcessing');
-            const files = Object.entries(currentProcessingFiles);
+            function updateProcessingStep(filename, step, progress) {
+                if (currentProcessingFiles[filename]) {
+                    currentProcessingFiles[filename] = { step, progress };
+                    renderCurrentProcessing();
+                }
+            }
 
-            if (files.length === 0) {
-                container.innerHTML = `
+            function renderCurrentProcessing() {
+                const container = document.getElementById('currentProcessing');
+                const files = Object.entries(currentProcessingFiles);
+
+                if (files.length === 0) {
+                    container.innerHTML = `
                     <div class="no-processing">
                         <div class="icon">📭</div>
                         <p>Aguardando...</p>
                     </div>
                 `;
-                document.getElementById('processingSpinner').style.display = 'none';
-                return;
-            }
+                    document.getElementById('processingSpinner').style.display = 'none';
+                    return;
+                }
 
-            container.innerHTML = files.map(([filename, data]) => `
+                container.innerHTML = files.map(([filename, data]) => `
                 <div class="processing-card">
                     <div class="filename">📄 ${filename}</div>
                     <div class="progress-bar">
@@ -928,87 +989,87 @@
                     </div>
                 </div>
             `).join('');
-        }
-
-        function endProcessing(filename, details) {
-            delete currentProcessingFiles[filename];
-            renderCurrentProcessing();
-
-            // Adiciona à tabela
-            const extrato = {
-                hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                empresa: details?.cliente || 'NÃO IDENTIFICADO',
-                arquivo: filename,
-                tipo: details?.tipo || '-',
-                banco: details?.banco || '-',
-                ano: details?.ano || '-',
-                mes: details?.mes || '-',
-                status: details?.status || 'SUCESSO',
-                metodo: details?.metodo || '-',
-                path: details?.path || '-',
-                statusClass: details?.status === 'SUCESSO' ? 'success' :
-                    (details?.status === 'FALHA' ? 'error' : 'warning')
-            };
-
-            processedExtratos.unshift(extrato);
-            renderExtratosTable();
-        }
-
-        function endProcessingError(filename, message) {
-            delete currentProcessingFiles[filename];
-            renderCurrentProcessing();
-
-            const extrato = {
-                hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                empresa: 'ERRO',
-                arquivo: filename,
-                tipo: '-',
-                banco: '-',
-                ano: '-',
-                mes: '-',
-                status: 'FALHA',
-                metodo: '-',
-                path: '-',
-                statusClass: 'error',
-                erro: message
-            };
-
-            processedExtratos.unshift(extrato);
-            renderExtratosTable();
-        }
-
-        function renderExtratosTable() {
-            const tbody = document.getElementById('extratosBody');
-
-            // Get filter values
-            const searchName = document.getElementById('searchName').value.toLowerCase();
-            const searchYear = document.getElementById('searchYear').value;
-            const searchMonth = document.getElementById('searchMonth').value;
-
-            let filtered = processedExtratos;
-
-            // Filter by Status
-            if (currentFilter !== 'all') {
-                filtered = filtered.filter(e => e.statusClass === currentFilter);
             }
 
-            // Filter by Name
-            if (searchName) {
-                filtered = filtered.filter(e => e.empresa.toLowerCase().includes(searchName));
+            function endProcessing(filename, details) {
+                delete currentProcessingFiles[filename];
+                renderCurrentProcessing();
+
+                // Adiciona à tabela
+                const extrato = {
+                    hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                    empresa: details?.cliente || 'NÃO IDENTIFICADO',
+                    arquivo: filename,
+                    tipo: details?.tipo || '-',
+                    banco: details?.banco || '-',
+                    ano: details?.ano || '-',
+                    mes: details?.mes || '-',
+                    status: details?.status || 'SUCESSO',
+                    metodo: details?.metodo || '-',
+                    path: details?.path || '-',
+                    statusClass: details?.status === 'SUCESSO' ? 'success' :
+                        (details?.status === 'FALHA' ? 'error' : 'warning')
+                };
+
+                processedExtratos.unshift(extrato);
+                renderExtratosTable();
             }
 
-            // Filter by Year
-            if (searchYear) {
-                filtered = filtered.filter(e => String(e.ano) == searchYear);
+            function endProcessingError(filename, message) {
+                delete currentProcessingFiles[filename];
+                renderCurrentProcessing();
+
+                const extrato = {
+                    hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                    empresa: 'ERRO',
+                    arquivo: filename,
+                    tipo: '-',
+                    banco: '-',
+                    ano: '-',
+                    mes: '-',
+                    status: 'FALHA',
+                    metodo: '-',
+                    path: '-',
+                    statusClass: 'error',
+                    erro: message
+                };
+
+                processedExtratos.unshift(extrato);
+                renderExtratosTable();
             }
 
-            // Filter by Month
-            if (searchMonth) {
-                filtered = filtered.filter(e => String(e.mes) == searchMonth);
-            }
+            function renderExtratosTable() {
+                const tbody = document.getElementById('extratosBody');
 
-            if (filtered.length === 0) {
-                tbody.innerHTML = `
+                // Get filter values
+                const searchName = document.getElementById('searchName').value.toLowerCase();
+                const searchYear = document.getElementById('searchYear').value;
+                const searchMonth = document.getElementById('searchMonth').value;
+
+                let filtered = processedExtratos;
+
+                // Filter by Status
+                if (currentFilter !== 'all') {
+                    filtered = filtered.filter(e => e.statusClass === currentFilter);
+                }
+
+                // Filter by Name
+                if (searchName) {
+                    filtered = filtered.filter(e => e.empresa.toLowerCase().includes(searchName));
+                }
+
+                // Filter by Year
+                if (searchYear) {
+                    filtered = filtered.filter(e => String(e.ano) == searchYear);
+                }
+
+                // Filter by Month
+                if (searchMonth) {
+                    filtered = filtered.filter(e => String(e.mes) == searchMonth);
+                }
+
+                if (filtered.length === 0) {
+                    tbody.innerHTML = `
                     <tr>
                         <td colspan="9">
                             <div class="empty-state">
@@ -1018,15 +1079,15 @@
                         </td>
                     </tr>
                 `;
-                return;
-            }
+                    return;
+                }
 
-            const meses = ['', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+                const meses = ['', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-            tbody.innerHTML = filtered.map((e, index) => {
-                // Encontra o índice real no array original para poder deletar corretamente
-                const realIndex = processedExtratos.indexOf(e);
-                return `
+                tbody.innerHTML = filtered.map((e, index) => {
+                    // Encontra o índice real no array original para poder deletar corretamente
+                    const realIndex = processedExtratos.indexOf(e);
+                    return `
                 <tr data-status="${e.statusClass}" data-index="${realIndex}">
                     <td class="action-col">
                         <button class="delete-btn" onclick="deleteExtrato(${realIndex})" title="Remover da lista">❌</button>
@@ -1046,37 +1107,37 @@
                     <td class="path" title="${e.path}">${e.path}</td>
                 </tr>
             `}).join('');
-        }
+            }
 
-        // Add Listeners
-        document.getElementById('searchName').addEventListener('input', renderExtratosTable);
-        document.getElementById('searchYear').addEventListener('input', renderExtratosTable);
-        document.getElementById('searchMonth').addEventListener('change', renderExtratosTable);
+            // Add Listeners
+            document.getElementById('searchName').addEventListener('input', renderExtratosTable);
+            document.getElementById('searchYear').addEventListener('input', renderExtratosTable);
+            document.getElementById('searchMonth').addEventListener('change', renderExtratosTable);
 
-        function filterExtratos(filter) {
-            currentFilter = filter;
+            function filterExtratos(filter) {
+                currentFilter = filter;
 
-            // Atualiza botões
-            document.querySelectorAll('.filter-btn').forEach(btn => {
-                btn.classList.remove('active');
-            });
-            event.target.classList.add('active');
+                // Atualiza botões
+                document.querySelectorAll('.filter-btn').forEach(btn => {
+                    btn.classList.remove('active');
+                });
+                event.target.classList.add('active');
 
-            renderExtratosTable();
-        }
-
-        function deleteExtrato(index) {
-            if (index >= 0 && index < processedExtratos.length) {
-                processedExtratos.splice(index, 1);
                 renderExtratosTable();
             }
-        }
 
-        function addEvent(type, message) {
-            const log = document.getElementById('eventLog');
-            const time = new Date().toLocaleTimeString('pt-BR');
+            function deleteExtrato(index) {
+                if (index >= 0 && index < processedExtratos.length) {
+                    processedExtratos.splice(index, 1);
+                    renderExtratosTable();
+                }
+            }
 
-            const eventHtml = `
+            function addEvent(type, message) {
+                const log = document.getElementById('eventLog');
+                const time = new Date().toLocaleTimeString('pt-BR');
+
+                const eventHtml = `
                 <div class="event-item">
                     <div class="time">${time}</div>
                     <div class="content">
@@ -1086,159 +1147,162 @@
                 </div>
             `;
 
-            log.insertAdjacentHTML('afterbegin', eventHtml);
+                log.insertAdjacentHTML('afterbegin', eventHtml);
 
-            // Limita a 30 eventos
-            while (log.children.length > 30) {
-                log.removeChild(log.lastChild);
+                // Limita a 30 eventos
+                while (log.children.length > 30) {
+                    log.removeChild(log.lastChild);
+                }
             }
-        }
 
-        function clearLog() {
-            document.getElementById('eventLog').innerHTML = '';
-            addEvent('info', 'Log limpo');
-        }
+            function clearLog() {
+                document.getElementById('eventLog').innerHTML = '';
+                addEvent('info', 'Log limpo');
+            }
 
-        // Iniciar conexão
-        connect();
+            // Iniciar conexão
+            connect();
 
-        // Carregar jobs existentes via API
-        fetch('/jobs')
-            .then(r => r.json())
-            .then(data => {
-                if (data.jobs) {
-                    data.jobs.forEach(job => {
-                        if (job.results?.resultados) {
-                            job.results.resultados.forEach(r => {
-                                processedExtratos.push({
-                                    hora: new Date(job.completed_at || job.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                                    empresa: r.cliente_identificado || 'NÃO IDENTIFICADO',
-                                    arquivo: r.nome_arquivo_original,
-                                    banco: '-',
-                                    ano: r.ano || '-',
-                                    mes: r.mes || '-',
-                                    status: r.status,
-                                    metodo: r.metodo_identificacao || '-',
-                                    path: r.nome_arquivo_final || '-',
-                                    statusClass: r.status === 'SUCESSO' ? 'success' :
-                                        (r.status === 'FALHA' ? 'error' : 'warning')
+            // Carregar jobs existentes via API
+            fetch('/jobs')
+                .then(r => r.json())
+                .then(data => {
+                    if (data.jobs) {
+                        data.jobs.forEach(job => {
+                            if (job.results?.resultados) {
+                                job.results.resultados.forEach(r => {
+                                    processedExtratos.push({
+                                        hora: new Date(job.completed_at || job.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                                        empresa: r.cliente_identificado || 'NÃO IDENTIFICADO',
+                                        arquivo: r.nome_arquivo_original,
+                                        banco: '-',
+                                        ano: r.ano || '-',
+                                        mes: r.mes || '-',
+                                        status: r.status,
+                                        metodo: r.metodo_identificacao || '-',
+                                        path: r.nome_arquivo_final || '-',
+                                        statusClass: r.status === 'SUCESSO' ? 'success' :
+                                            (r.status === 'FALHA' ? 'error' : 'warning')
+                                    });
                                 });
-                            });
-                        }
-                    });
-                    renderExtratosTable();
-                }
-            })
-            .catch(console.error);
+                            }
+                        });
+                        renderExtratosTable();
+                    }
+                })
+                .catch(console.error);
 
-        async function resetProcessing() {
-            if (!confirm('Tem certeza que deseja forçar a parada de todos os processamentos? Isso pode deixar arquivos incompletos.')) {
-                return;
-            }
-
-            try {
-                const response = await fetch('/monitor/reset', { method: 'POST' });
-                const result = await response.json();
-                console.log(result.message);
-
-                // Força limpeza visual imediata
-                currentProcessingFiles = {};
-                renderProcessing();
-                document.getElementById('processingSpinner').style.display = 'none';
-                document.getElementById('btnStopProcessing').style.display = 'none';
-
-            } catch (e) {
-                console.error("Erro ao resetar processamento:", e);
-                alert("Erro ao tentar parar processamento.");
-            }
-        }
-
-        async function fetchFolderStats() {
-            try {
-                const response = await fetch('/monitor/stats');
-                const data = await response.json();
-
-                // Atualiza o valor
-                const elValue = document.getElementById('statFolderUnidentified');
-                if (elValue) {
-                    const count = data.unidentified_files_count ?? 0;
-                    elValue.innerText = String(count); // Usa innerText e conversão explícita
+            async function resetProcessing() {
+                if (!confirm('Tem certeza que deseja forçar a parada de todos os processamentos? Isso pode deixar arquivos incompletos.')) {
+                    return;
                 }
 
-                // Atualiza o tooltip do card pai com o caminho
-                const card = elValue?.closest('.stat-card');
-                if (card) card.title = `Pasta: ${data.unidentified_path}`;
+                try {
+                    const response = await fetch('/monitor/reset', { method: 'POST' });
+                    const result = await response.json();
+                    console.log(result.message);
 
-            } catch (e) {
-                console.error("Erro ao buscar stats da pasta:", e);
+                    // Força limpeza visual imediata
+                    currentProcessingFiles = {};
+                    renderProcessing();
+                    document.getElementById('processingSpinner').style.display = 'none';
+                    document.getElementById('btnStopProcessing').style.display = 'none';
+
+                } catch (e) {
+                    console.error("Erro ao resetar processamento:", e);
+                    alert("Erro ao tentar parar processamento.");
+                }
             }
-        }
 
-        // Atualiza a cada 30 segundos
-        setInterval(fetchFolderStats, 30000);
+            async function fetchFolderStats() {
+                try {
+                    const response = await fetch('/monitor/stats');
+                    const data = await response.json();
 
-        async function loadHistory() {
-            try {
-                const response = await fetch('/monitor/history');
-                const history = await response.json();
+                    // Atualiza o valor
+                    const elValue = document.getElementById('statFolderUnidentified');
+                    if (elValue) {
+                        const count = data.unidentified_files_count ?? 0;
+                        elValue.innerText = String(count); // Usa innerText e conversão explícita
+                    }
 
-                if (!Array.isArray(history)) return;
+                    // Atualiza o tooltip do card pai com o caminho
+                    const card = elValue?.closest('.stat-card');
+                    if (card) card.title = `Pasta: ${data.unidentified_path}`;
 
-                // Mapeia para o formato usado na tabela
-                const mappedHistory = history.map(item => ({
-                    filename: item.filename,
-                    originalName: item.filename,
-                    cliente: item.cliente,
-                    status: item.status,
-                    formattedDate: item.data_hora_formatada,
-                    savedPath: item.full_path,
-                    periodo: item.periodo,
-                    // Campos auxiliares para filtros
-                    banco: item.tipo // Usando tipo como info extra já que banco não tem no log simples
-                }));
-
-                // Substitui ou adiciona ao início? Como é histórico, substitui o estado inicial.
-                processedExtratos = mappedHistory;
-                renderExtratos(currentFilter);
-
-                // Atualiza contadores baseados no histórico
-                updateStatsFromHistory(mappedHistory);
-
-            } catch (e) {
-                console.error("Erro ao carregar histórico:", e);
+                } catch (e) {
+                    console.error("Erro ao buscar stats da pasta:", e);
+                }
             }
-        }
 
-        function updateStatsFromHistory(history) {
-            // Recalcula stats baseado no historico carregado
-            const stats = {
-                total_processados: history.length,
-                sucesso: history.filter(i => i.status === 'SUCESSO').length,
-                nao_identificados: history.filter(i => i.status === 'NAO_IDENTIFICADO').length,
-                falhas: history.filter(i => i.status === 'FALHA' || i.status === 'ERRO').length,
-                em_processamento: 0 // Historico é estático
-            };
+            // Atualiza a cada 30 segundos
+            setInterval(fetchFolderStats, 30000);
 
-            // Só atualiza os cards de contagem TOTAL, mantendo o "em processamento" zerado ou gerenciado pelo WS
-            document.getElementById('statTotal').textContent = stats.total_processados;
-            // document.getElementById('statSuccess').textContent = stats.sucesso; // Opcional: atualizar cards com histórico
-            // document.getElementById('statError').textContent = stats.falhas;
+            async function loadHistory() {
+                try {
+                    const response = await fetch('/monitor/history');
+                    const history = await response.json();
 
-            // Nota: Os cards superiores geralmente mostram o estado "da sessão" ou "do dia". 
-            // Se o usuário quer histórico de dias anteriores, talvez os cards devam refletir isso ou ter cards separados.
-            // Por padrão, vou deixar os cards refletirem o que está na tabela.
-            document.getElementById('statSuccess').textContent = stats.sucesso;
-            document.getElementById('statError').textContent = stats.falhas;
-            // O card de "Não Identificados (Pasta)" é gerado pelo backend (scan de pasta), então não mexo nele aqui.
-        }
+                    if (!Array.isArray(history)) return;
 
-        // Chama ao iniciar
-        fetchFolderStats();
-        loadHistory(); // Carrega histórico persistente
+                    // Mapeia para o formato usado na tabela
+                    const mappedHistory = history.map(item => ({
+                        filename: item.filename,
+                        originalName: item.filename,
+                        cliente: item.cliente,
+                        status: item.status,
+                        formattedDate: item.data_hora_formatada,
+                        savedPath: item.full_path,
+                        periodo: item.periodo,
+                        // Campos auxiliares para filtros
+                        banco: item.tipo // Usando tipo como info extra já que banco não tem no log simples
+                    }));
 
-        // Conexão WebSocket iniciada no onload ou similar se houver, ou:
-        if (!ws) connect();
-    </script>
+                    // Substitui ou adiciona ao início? Como é histórico, substitui o estado inicial.
+                    processedExtratos = mappedHistory;
+                    renderExtratos(currentFilter);
+
+                    // Atualiza contadores baseados no histórico
+                    updateStatsFromHistory(mappedHistory);
+
+                } catch (e) {
+                    console.error("Erro ao carregar histórico:", e);
+                }
+            }
+
+            function updateStatsFromHistory(history) {
+                // Recalcula stats baseado no historico carregado
+                const stats = {
+                    total_processados: history.length,
+                    sucesso: history.filter(i => i.status === 'SUCESSO').length,
+                    nao_identificados: history.filter(i => i.status === 'NAO_IDENTIFICADO').length,
+                    falhas: history.filter(i => i.status === 'FALHA' || i.status === 'ERRO').length,
+                    em_processamento: 0 // Historico é estático
+                };
+
+                // Só atualiza os cards de contagem TOTAL, mantendo o "em processamento" zerado ou gerenciado pelo WS
+                document.getElementById('statTotal').textContent = stats.total_processados;
+                // document.getElementById('statSuccess').textContent = stats.sucesso; // Opcional: atualizar cards com histórico
+                // document.getElementById('statError').textContent = stats.falhas;
+
+                // Nota: Os cards superiores geralmente mostram o estado "da sessão" ou "do dia". 
+                // Se o usuário quer histórico de dias anteriores, talvez os cards devam refletir isso ou ter cards separados.
+                // Por padrão, vou deixar os cards refletirem o que está na tabela.
+                document.getElementById('statSuccess').textContent = stats.sucesso;
+                document.getElementById('statError').textContent = stats.falhas;
+                // O card de "Não Identificados (Pasta)" é gerado pelo backend (scan de pasta), então não mexo nele aqui.
+            }
+
+            // Chama ao iniciar
+            fetchFolderStats();
+            loadHistory(); // Carrega histórico persistente
+
+            // Conexão WebSocket iniciada no onload ou similar se houver, ou:
+            if (!ws) connect();
+        </script>
+    </div> <!-- Fecha container e main-content -->
+
+    <script src="/static/js/tech-navbar.js"></script>
 </body>
 
 </html>

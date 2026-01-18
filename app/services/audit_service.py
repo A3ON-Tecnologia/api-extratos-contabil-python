@@ -96,8 +96,8 @@ class AuditService:
         
         for attempt in range(max_retries):
             try:
-                # Tenta abrir ou criar a planilha
-                workbook, worksheet = self._open_or_create_log(log_path)
+                # Abre a planilha existente
+                workbook, worksheet = self._open_log(log_path)
                 
                 # Dados da nova linha
                 now = datetime.now()
@@ -150,33 +150,28 @@ class AuditService:
         
         return False
     
-    def _open_or_create_log(self, log_path: Path) -> tuple:
+    def _open_log(self, log_path: Path) -> tuple:
         """
-        Abre a planilha de LOG existente ou cria uma nova.
+        Abre a planilha de LOG existente.
+        
+        NÃO cria arquivo novo - o arquivo já deve existir.
         
         Returns:
             Tuple (workbook, worksheet)
+            
+        Raises:
+            FileNotFoundError: Se o arquivo não existir
         """
-        if log_path.exists():
-            try:
-                workbook = load_workbook(log_path)
-                worksheet = workbook.active
-                return workbook, worksheet
-            except InvalidFileException:
-                logger.warning("Arquivo de LOG corrompido, criando novo")
+        if not log_path.exists():
+            raise FileNotFoundError(f"Arquivo de LOG não encontrado: {log_path}")
         
-        # Cria nova planilha
-        workbook = Workbook()
-        worksheet = workbook.active
-        worksheet.title = "LOG"
-        
-        # Adiciona cabeçalhos
-        worksheet.append(self.COLUMNS)
-        
-        # Garante que o diretório existe
-        log_path.parent.mkdir(parents=True, exist_ok=True)
-        
-        return workbook, worksheet
+        try:
+            workbook = load_workbook(log_path)
+            worksheet = workbook.active
+            return workbook, worksheet
+        except InvalidFileException as e:
+            logger.error(f"Arquivo de LOG corrompido: {e}")
+            raise
     
     def _write_to_fallback(
         self,
@@ -189,48 +184,17 @@ class AuditService:
         nome_arquivo_final: str,
     ) -> bool:
         """
-        Escreve em arquivo alternativo quando o principal está bloqueado.
+        Fallback quando o arquivo principal está bloqueado.
         
-        Cria um arquivo com timestamp no nome.
+        NÃO cria arquivo novo - apenas loga o erro.
+        O log será registrado no banco de dados MySQL de qualquer forma.
         """
-        try:
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            fallback_name = f"LOG_FALLBACK_{timestamp}.xlsx"
-            fallback_path = original_path.parent / fallback_name
-            
-            logger.warning(f"Usando arquivo de fallback: {fallback_path}")
-            
-            # Cria nova planilha
-            workbook = Workbook()
-            worksheet = workbook.active
-            worksheet.title = "LOG"
-            
-            # Adiciona cabeçalhos
-            worksheet.append(self.COLUMNS)
-            
-            # Adiciona a linha
-            now = datetime.now()
-            row_data = [
-                now.strftime("%d/%m/%Y %H:%M:%S"),
-                nome_cliente,
-                tipo_extrato,
-                str(ano) if ano else "",
-                str(mes) if mes else "",
-                status,
-                nome_arquivo_final,
-            ]
-            worksheet.append(row_data)
-            
-            # Salva
-            workbook.save(fallback_path)
-            workbook.close()
-            
-            logger.info(f"Log de fallback salvo: {fallback_path}")
-            return True
-            
-        except Exception as e:
-            logger.error(f"Erro ao escrever log de fallback: {e}")
-            return False
+        logger.error(
+            f"Não foi possível escrever no LOG Excel. "
+            f"Cliente: {nome_cliente}, Status: {status}. "
+            f"O registro será salvo apenas no banco de dados MySQL."
+        )
+        return False
     
     def merge_fallback_logs(self) -> int:
         """
@@ -252,7 +216,7 @@ class AuditService:
         with self._write_lock:
             try:
                 # Abre o arquivo principal
-                main_workbook, main_worksheet = self._open_or_create_log(
+                main_workbook, main_worksheet = self._open_log(
                     self.settings.log_excel_path
                 )
                 

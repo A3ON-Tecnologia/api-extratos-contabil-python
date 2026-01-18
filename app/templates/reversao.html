@@ -1,0 +1,762 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🔄 Reversão | Extratos Contábeis</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #151210;
+            --bg-card: #1c1814;
+            --bg-card-hover: #2a241e;
+            --accent-primary: #f97316;
+            --accent-secondary: #fb923c;
+            --accent-revert: #ea580c;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-error: #ef4444;
+            --accent-danger: #dc2626;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border: #3d2a1a;
+            --glow-revert: rgba(249, 115, 22, 0.3);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            background: radial-gradient(circle at 30% 20%, var(--glow-revert) 0%, transparent 50%),
+                radial-gradient(circle at 70% 80%, rgba(251, 146, 60, 0.15) 0%, transparent 50%);
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-revert), var(--accent-secondary));
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+
+        .header p {
+            color: var(--text-secondary);
+            margin-top: 0.5rem;
+        }
+
+        /* Stats */
+        .stats-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+            gap: 1rem;
+            margin-bottom: 2rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1rem;
+            text-align: center;
+        }
+
+        .stat-card .icon {
+            font-size: 1.5rem;
+        }
+
+        .stat-card .value {
+            font-size: 1.75rem;
+            font-weight: 700;
+        }
+
+        .stat-card .label {
+            font-size: 0.7rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+        }
+
+        .stat-card.success .value {
+            color: var(--accent-success);
+        }
+
+        .stat-card.warning .value {
+            color: var(--accent-warning);
+        }
+
+        .stat-card.error .value {
+            color: var(--accent-error);
+        }
+
+        /* Actions Bar */
+        .actions-bar {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1.2rem;
+            border: none;
+            border-radius: 10px;
+            font-size: 0.85rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-decoration: none;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-revert), var(--accent-secondary));
+            color: white;
+        }
+
+        .btn-danger {
+            background: var(--accent-danger);
+            color: white;
+        }
+
+        .btn-outline {
+            background: transparent;
+            color: var(--text-secondary);
+            border: 1px solid var(--border);
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            opacity: 0.9;
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none;
+        }
+
+        .search-input {
+            flex: 1;
+            min-width: 200px;
+            padding: 0.6rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 10px;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+        }
+
+        .search-input:focus {
+            outline: none;
+            border-color: var(--accent-primary);
+        }
+
+        /* Selection Info */
+        .selection-info {
+            background: var(--bg-card);
+            border: 1px solid var(--accent-primary);
+            border-radius: 10px;
+            padding: 0.75rem 1rem;
+            display: none;
+            align-items: center;
+            gap: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .selection-info.active {
+            display: flex;
+        }
+
+        .selection-info .count {
+            font-weight: 600;
+            color: var(--accent-primary);
+        }
+
+        /* Table */
+        .table-container {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            overflow: hidden;
+        }
+
+        .table-header {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .table-header h2 {
+            font-size: 1.1rem;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+
+        th,
+        td {
+            padding: 0.75rem 1rem;
+            text-align: left;
+        }
+
+        th {
+            background: var(--bg-secondary);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            color: var(--text-muted);
+        }
+
+        tr {
+            border-bottom: 1px solid var(--border);
+        }
+
+        tbody tr:hover {
+            background: var(--bg-card-hover);
+        }
+
+        td {
+            font-size: 0.85rem;
+        }
+
+        .checkbox-cell {
+            width: 40px;
+            text-align: center;
+        }
+
+        input[type="checkbox"] {
+            width: 18px;
+            height: 18px;
+            accent-color: var(--accent-primary);
+            cursor: pointer;
+        }
+
+        .cliente-cell {
+            max-width: 250px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .tag {
+            display: inline-block;
+            padding: 0.2rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            font-weight: 500;
+        }
+
+        .tag-tipo {
+            background: rgba(99, 102, 241, 0.15);
+            color: var(--accent-secondary);
+        }
+
+        .tag-banco {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-success);
+        }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            padding: 0.2rem 0.6rem;
+            border-radius: 20px;
+            font-size: 0.7rem;
+            font-weight: 600;
+        }
+
+        .status-badge.success {
+            background: rgba(16, 185, 129, 0.15);
+            color: var(--accent-success);
+        }
+
+        .status-badge.warning {
+            background: rgba(245, 158, 11, 0.15);
+            color: var(--accent-warning);
+        }
+
+        .status-badge.error {
+            background: rgba(239, 68, 68, 0.15);
+            color: var(--accent-error);
+        }
+
+        .exists-badge {
+            padding: 0.2rem 0.5rem;
+            border-radius: 6px;
+            font-size: 0.65rem;
+            font-weight: 600;
+        }
+
+        .exists-badge.yes {
+            background: var(--accent-success);
+            color: white;
+        }
+
+        .exists-badge.no {
+            background: var(--accent-error);
+            color: white;
+        }
+
+        .action-btn {
+            padding: 0.3rem 0.6rem;
+            background: var(--accent-danger);
+            color: white;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.7rem;
+            cursor: pointer;
+        }
+
+        .action-btn:hover {
+            opacity: 0.8;
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state .icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+
+        /* Toast */
+        .toast {
+            position: fixed;
+            top: 2rem;
+            right: 2rem;
+            padding: 1rem 1.5rem;
+            border-radius: 12px;
+            color: white;
+            font-weight: 500;
+            transform: translateX(400px);
+            opacity: 0;
+            transition: all 0.5s ease;
+            z-index: 1000;
+        }
+
+        .toast.show {
+            transform: translateX(0);
+            opacity: 1;
+        }
+
+        .toast.success {
+            background: var(--accent-success);
+        }
+
+        .toast.error {
+            background: var(--accent-error);
+        }
+
+        /* Modal */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+
+        .modal-overlay.active {
+            display: flex;
+        }
+
+        .modal {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 2rem;
+            max-width: 500px;
+            width: 90%;
+        }
+
+        .modal h3 {
+            font-size: 1.25rem;
+            margin-bottom: 1rem;
+            color: var(--accent-error);
+        }
+
+        .modal p {
+            color: var(--text-secondary);
+            margin-bottom: 1.5rem;
+        }
+
+        .modal-actions {
+            display: flex;
+            gap: 1rem;
+            justify-content: flex-end;
+        }
+    </style>
+    <link rel="stylesheet" href="/static/css/tech-navbar.css">
+</head>
+
+<body>
+    <div class="toast" id="toast"></div>
+
+    <div class="modal-overlay" id="modalOverlay">
+        <div class="modal">
+            <h3>⚠️ Confirmar Reversão</h3>
+            <p id="modalMessage">Tem certeza que deseja reverter os processamentos selecionados?</p>
+            <div class="modal-actions">
+                <button class="btn btn-outline" onclick="closeModal()">Cancelar</button>
+                <button class="btn btn-danger" id="modalConfirmBtn">Reverter</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="bg-animation"></div>
+
+    <!-- Tech Navbar -->
+    <nav class="tech-navbar collapsed" id="techNavbar">
+        <div class="navbar-header">
+            <span class="navbar-title">Extratos API</span>
+        </div>
+        <div class="navbar-nav">
+            <div class="nav-item">
+                <a href="/monitor" class="nav-link">
+                    <span class="nav-icon">📺</span>
+                    <span class="nav-text">Monitor</span>
+                    <span class="nav-status"></span>
+                </a>
+                <span class="nav-tooltip">Monitor</span>
+            </div>
+            <div class="nav-item">
+                <a href="/test" class="nav-link">
+                    <span class="nav-icon">🧪</span>
+                    <span class="nav-text">Modo Teste</span>
+                </a>
+                <span class="nav-tooltip">Modo Teste</span>
+            </div>
+            <div class="nav-item active">
+                <a href="/reversao" class="nav-link">
+                    <span class="nav-icon">🔄</span>
+                    <span class="nav-text">Reversão</span>
+                </a>
+                <span class="nav-tooltip">Reversão</span>
+            </div>
+        </div>
+        <div class="navbar-footer">
+            <div class="footer-status"></div>
+            <span class="footer-text">Sistema Online</span>
+        </div>
+        <button class="navbar-toggle" id="navbarToggle">
+            <span class="arrow">❯</span>
+        </button>
+    </nav>
+
+    <div class="page-wrapper navbar-collapsed" id="mainContent">
+        <div class="container">
+            <header class="header">
+                <h1><span style="-webkit-text-fill-color: initial;">🔄</span> Gestão de Reversão</h1>
+                <p>Reverter processamentos e deletar arquivos salvos incorretamente</p>
+            </header>
+
+            <div class="stats-grid">
+                <div class="stat-card">
+                    <div class="icon">📊</div>
+                    <div class="value" id="statTotal">0</div>
+                    <div class="label">Total Registros</div>
+                </div>
+                <div class="stat-card success">
+                    <div class="icon">✅</div>
+                    <div class="value" id="statSucesso">0</div>
+                    <div class="label">Sucesso</div>
+                </div>
+                <div class="stat-card warning">
+                    <div class="icon">⚠️</div>
+                    <div class="value" id="statNaoId">0</div>
+                    <div class="label">Não Identificado</div>
+                </div>
+                <div class="stat-card error">
+                    <div class="icon">📁</div>
+                    <div class="value" id="statArquivos">0</div>
+                    <div class="label">Arquivos no Disco</div>
+                </div>
+            </div>
+
+            <div class="actions-bar">
+                <input type="text" class="search-input" id="searchInput" placeholder="🔍 Buscar por cliente...">
+                <button class="btn btn-primary" onclick="loadData()">🔄 Atualizar</button>
+                <a href="/monitor" class="btn btn-outline">📺 Monitor</a>
+            </div>
+
+            <div class="selection-info" id="selectionInfo">
+                <span><span class="count" id="selectedCount">0</span> selecionados</span>
+                <button class="btn btn-danger" onclick="reverterSelecionados()">🗑️ Reverter Selecionados</button>
+                <button class="btn btn-outline" onclick="clearSelection()">Limpar Seleção</button>
+            </div>
+
+            <div class="table-container">
+                <div class="table-header">
+                    <h2>📋 Processamentos</h2>
+                </div>
+                <div id="tableContent">
+                    <div class="empty-state">
+                        <div class="icon">📭</div>
+                        <p>Nenhum processamento encontrado</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <script>
+            let allLogs = [];
+            let selectedIds = new Set();
+
+            async function loadData() {
+                await Promise.all([loadStats(), loadLogs()]);
+            }
+
+            async function loadStats() {
+                try {
+                    const res = await fetch('/reversao/stats');
+                    const data = await res.json();
+                    document.getElementById('statTotal').textContent = data.total || 0;
+                    document.getElementById('statSucesso').textContent = data.sucesso || 0;
+                    document.getElementById('statNaoId').textContent = data.nao_identificado || 0;
+                    document.getElementById('statArquivos').textContent = data.arquivos_existentes || 0;
+                } catch (e) {
+                    console.error('Erro:', e);
+                }
+            }
+
+            async function loadLogs() {
+                const search = document.getElementById('searchInput').value;
+
+                try {
+                    const url = `/reversao/listar?limit=100${search ? '&cliente=' + encodeURIComponent(search) : ''}`;
+                    const res = await fetch(url);
+                    const data = await res.json();
+
+                    allLogs = data.logs || [];
+                    renderTable();
+                } catch (e) {
+                    console.error('Erro:', e);
+                }
+            }
+
+            function renderTable() {
+                const container = document.getElementById('tableContent');
+
+                if (allLogs.length === 0) {
+                    container.innerHTML = `
+                    <div class="empty-state">
+                        <div class="icon">📭</div>
+                        <p>Nenhum processamento encontrado</p>
+                    </div>
+                `;
+                    return;
+                }
+
+                const rows = allLogs.map(log => {
+                    const statusClass = log.status === 'SUCESSO' ? 'success' : (log.status === 'FALHA' ? 'error' : 'warning');
+                    const checked = selectedIds.has(log.id) ? 'checked' : '';
+
+                    return `
+                    <tr>
+                        <td class="checkbox-cell">
+                            <input type="checkbox" ${checked} onchange="toggleSelect(${log.id})">
+                        </td>
+                        <td>${log.id}</td>
+                        <td style="font-size: 0.75rem; color: var(--text-muted);">${formatDate(log.processado_em)}</td>
+                        <td class="cliente-cell" title="${log.cliente_nome || 'N/A'}">${log.cliente_nome || 'N/A'}</td>
+                        <td>
+                            <span class="tag tag-tipo">${log.tipo_documento || '-'}</span>
+                            <span class="tag tag-banco">${log.banco || '-'}</span>
+                        </td>
+                        <td>${log.mes || '-'}/${log.ano || '-'}</td>
+                        <td><span class="status-badge ${statusClass}">${log.status}</span></td>
+                        <td><span class="exists-badge ${log.arquivo_existe ? 'yes' : 'no'}">${log.arquivo_existe ? 'SIM' : 'NAO'}</span></td>
+                        <td>
+                            <button class="action-btn" onclick="reverterUm(${log.id})">🗑️ Reverter</button>
+                        </td>
+                    </tr>
+                `;
+                }).join('');
+
+                container.innerHTML = `
+                <table>
+                    <thead>
+                        <tr>
+                            <th class="checkbox-cell"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
+                            <th>ID</th>
+                            <th>Data</th>
+                            <th>Cliente</th>
+                            <th>Tipo / Banco</th>
+                            <th>Período</th>
+                            <th>Status</th>
+                            <th>Arquivo</th>
+                            <th>Ação</th>
+                        </tr>
+                    </thead>
+                    <tbody>${rows}</tbody>
+                </table>
+            `;
+            }
+
+            function toggleSelect(id) {
+                if (selectedIds.has(id)) {
+                    selectedIds.delete(id);
+                } else {
+                    selectedIds.add(id);
+                }
+                updateSelectionInfo();
+            }
+
+            function toggleSelectAll() {
+                const selectAll = document.getElementById('selectAll').checked;
+                if (selectAll) {
+                    allLogs.forEach(log => selectedIds.add(log.id));
+                } else {
+                    selectedIds.clear();
+                }
+                renderTable();
+                updateSelectionInfo();
+            }
+
+            function clearSelection() {
+                selectedIds.clear();
+                renderTable();
+                updateSelectionInfo();
+            }
+
+            function updateSelectionInfo() {
+                const info = document.getElementById('selectionInfo');
+                const count = document.getElementById('selectedCount');
+                count.textContent = selectedIds.size;
+                info.classList.toggle('active', selectedIds.size > 0);
+            }
+
+            function reverterUm(id) {
+                showModal(`Reverter o registro ID ${id}? O arquivo será deletado do disco.`, async () => {
+                    try {
+                        const res = await fetch(`/reversao/${id}`, { method: 'DELETE' });
+                        const data = await res.json();
+
+                        if (data.success) {
+                            showToast('Registro revertido com sucesso!', 'success');
+                            loadData();
+                        } else {
+                            showToast('Erro: ' + data.message, 'error');
+                        }
+                    } catch (e) {
+                        showToast('Erro ao reverter', 'error');
+                    }
+                });
+            }
+
+            function reverterSelecionados() {
+                if (selectedIds.size === 0) return;
+
+                showModal(`Reverter ${selectedIds.size} registros? Os arquivos serão deletados do disco.`, async () => {
+                    try {
+                        const res = await fetch('/reversao/lote', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(Array.from(selectedIds))
+                        });
+                        const data = await res.json();
+
+                        showToast(`${data.sucesso} revertidos, ${data.arquivos_deletados} arquivos deletados`, 'success');
+                        selectedIds.clear();
+                        updateSelectionInfo();
+                        loadData();
+                    } catch (e) {
+                        showToast('Erro ao reverter lote', 'error');
+                    }
+                });
+            }
+
+            function showModal(message, onConfirm) {
+                document.getElementById('modalMessage').textContent = message;
+                document.getElementById('modalOverlay').classList.add('active');
+                document.getElementById('modalConfirmBtn').onclick = () => {
+                    closeModal();
+                    onConfirm();
+                };
+            }
+
+            function closeModal() {
+                document.getElementById('modalOverlay').classList.remove('active');
+            }
+
+            function showToast(message, type = 'success') {
+                const toast = document.getElementById('toast');
+                toast.textContent = message;
+                toast.className = `toast ${type} show`;
+                setTimeout(() => toast.classList.remove('show'), 4000);
+            }
+
+            function formatDate(isoString) {
+                if (!isoString) return '-';
+                const date = new Date(isoString);
+                return date.toLocaleString('pt-BR', {
+                    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit'
+                });
+            }
+
+            // Search com debounce
+            let searchTimeout;
+            document.getElementById('searchInput').addEventListener('input', () => {
+                clearTimeout(searchTimeout);
+                searchTimeout = setTimeout(loadLogs, 300);
+            });
+
+            // Carrega dados iniciais
+            loadData();
+        </script>
+    </div> <!-- Fecha container -->
+    </div> <!-- Fecha main-content -->
+
+    <script src="/static/js/tech-navbar.js"></script>
+</body>
+
+</html>

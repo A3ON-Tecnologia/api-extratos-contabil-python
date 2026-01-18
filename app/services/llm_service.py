@@ -6,7 +6,6 @@ Utiliza OpenAI para extrair informações estruturadas de documentos.
 
 import json
 import logging
-from datetime import datetime
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -26,7 +25,7 @@ REGRAS IMPORTANTES:
 2. Se uma informação não estiver clara, use null
 3. O campo "confianca" deve refletir sua certeza geral sobre a extração (0.0 a 1.0)
 4. Para CNPJ, mantenha o formato encontrado ou extraia apenas números
-5. Para datas, identifique o período de referência do documento (não a data de emissão), cuidado com Saldo Anterior, data de emissão etc. Busque datas como período analisados, Saldo Atual, etc..
+5. NÃO extraia datas - o sistema usará automaticamente o mês anterior
 
 CLASSIFICAÇÃO DE TIPO DE DOCUMENTO (Campo: tipo_documento):
 Você DEVE classificar o documento em EXATAMENTE UMA das categorias abaixo. Não use outros textos.
@@ -36,9 +35,17 @@ Você DEVE classificar o documento em EXATAMENTE UMA das categorias abaixo. Não
 - "CARTAO_CREDITO" -> Para Cartão de Crédito, Maquininhas, Antecipação, Taxas de Cartão
 - "CONSORCIO" -> Para Extratos de Consórcio
 - "EMPRESTIMO" -> Para Empréstimos, Financiamentos, Mútuos
-- "TITULOS_DESCONTADOS" -> Para Títulos Descontados ou Cheques Descontados
-- "COTA_CAPITAL" -> Para Extratos de Cota Capital
+- "CONTA_CAPITAL" -> Para Extratos de Conta Capital, Capital Social
+- "PIX" -> Para Extratos de Transferências PIX, Comprovantes PIX
+- "PAGAMENTOS" -> Para Pagamentos Realizados, Comprovantes de Pagamento
+- "DEPOSITO" -> Para Extratos de Depósito, Comprovantes de Depósito
+- "VENDAS" -> Para Histórico de Vendas, Relatório de Vendas
+- "TITULOS_CADASTRADOS" -> Para Relação de Títulos Cadastrados
 - "OUTROS" -> Se não se encaixar em nenhuma acima
+
+DICAS PARA IDENTIFICAÇÃO DE BANCOS:
+- "COOP DE CRED POUP INV SOMA PR/SC/SP" ou similar -> Banco: SICREDI
+- Sempre retorne o nome simplificado do banco (ex: "SICREDI", "BRADESCO", "ITAU", "CAIXA", "BANCO DO BRASIL")
 
 FORMATO DE RESPOSTA:
 Retorne APENAS um JSON válido, sem explicações adicionais, com a seguinte estrutura:
@@ -49,9 +56,7 @@ Retorne APENAS um JSON válido, sem explicações adicionais, com a seguinte est
     "banco": "string ou null - nome do banco (ex: Bradesco, Itaú, Banco do Brasil)",
     "agencia": "string ou null - número da agência",
     "conta": "string ou null - número da conta",
-    "tipo_documento": "string - OBRIGATÓRIO: Um dos códigos acima (ex: 'CC', 'CARTAO_CREDITO')",
-    "ano": "number ou null - ano do período (ex: 2024)",
-    "mes": "number ou null - mês do período (1-12)",
+    "tipo_documento": "string - OBRIGATÓRIO: Um dos códigos acima (ex: 'CC', 'PIX', 'PAGAMENTOS')",
     "confianca": "number - nível de confiança de 0.0 a 1.0"
 }"""
 
@@ -141,8 +146,7 @@ class LLMService:
         """
         Extrai informações com fallback para valores padrão.
         
-        Se a extração falhar, retorna um resultado com valores
-        padrão baseados na data atual.
+        Se a extração falhar, retorna um resultado com valores padrão.
         
         Args:
             text: Texto extraído do documento PDF
@@ -155,16 +159,13 @@ class LLMService:
         except Exception as e:
             logger.warning(f"Usando fallback devido a erro: {e}")
             
-            # Fallback com data atual
-            now = datetime.now()
             return LLMExtractionResult(
                 cliente_sugerido=None,
                 cnpj=None,
                 banco=None,
                 agencia=None,
                 conta=None,
-                tipo_documento="documento não identificado",
-                ano=now.year,
-                mes=now.month,
+                tipo_documento="OUTROS",
                 confianca=0.0,
             )
+

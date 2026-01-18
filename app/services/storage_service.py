@@ -39,42 +39,56 @@ class StorageService:
         """Inicializa o serviço."""
         self.settings = get_settings()
     
+    def _get_previous_month(self) -> tuple[int, int]:
+        """
+        Retorna o mês anterior ao atual.
+        
+        Returns:
+            Tupla (ano, mes) do mês anterior
+        """
+        now = datetime.now()
+        if now.month == 1:
+            return (now.year - 1, 12)
+        else:
+            return (now.year, now.month - 1)
+    
     def save_file(
         self,
         pdf_data: bytes,
         match_result: MatchResult,
-        ano: int | None,
-        mes: int | None,
         original_filename: str,
         tipo_documento: str | None = None,
         banco: str | None = None,
-    ) -> str:
+    ) -> tuple[str, int, int]:
         """
         Salva o arquivo PDF no caminho correto.
+        
+        Usa automaticamente o mês anterior ao processamento como período do documento.
+        NÃO cria pastas - todas as pastas já devem existir.
+        
+        Returns:
+            Tupla (caminho_salvo, ano, mes)
         """
-        # Usa ano/mês atual se não identificado
-        now = datetime.now()
-        ano = ano or now.year
-        mes = mes or now.month
+        # Usa automaticamente o mês anterior
+        ano, mes = self._get_previous_month()
         
         target_path = None
         
         if match_result.identificado:
-            # Validação Temporal: Apenas 12/2025 em diante
-            is_date_valid = False
+            # Tenta resolver o caminho do cliente validando existência
+            client_base_path = self._resolve_client_path(match_result.cliente)
             
-            if ano and mes:
-                if ano > 2025:
-                    is_date_valid = True
-                elif ano == 2025 and mes >= 12:
-                    is_date_valid = True
-            
-            if is_date_valid:
-                # Tenta resolver o caminho do cliente validando existência
-                client_base_path = self._resolve_client_path(match_result.cliente)
+            if client_base_path:
+                target_path = self._build_path_structure(client_base_path, ano, mes)
                 
-                if client_base_path:
-                    target_path = self._build_path_structure(client_base_path, ano, mes)
+                # Verifica se a pasta do mês existe
+                if not target_path.exists():
+                    logger.warning(
+                        f"Pasta do mês não encontrada: {target_path}. "
+                        "Salvando em NAO_IDENTIFICADOS."
+                    )
+                    target_path = None
+                else:
                     filename = self._build_filename(
                         banco,
                         tipo_documento,
@@ -82,36 +96,33 @@ class StorageService:
                         target_path,
                         original_filename
                     )
-                else:
-                    logger.warning(
-                        f"Estrutura de pastas não encontrada para cliente {match_result.cliente.cod}. "
-                        "Salvando em NAO_IDENTIFICADOS."
-                    )
             else:
                 logger.warning(
-                    f"Documento identificado ({match_result.cliente.cod}) mas com data anterior ao permitido ({mes}/{ano}). "
+                    f"Estrutura de pastas não encontrada para cliente {match_result.cliente.cod}. "
                     "Salvando em NAO_IDENTIFICADOS."
                 )
         
-        # Fallback se não identificado, path inválido ou data antiga
+        # Fallback: salva direto na pasta NAO_IDENTIFICADOS (sem subpastas)
         if not target_path:
-            target_path = self._build_unidentified_path(ano, mes)
-            path_filename = self._ensure_unique_filename(
+            target_path = self.settings.unidentified_path
+            
+            # Verifica se a pasta de não identificados existe
+            if not target_path.exists():
+                logger.error(f"Pasta NAO_IDENTIFICADOS não encontrada: {target_path}")
+                raise FileNotFoundError(f"Pasta não encontrada: {target_path}")
+            
+            filename = self._ensure_unique_filename(
                 original_filename,
                 pdf_data,
                 target_path
             )
-            filename = path_filename
         
-        # Cria apenas subdiretórios (Ano/Mês), nunca a raiz doi cliente
-        target_path.mkdir(parents=True, exist_ok=True)
-        
-        # Salva o arquivo
+        # NÃO cria pastas - apenas salva o arquivo
         full_path = target_path / filename
         full_path.write_bytes(pdf_data)
         
         logger.info(f"Arquivo salvo: {full_path}")
-        return str(full_path)
+        return (str(full_path), ano, mes)
 
     def _resolve_client_path(self, client: ClientInfo) -> Path | None:
         """
@@ -144,9 +155,23 @@ class StorageService:
         
         Estrutura: cliente/Departamento Contábil/ANO/MÊS
         Ex: cliente/Departamento Contábil/2025/12
+        
+        Aceita tanto "Departamento Contábil" quanto "Departamento Contabil" (sem acento)
         """
         # Mês como número com 2 dígitos (01, 02, ..., 12)
         mes_str = str(mes).zfill(2)
+        
+        # Tenta com acento primeiro
+        dept_path = client_base_path / "Departamento Contábil"
+        if dept_path.exists():
+            return dept_path / str(ano) / mes_str
+        
+        # Tenta sem acento
+        dept_path_sem_acento = client_base_path / "Departamento Contabil"
+        if dept_path_sem_acento.exists():
+            return dept_path_sem_acento / str(ano) / mes_str
+        
+        # Retorna o padrão com acento (mesmo que não exista, será tratado depois)
         return client_base_path / "Departamento Contábil" / str(ano) / mes_str
     
     def _build_unidentified_path(self, ano: int, mes: int) -> Path:
