@@ -1704,59 +1704,7 @@
             }
         }
 
-        async function openEditBankModal() {
-            if (selectedItems.size === 0) return;
-            document.getElementById('editBankCount').textContent = selectedItems.size;
-            document.getElementById('editBankModal').style.display = 'flex';
-        }
 
-        function closeEditBankModal() {
-            document.getElementById('editBankModal').style.display = 'none';
-        }
-
-        async function confirmEditBank() {
-            const banco = document.getElementById('selectBankInput').value;
-            if (!banco) {
-                alert('Selecione um banco!');
-                return;
-            }
-
-            const confirmBtn = document.getElementById('confirmEditBankBtn');
-            const originalText = confirmBtn.innerText;
-            confirmBtn.disabled = true;
-            confirmBtn.innerText = "Atualizando...";
-
-            try {
-                const response = await fetch('/logs/update-batch', {
-                    method: 'PATCH',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        ids: Array.from(selectedItems),
-                        updates: { banco: banco }
-                    })
-                });
-
-                const data = await response.json();
-
-                if (data.success) {
-                    addEvent('success', data.message);
-                    closeEditBankModal();
-                    selectedItems.clear();
-                    updateSelectionUI();
-                    loadHistory();
-                } else {
-                    addEvent('error', 'Erro ao atualizar: ' + data.message);
-                }
-            } catch (e) {
-                console.error("Erro na atualização em lote:", e);
-                addEvent('error', 'Erro de conexão ao atualizar.');
-            } finally {
-                confirmBtn.disabled = false;
-                confirmBtn.innerText = originalText;
-            }
-        }
-
-        }
 
         function updateBatchButton() {
             const btnRevert = document.getElementById('batchRevertBtn');
@@ -2076,57 +2024,7 @@
         </div>
     </div>
 
-    <!-- Modal de Edição de Banco -->
-    <div id="editBankModal" class="modal-overlay" style="display: none;">
-        <div class="modal-container">
-            <div class="modal-header">
-                <div class="modal-icon">🏦</div>
-                <h3>Definir Banco</h3>
-            </div>
-            <div class="modal-body">
-                <p class="modal-description">Selecione o banco para aplicar aos <strong id="editBankCount">0</strong>
-                    itens selecionados:</p>
 
-                <div class="form-group" style="margin-top: 1rem;">
-                    <label style="display: block; margin-bottom: 0.5rem; color: #aaa;">Banco:</label>
-                    <select id="selectBankInput"
-                        style="width: 100%; padding: 0.75rem; background: #2d2d2d; border: 1px solid #444; color: white; border-radius: 4px;">
-                        <option value="">Selecione...</option>
-                        <option value="SICREDI">SICREDI</option>
-                        <option value="BANCO DO BRASIL">BANCO DO BRASIL</option>
-                        <option value="ITAU">ITAU</option>
-                        <option value="BRADESCO">BRADESCO</option>
-                        <option value="CAIXA">CAIXA</option>
-                        <option value="SANTANDER">SANTANDER</option>
-                        <option value="SICOOB">SICOOB</option>
-                        <option value="VIACREDI">VIACREDI</option>
-                        <option value="SAFRA">SAFRA</option>
-                        <option value="BTG">BTG</option>
-                        <option value="INTER">INTER</option>
-                        <option value="NUBANK">NUBANK</option>
-                        <option value="ORIGINAL">ORIGINAL</option>
-                        <option value="Outros">Outros</option>
-                    </select>
-                </div>
-
-                <div class="modal-warning" style="margin-top: 1rem;">
-                    <div class="warning-icon">ℹ️</div>
-                    <div class="warning-text">
-                        Isso atualizará apenas o registro no sistema. O arquivo original não será renomeado.
-                    </div>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="modal-btn modal-btn-cancel" onclick="closeEditBankModal()">
-                    ✕ Cancelar
-                </button>
-                <button class="modal-btn modal-btn-confirm" id="confirmEditBankBtn" onclick="confirmEditBank()"
-                    style="background: linear-gradient(135deg, #6366f1, #4f46e5);">
-                    💾 Salvar Alterações
-                </button>
-            </div>
-        </div>
-    </div>
 
     <script src="/static/js/tech-navbar.js"></script>
 </body>
