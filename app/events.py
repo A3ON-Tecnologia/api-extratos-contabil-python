@@ -187,10 +187,19 @@ class EventManager:
         ))
 
 
-# Instância global do gerenciador de eventos
+# Instância global do gerenciador de eventos (PRODUÇÃO)
 event_manager = EventManager()
+
+# Instância global do gerenciador de eventos (TESTE)
+test_event_manager = EventManager()
 
 
 def get_event_manager() -> EventManager:
-    """Retorna a instância global do gerenciador de eventos."""
+    """Retorna a instância global do gerenciador de eventos de PRODUÇÃO."""
     return event_manager
+
+
+def get_test_event_manager() -> EventManager:
+    """Retorna a instância global do gerenciador de eventos de TESTE."""
+    return test_event_manager
+

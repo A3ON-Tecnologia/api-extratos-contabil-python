@@ -324,29 +324,79 @@
             font-family: monospace;
         }
 
-        /* Delete Button */
-        .extratos-table .delete-btn {
+        /* Revert Button */
+        .extratos-table .revert-btn {
             opacity: 0;
-            background: none;
-            border: none;
-            color: var(--accent-error);
+            background: rgba(249, 115, 22, 0.15);
+            border: 1px solid #f97316;
+            color: #f97316;
             cursor: pointer;
-            font-size: 1rem;
-            padding: 0.25rem;
-            transition: opacity 0.2s, transform 0.2s;
+            font-size: 0.65rem;
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+            transition: all 0.2s;
+            white-space: nowrap;
         }
 
-        .extratos-table tr:hover .delete-btn {
+        .extratos-table tr:hover .revert-btn {
             opacity: 1;
         }
 
-        .extratos-table .delete-btn:hover {
-            transform: scale(1.2);
+        .extratos-table .revert-btn:hover {
+            background: #f97316;
+            color: white;
+            transform: scale(1.05);
         }
 
         .extratos-table .action-col {
+            width: 80px;
+            text-align: center;
+        }
+
+        /* Checkbox Column */
+        .extratos-table .checkbox-col {
             width: 40px;
             text-align: center;
+        }
+
+        .extratos-table input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: #f97316;
+        }
+
+        .extratos-table tr.selected {
+            background: rgba(249, 115, 22, 0.1) !important;
+        }
+
+        /* Batch Revert Button */
+        .batch-revert-btn {
+            display: none;
+            align-items: center;
+            gap: 8px;
+            padding: 0.5rem 1rem;
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            border: none;
+            border-radius: 8px;
+            color: white;
+            font-size: 0.8rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s;
+            margin-left: 1rem;
+        }
+
+        .batch-revert-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(249, 115, 22, 0.3);
+        }
+
+        .batch-revert-btn .count {
+            background: rgba(255, 255, 255, 0.2);
+            padding: 0.1rem 0.5rem;
+            border-radius: 10px;
+            font-size: 0.75rem;
         }
 
         /* Status Badge */
@@ -753,6 +803,9 @@
                                 <button class="filter-btn" onclick="filterExtratos('success')">✅ Sucesso</button>
                                 <button class="filter-btn" onclick="filterExtratos('warning')">⚠️ Não ID</button>
                                 <button class="filter-btn" onclick="filterExtratos('error')">❌ Falha</button>
+                                <button class="batch-revert-btn" id="batchRevertBtn" onclick="openBatchRevertModal()">
+                                    🔄 Reverter Selecionados <span class="count" id="selectedCount">0</span>
+                                </button>
                             </div>
                             <div class="filter-group" style="flex: 1; justify-content: flex-end;">
                                 <input type="text" id="searchName" class="filter-input" placeholder="Buscar Empresa..."
@@ -781,6 +834,10 @@
                         <table class="extratos-table" id="extratosTable">
                             <thead>
                                 <tr>
+                                    <th class="checkbox-col">
+                                        <input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll()"
+                                            title="Selecionar todos">
+                                    </th>
                                     <th class="action-col"></th>
                                     <th>Data/Hora</th>
                                     <th>Empresa</th>
@@ -843,11 +900,262 @@
             </div>
         </div>
 
+        <!-- Modal de Confirmação de Reversão -->
+        <div id="revertModal" class="modal-overlay" style="display: none;">
+            <div class="modal-container">
+                <div class="modal-header">
+                    <div class="modal-icon">🔄</div>
+                    <h3>Reverter Processamento</h3>
+                </div>
+                <div class="modal-body">
+                    <p class="modal-description">Tem certeza que deseja reverter este processamento?</p>
+
+                    <div class="modal-info-card">
+                        <div class="info-row">
+                            <span class="info-label">📄 Arquivo:</span>
+                            <span class="info-value" id="modalFileName">-</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">🏢 Cliente:</span>
+                            <span class="info-value" id="modalClientName">-</span>
+                        </div>
+                        <div class="info-row">
+                            <span class="info-label">🏦 Banco:</span>
+                            <span class="info-value" id="modalBankName">-</span>
+                        </div>
+                    </div>
+
+                    <div class="modal-warning">
+                        <div class="warning-icon">⚠️</div>
+                        <div class="warning-text">
+                            <strong>Esta ação irá:</strong>
+                            <ul>
+                                <li>Deletar o registro do banco de dados</li>
+                                <li>Deletar o arquivo físico do disco</li>
+                                <li>Registrar no histórico de reversões</li>
+                            </ul>
+                            <p class="warning-note">Esta ação não pode ser desfeita!</p>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="modal-btn modal-btn-cancel" onclick="closeRevertModal()">
+                        ✕ Cancelar
+                    </button>
+                    <button class="modal-btn modal-btn-confirm" id="confirmRevertBtn">
+                        🔄 Confirmar Reversão
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <style>
+            /* Modal Styles */
+            .modal-overlay {
+                position: fixed;
+                top: 0;
+                left: 0;
+                width: 100%;
+                height: 100%;
+                background: rgba(0, 0, 0, 0.7);
+                backdrop-filter: blur(5px);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                z-index: 1000;
+                opacity: 0;
+                animation: fadeIn 0.2s ease forwards;
+            }
+
+            @keyframes fadeIn {
+                to {
+                    opacity: 1;
+                }
+            }
+
+            .modal-container {
+                background: linear-gradient(145deg, #1a1a24, #12121a);
+                border: 1px solid rgba(249, 115, 22, 0.3);
+                border-radius: 16px;
+                width: 90%;
+                max-width: 480px;
+                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5),
+                    0 0 40px rgba(249, 115, 22, 0.1);
+                transform: scale(0.9);
+                animation: scaleIn 0.2s ease forwards;
+            }
+
+            @keyframes scaleIn {
+                to {
+                    transform: scale(1);
+                }
+            }
+
+            .modal-header {
+                display: flex;
+                align-items: center;
+                gap: 12px;
+                padding: 1.25rem 1.5rem;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+            .modal-icon {
+                font-size: 1.75rem;
+                animation: rotate 2s linear infinite;
+            }
+
+            @keyframes rotate {
+                from {
+                    transform: rotate(0deg);
+                }
+
+                to {
+                    transform: rotate(360deg);
+                }
+            }
+
+            .modal-header h3 {
+                margin: 0;
+                font-size: 1.25rem;
+                font-weight: 600;
+                color: #f97316;
+            }
+
+            .modal-body {
+                padding: 1.5rem;
+            }
+
+            .modal-description {
+                margin: 0 0 1rem 0;
+                color: var(--text-primary);
+                font-size: 1rem;
+            }
+
+            .modal-info-card {
+                background: rgba(0, 0, 0, 0.3);
+                border: 1px solid rgba(255, 255, 255, 0.1);
+                border-radius: 12px;
+                padding: 1rem;
+                margin-bottom: 1rem;
+            }
+
+            .info-row {
+                display: flex;
+                justify-content: space-between;
+                padding: 0.5rem 0;
+                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+            }
+
+            .info-row:last-child {
+                border-bottom: none;
+            }
+
+            .info-label {
+                color: var(--text-secondary);
+                font-size: 0.875rem;
+            }
+
+            .info-value {
+                color: var(--text-primary);
+                font-size: 0.875rem;
+                font-weight: 500;
+                max-width: 250px;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+            }
+
+            .modal-warning {
+                display: flex;
+                gap: 12px;
+                background: rgba(239, 68, 68, 0.1);
+                border: 1px solid rgba(239, 68, 68, 0.3);
+                border-radius: 12px;
+                padding: 1rem;
+            }
+
+            .warning-icon {
+                font-size: 1.5rem;
+                flex-shrink: 0;
+            }
+
+            .warning-text {
+                color: #fca5a5;
+                font-size: 0.875rem;
+            }
+
+            .warning-text strong {
+                color: #ef4444;
+            }
+
+            .warning-text ul {
+                margin: 0.5rem 0;
+                padding-left: 1.25rem;
+            }
+
+            .warning-text li {
+                margin: 0.25rem 0;
+            }
+
+            .warning-note {
+                margin: 0.75rem 0 0 0;
+                font-weight: 600;
+                color: #ef4444;
+            }
+
+            .modal-footer {
+                display: flex;
+                justify-content: flex-end;
+                gap: 12px;
+                padding: 1rem 1.5rem;
+                border-top: 1px solid rgba(255, 255, 255, 0.1);
+            }
+
+            .modal-btn {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+                padding: 0.75rem 1.5rem;
+                border-radius: 8px;
+                font-size: 0.875rem;
+                font-weight: 500;
+                cursor: pointer;
+                transition: all 0.2s ease;
+                border: none;
+            }
+
+            .modal-btn-cancel {
+                background: rgba(255, 255, 255, 0.1);
+                color: var(--text-secondary);
+            }
+
+            .modal-btn-cancel:hover {
+                background: rgba(255, 255, 255, 0.2);
+                color: var(--text-primary);
+            }
+
+            .modal-btn-confirm {
+                background: linear-gradient(135deg, #f97316, #ea580c);
+                color: white;
+            }
+
+            .modal-btn-confirm:hover {
+                background: linear-gradient(135deg, #fb923c, #f97316);
+                transform: translateY(-2px);
+                box-shadow: 0 5px 20px rgba(249, 115, 22, 0.3);
+            }
+
+            .modal-btn-confirm:active {
+                transform: translateY(0);
+            }
+        </style>
+
         <script>
             // Estado
             let processedExtratos = [];
             let currentFilter = 'all';
             let currentProcessingFiles = {};
+            let selectedItems = new Set();  // IDs selecionados para reversão em lote
 
             // WebSocket
             let ws = null;
@@ -1031,6 +1339,7 @@
                     status: details?.status || 'SUCESSO',
                     metodo: details?.metodo || '-',
                     path: details?.path || '-',
+                    logId: details?.log_id || null,  // ID do log no banco para reversão
                     statusClass: details?.status === 'SUCESSO' ? 'success' :
                         (details?.status === 'FALHA' ? 'error' : 'warning')
                 };
@@ -1111,10 +1420,21 @@
                 tbody.innerHTML = filtered.map((e, index) => {
                     // Encontra o índice real no array original para poder deletar corretamente
                     const realIndex = processedExtratos.indexOf(e);
+                    const canRevert = e.logId && e.status === 'SUCESSO';
+                    const isSelected = selectedItems.has(e.logId);
                     return `
-                <tr data-status="${e.statusClass}" data-index="${realIndex}">
+                <tr data-status="${e.statusClass}" data-index="${realIndex}" class="${isSelected ? 'selected' : ''}">
+                    <td class="checkbox-col">
+                        ${canRevert ?
+                            `<input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSelection(${e.logId}, ${realIndex})" data-logid="${e.logId}">` :
+                            ''
+                        }
+                    </td>
                     <td class="action-col">
-                        <button class="delete-btn" onclick="deleteExtrato(${realIndex})" title="Remover da lista">❌</button>
+                        ${canRevert ?
+                            `<button class="revert-btn" onclick="reverterExtrato(${e.logId}, ${realIndex})" title="Reverter processamento e deletar arquivo">🔄 Reverter</button>` :
+                            `<span style="color: var(--text-muted); font-size: 0.65rem;">-</span>`
+                        }
                     </td>
                     <td class="hora">${e.hora}</td>
                     <td class="empresa" title="${e.empresa}">${e.empresa}</td>
@@ -1154,6 +1474,234 @@
                 if (index >= 0 && index < processedExtratos.length) {
                     processedExtratos.splice(index, 1);
                     renderExtratosTable();
+                }
+            }
+
+            // Variáveis do modal de reversão
+            let pendingRevert = { logId: null, index: null };
+
+            function openRevertModal(logId, index) {
+                const extrato = processedExtratos[index];
+                if (!extrato) return;
+
+                // Preenche os dados no modal
+                document.getElementById('modalFileName').textContent = extrato.arquivo || '-';
+                document.getElementById('modalClientName').textContent = extrato.empresa || '-';
+                document.getElementById('modalBankName').textContent = extrato.banco || '-';
+
+                // Salva os dados pendentes
+                pendingRevert = { logId, index };
+
+                // Mostra o modal
+                document.getElementById('revertModal').style.display = 'flex';
+
+                // Configura o botão de confirmar
+                document.getElementById('confirmRevertBtn').onclick = () => executeRevert();
+            }
+
+            function closeRevertModal() {
+                document.getElementById('revertModal').style.display = 'none';
+                pendingRevert = { logId: null, index: null };
+            }
+
+            async function executeRevert() {
+                const { logId, index } = pendingRevert;
+                if (!logId) return;
+
+                // Desabilita o botão durante a execução
+                const confirmBtn = document.getElementById('confirmRevertBtn');
+                const originalText = confirmBtn.innerHTML;
+                confirmBtn.innerHTML = '⏳ Revertendo...';
+                confirmBtn.disabled = true;
+
+                try {
+                    const response = await fetch(`/reversao/${logId}`, {
+                        method: 'DELETE'
+                    });
+                    const data = await response.json();
+
+                    if (data.success) {
+                        // Pega o status do extrato antes de remover
+                        const extrato = processedExtratos[index];
+                        const wasSuccess = extrato && extrato.statusClass === 'success';
+
+                        // Remove da lista local
+                        if (index >= 0 && index < processedExtratos.length) {
+                            processedExtratos.splice(index, 1);
+                            renderExtratosTable();
+                        }
+
+                        // Atualiza estatísticas locais
+                        if (wasSuccess) {
+                            const statSuccess = document.getElementById('statSuccess');
+                            const statTotal = document.getElementById('statTotal');
+                            if (statSuccess) {
+                                statSuccess.textContent = Math.max(0, parseInt(statSuccess.textContent) - 1);
+                            }
+                            if (statTotal) {
+                                statTotal.textContent = Math.max(0, parseInt(statTotal.textContent) - 1);
+                            }
+                        }
+
+                        // Fecha o modal
+                        closeRevertModal();
+
+                        // Mostra mensagem de sucesso
+                        addEvent('success', `Reversão concluída: ${data.cliente || 'Registro'} - Arquivo ${data.arquivo_deletado ? 'deletado' : 'não encontrado'}`);
+                    } else {
+                        addEvent('error', `Erro na reversão: ${data.message}`);
+                        closeRevertModal();
+                        alert('Erro ao reverter: ' + data.message);
+                    }
+                } catch (error) {
+                    console.error('Erro ao reverter:', error);
+                    addEvent('error', `Erro na reversão: ${error.message}`);
+                    closeRevertModal();
+                    alert('Erro ao conectar com o servidor');
+                } finally {
+                    confirmBtn.innerHTML = originalText;
+                    confirmBtn.disabled = false;
+                }
+            }
+
+            // Função chamada pelo botão na tabela
+            function reverterExtrato(logId, index) {
+                openRevertModal(logId, index);
+            }
+
+            // Fecha modal ao clicar fora
+            document.getElementById('revertModal').addEventListener('click', (e) => {
+                if (e.target.id === 'revertModal') {
+                    closeRevertModal();
+                }
+            });
+
+            // Fecha modal com ESC
+            document.addEventListener('keydown', (e) => {
+                if (e.key === 'Escape' && document.getElementById('revertModal').style.display === 'flex') {
+                    closeRevertModal();
+                }
+            });
+
+            // ============================================
+            // FUNÇÕES DE SELEÇÃO EM LOTE
+            // ============================================
+
+            function toggleSelection(logId, index) {
+                if (selectedItems.has(logId)) {
+                    selectedItems.delete(logId);
+                } else {
+                    selectedItems.add(logId);
+                }
+                updateBatchButton();
+                renderExtratosTable();
+            }
+
+            function toggleSelectAll() {
+                const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+                const allRevertable = processedExtratos.filter(e => e.logId && e.status === 'SUCESSO');
+
+                if (selectAllCheckbox.checked) {
+                    // Seleciona todos que podem ser revertidos
+                    allRevertable.forEach(e => selectedItems.add(e.logId));
+                } else {
+                    // Desmarca todos
+                    selectedItems.clear();
+                }
+                updateBatchButton();
+                renderExtratosTable();
+            }
+
+            function updateBatchButton() {
+                const btn = document.getElementById('batchRevertBtn');
+                const count = document.getElementById('selectedCount');
+                count.textContent = selectedItems.size;
+
+                if (selectedItems.size > 0) {
+                    btn.style.display = 'flex';
+                } else {
+                    btn.style.display = 'none';
+                }
+            }
+
+            function openBatchRevertModal() {
+                if (selectedItems.size === 0) return;
+
+                // Atualiza o modal para mostrar quantidade
+                document.getElementById('modalFileName').textContent = `${selectedItems.size} arquivo(s) selecionado(s)`;
+                document.getElementById('modalClientName').textContent = 'Múltiplos clientes';
+                document.getElementById('modalBankName').textContent = '-';
+
+                // Mostra o modal
+                document.getElementById('revertModal').style.display = 'flex';
+
+                // Configura o botão de confirmar para reversão em lote
+                document.getElementById('confirmRevertBtn').onclick = () => executeBatchRevert();
+            }
+
+            async function executeBatchRevert() {
+                if (selectedItems.size === 0) return;
+
+                // Desabilita o botão durante a execução
+                const confirmBtn = document.getElementById('confirmRevertBtn');
+                const originalText = confirmBtn.innerHTML;
+                confirmBtn.innerHTML = '⏳ Revertendo...';
+                confirmBtn.disabled = true;
+
+                const logIds = Array.from(selectedItems);
+                let successCount = 0;
+                let errorCount = 0;
+
+                try {
+                    // Usa o endpoint de reversão em lote
+                    const response = await fetch('/reversao/lote', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ log_ids: logIds })
+                    });
+                    const data = await response.json();
+
+                    if (data.success) {
+                        successCount = data.revertidos || 0;
+                        errorCount = data.erros || 0;
+
+                        // Remove os itens revertidos da lista local
+                        processedExtratos = processedExtratos.filter(e => !selectedItems.has(e.logId));
+
+                        // Limpa a seleção
+                        selectedItems.clear();
+                        document.getElementById('selectAllCheckbox').checked = false;
+                        updateBatchButton();
+                        renderExtratosTable();
+
+                        // Atualiza estatísticas
+                        const statSuccess = document.getElementById('statSuccess');
+                        const statTotal = document.getElementById('statTotal');
+                        if (statSuccess) {
+                            statSuccess.textContent = Math.max(0, parseInt(statSuccess.textContent) - successCount);
+                        }
+                        if (statTotal) {
+                            statTotal.textContent = Math.max(0, parseInt(statTotal.textContent) - successCount);
+                        }
+
+                        // Fecha o modal
+                        closeRevertModal();
+
+                        // Mostra mensagem de sucesso
+                        addEvent('success', `Reversão em lote: ${successCount} revertido(s), ${errorCount} erro(s)`);
+                    } else {
+                        addEvent('error', `Erro na reversão em lote: ${data.message}`);
+                        closeRevertModal();
+                        alert('Erro ao reverter: ' + data.message);
+                    }
+                } catch (error) {
+                    console.error('Erro ao reverter em lote:', error);
+                    addEvent('error', `Erro na reversão em lote: ${error.message}`);
+                    closeRevertModal();
+                    alert('Erro ao conectar com o servidor');
+                } finally {
+                    confirmBtn.innerHTML = originalText;
+                    confirmBtn.disabled = false;
                 }
             }
 
@@ -1271,20 +1819,23 @@
 
                     // Mapeia para o formato usado na tabela
                     const mappedHistory = history.map(item => ({
-                        filename: item.filename,
-                        originalName: item.filename,
-                        cliente: item.cliente,
-                        status: item.status,
-                        formattedDate: item.data_hora_formatada,
-                        savedPath: item.full_path,
-                        periodo: item.periodo,
-                        // Campos auxiliares para filtros
-                        banco: item.tipo // Usando tipo como info extra já que banco não tem no log simples
+                        hora: item.data_hora_formatada || '-',
+                        empresa: item.cliente || 'NÃO IDENTIFICADO',
+                        arquivo: item.filename || '-',
+                        tipo: item.tipo || '-',
+                        banco: item.banco || '-',
+                        ano: item.periodo ? item.periodo.split('/')[1] : '-',
+                        mes: item.periodo ? item.periodo.split('/')[0] : '-',
+                        status: item.status || '-',
+                        path: item.full_path || '-',
+                        logId: item.log_id || null,  // ID para reversão
+                        statusClass: item.status === 'SUCESSO' ? 'success' :
+                            (item.status === 'FALHA' ? 'error' : 'warning')
                     }));
 
-                    // Substitui ou adiciona ao início? Como é histórico, substitui o estado inicial.
+                    // Substitui o estado inicial com os dados do banco
                     processedExtratos = mappedHistory;
-                    renderExtratos(currentFilter);
+                    renderExtratosTable();
 
                     // Atualiza contadores baseados no histórico
                     updateStatsFromHistory(mappedHistory);

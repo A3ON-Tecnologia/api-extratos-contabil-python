@@ -523,60 +523,58 @@
 
             <div class="stats-grid">
                 <div class="stat-card">
-                    <div class="icon">📊</div>
-                    <div class="value" id="statTotal">0</div>
-                    <div class="label">Total Registros</div>
+                    <div class="icon">📜</div>
+                    <div class="value" id="statTotalReversoes">0</div>
+                    <div class="label">Total Reversões</div>
                 </div>
                 <div class="stat-card success">
-                    <div class="icon">✅</div>
-                    <div class="value" id="statSucesso">0</div>
-                    <div class="label">Sucesso</div>
+                    <div class="icon">🗑️</div>
+                    <div class="value" id="statArquivosDeletados">0</div>
+                    <div class="label">Arquivos Deletados</div>
                 </div>
                 <div class="stat-card warning">
-                    <div class="icon">⚠️</div>
-                    <div class="value" id="statNaoId">0</div>
-                    <div class="label">Não Identificado</div>
-                </div>
-                <div class="stat-card error">
                     <div class="icon">📁</div>
-                    <div class="value" id="statArquivos">0</div>
-                    <div class="label">Arquivos no Disco</div>
+                    <div class="value" id="statArquivosNaoEncontrados">0</div>
+                    <div class="label">Não Encontrados</div>
+                </div>
+                <div class="stat-card">
+                    <div class="icon">📅</div>
+                    <div class="value" id="statUltimaReversao">-</div>
+                    <div class="label">Última Reversão</div>
                 </div>
             </div>
 
-            <div class="actions-bar">
-                <input type="text" class="search-input" id="searchInput" placeholder="🔍 Buscar por cliente...">
-                <button class="btn btn-primary" onclick="loadData()">🔄 Atualizar</button>
-                <a href="/monitor" class="btn btn-outline">📺 Monitor</a>
+            <!-- Filtros e Busca -->
+            <div class="filters-container">
+                <div class="filter-group">
+                    <input type="text" class="filter-input" id="searchCliente" placeholder="🔍 Buscar cliente...">
+                    <input type="text" class="filter-input" id="searchBanco" placeholder="🏦 Banco...">
+                    <select class="filter-input" id="filterTipo">
+                        <option value="">Todos os tipos</option>
+                        <option value="individual">Individual</option>
+                        <option value="lote">Em Lote</option>
+                        <option value="ultimos_n">Últimos N</option>
+                    </select>
+                    <select class="filter-input" id="filterArquivoDeletado">
+                        <option value="">Arquivo deletado?</option>
+                        <option value="true">Sim</option>
+                        <option value="false">Não</option>
+                    </select>
+                </div>
+                <div class="filter-group">
+                    <button class="btn btn-primary" onclick="loadHistorico()">🔍 Buscar</button>
+                    <button class="btn btn-outline" onclick="clearFilters()">🧹 Limpar</button>
+                    <a href="/monitor" class="btn btn-outline">📺 Monitor</a>
+                </div>
             </div>
 
-            <div class="selection-info" id="selectionInfo">
-                <span><span class="count" id="selectedCount">0</span> selecionados</span>
-                <button class="btn btn-danger" onclick="reverterSelecionados()">🗑️ Reverter Selecionados</button>
-                <button class="btn btn-outline" onclick="clearSelection()">Limpar Seleção</button>
-            </div>
-
+            <!-- Histórico de Reversões -->
             <div class="table-container">
                 <div class="table-header">
-                    <h2>📋 Processamentos</h2>
-                </div>
-                <div id="tableContent">
-                    <div class="empty-state">
-                        <div class="icon">📭</div>
-                        <p>Nenhum processamento encontrado</p>
-                    </div>
-                </div>
-            </div>
-
-            <!-- Seção de Histórico de Reversões -->
-            <div class="table-container" style="margin-top: 2rem;">
-                <div class="table-header">
-                    <h2>📜 Histórico de Reversões <span class="count" id="historicoCount">0</span></h2>
-                    <div style="display: flex; gap: 0.5rem; align-items: center;">
-                        <span style="font-size: 0.8rem; color: var(--text-muted);">
-                            Total: <strong id="statTotalReversoes">0</strong> |
-                            Arquivos Deletados: <strong id="statArquivosDeletados">0</strong>
-                        </span>
+                    <h2>📜 Histórico de Reversões</h2>
+                    <div class="pagination-info">
+                        Mostrando <span id="showingStart">0</span>-<span id="showingEnd">0</span> de <span
+                            id="totalRecords">0</span>
                     </div>
                 </div>
                 <div id="historicoContent">
@@ -585,47 +583,239 @@
                         <p>Nenhuma reversão realizada ainda</p>
                     </div>
                 </div>
+                <!-- Paginação -->
+                <div class="pagination" id="paginationControls">
+                    <button class="page-btn" id="prevPage" onclick="changePage(-1)" disabled>◀ Anterior</button>
+                    <div class="page-numbers" id="pageNumbers"></div>
+                    <button class="page-btn" id="nextPage" onclick="changePage(1)">Próximo ▶</button>
+                </div>
             </div>
         </div>
 
-        <script>
-            let allLogs = [];
-            let selectedIds = new Set();
+        <style>
+            /* Filters */
+            .filters-container {
+                display: flex;
+                flex-wrap: wrap;
+                gap: 1rem;
+                margin-bottom: 1.5rem;
+                justify-content: space-between;
+                align-items: center;
+            }
 
+            .filter-group {
+                display: flex;
+                gap: 0.5rem;
+                flex-wrap: wrap;
+                align-items: center;
+            }
+
+            .filter-input {
+                padding: 0.5rem 1rem;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                color: var(--text-primary);
+                font-size: 0.85rem;
+                min-width: 150px;
+            }
+
+            .filter-input:focus {
+                outline: none;
+                border-color: var(--accent-revert);
+            }
+
+            /* Pagination */
+            .pagination {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                gap: 0.5rem;
+                padding: 1rem;
+                border-top: 1px solid var(--border);
+            }
+
+            .page-btn {
+                padding: 0.5rem 1rem;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                color: var(--text-secondary);
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+
+            .page-btn:hover:not(:disabled) {
+                background: var(--accent-revert);
+                color: white;
+                border-color: var(--accent-revert);
+            }
+
+            .page-btn:disabled {
+                opacity: 0.5;
+                cursor: not-allowed;
+            }
+
+            .page-numbers {
+                display: flex;
+                gap: 0.25rem;
+            }
+
+            .page-number {
+                width: 36px;
+                height: 36px;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                background: var(--bg-secondary);
+                border: 1px solid var(--border);
+                border-radius: 8px;
+                color: var(--text-secondary);
+                cursor: pointer;
+                transition: all 0.2s;
+            }
+
+            .page-number:hover {
+                border-color: var(--accent-revert);
+                color: var(--accent-revert);
+            }
+
+            .page-number.active {
+                background: var(--accent-revert);
+                color: white;
+                border-color: var(--accent-revert);
+            }
+
+            .pagination-info {
+                font-size: 0.8rem;
+                color: var(--text-muted);
+            }
+        </style>
+
+        <script>
+            // Estado da paginação
+            let allReversoes = [];
+            let currentPage = 1;
+            const itemsPerPage = 10;
+            let totalPages = 1;
+
+            // Inicialização
             async function loadData() {
-                await Promise.all([loadStats(), loadLogs(), loadHistorico()]);
+                await Promise.all([loadStats(), loadHistorico()]);
             }
 
             async function loadStats() {
                 try {
-                    const res = await fetch('/reversao/stats');
+                    const res = await fetch('/reversao/historico/stats');
                     const data = await res.json();
-                    document.getElementById('statTotal').textContent = data.total || 0;
-                    document.getElementById('statSucesso').textContent = data.sucesso || 0;
-                    document.getElementById('statNaoId').textContent = data.nao_identificado || 0;
-                    document.getElementById('statArquivos').textContent = data.arquivos_existentes || 0;
-                    document.getElementById('statTotalReversoes').textContent = data.total_reversoes || 0;
+                    document.getElementById('statTotalReversoes').textContent = data.total || 0;
+                    document.getElementById('statArquivosDeletados').textContent = data.arquivos_deletados || 0;
+                    document.getElementById('statArquivosNaoEncontrados').textContent = data.arquivos_nao_deletados || 0;
+
+                    // Última reversão
+                    if (data.ultima_reversao) {
+                        document.getElementById('statUltimaReversao').textContent = formatDateShort(data.ultima_reversao);
+                    }
                 } catch (e) {
                     console.error('Erro:', e);
                 }
             }
 
             async function loadHistorico() {
+                // Coleta filtros
+                const cliente = document.getElementById('searchCliente').value.trim();
+                const banco = document.getElementById('searchBanco').value.trim();
+                const tipo = document.getElementById('filterTipo').value;
+                const arquivoDeletado = document.getElementById('filterArquivoDeletado').value;
+
+                // Monta query params
+                const params = new URLSearchParams();
+                params.append('limit', 500);  // Busca mais para paginar no frontend
+                if (cliente) params.append('cliente', cliente);
+                if (banco) params.append('banco', banco);
+                if (tipo) params.append('tipo', tipo);
+                if (arquivoDeletado) params.append('arquivo_deletado', arquivoDeletado);
+
                 try {
-                    const res = await fetch('/reversao/historico?limit=50');
+                    const res = await fetch(`/reversao/historico?${params.toString()}`);
                     const data = await res.json();
 
-                    document.getElementById('historicoCount').textContent = data.total || 0;
+                    allReversoes = data.reversoes || [];
+                    totalPages = Math.max(1, Math.ceil(allReversoes.length / itemsPerPage));
+                    currentPage = 1;
 
-                    // Carrega estatísticas de reversões
-                    const statsRes = await fetch('/reversao/historico/stats');
-                    const statsData = await statsRes.json();
-                    document.getElementById('statArquivosDeletados').textContent = statsData.arquivos_deletados || 0;
+                    document.getElementById('totalRecords').textContent = allReversoes.length;
 
-                    renderHistorico(data.reversoes || []);
+                    renderPage();
+                    renderPagination();
                 } catch (e) {
                     console.error('Erro ao carregar histórico:', e);
                 }
+            }
+
+            function renderPage() {
+                const startIdx = (currentPage - 1) * itemsPerPage;
+                const endIdx = Math.min(startIdx + itemsPerPage, allReversoes.length);
+                const pageData = allReversoes.slice(startIdx, endIdx);
+
+                // Atualiza info de paginação
+                document.getElementById('showingStart').textContent = allReversoes.length > 0 ? startIdx + 1 : 0;
+                document.getElementById('showingEnd').textContent = endIdx;
+
+                renderHistorico(pageData);
+            }
+
+            function renderPagination() {
+                const pageNumbers = document.getElementById('pageNumbers');
+                const prevBtn = document.getElementById('prevPage');
+                const nextBtn = document.getElementById('nextPage');
+
+                // Habilita/desabilita botões
+                prevBtn.disabled = currentPage <= 1;
+                nextBtn.disabled = currentPage >= totalPages;
+
+                // Gera números de página (máximo 5 visíveis)
+                let pages = [];
+                if (totalPages <= 5) {
+                    pages = Array.from({ length: totalPages }, (_, i) => i + 1);
+                } else {
+                    if (currentPage <= 3) {
+                        pages = [1, 2, 3, 4, 5];
+                    } else if (currentPage >= totalPages - 2) {
+                        pages = [totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+                    } else {
+                        pages = [currentPage - 2, currentPage - 1, currentPage, currentPage + 1, currentPage + 2];
+                    }
+                }
+
+                pageNumbers.innerHTML = pages.map(p => `
+                    <div class="page-number ${p === currentPage ? 'active' : ''}" onclick="goToPage(${p})">${p}</div>
+                `).join('');
+            }
+
+            function changePage(delta) {
+                const newPage = currentPage + delta;
+                if (newPage >= 1 && newPage <= totalPages) {
+                    currentPage = newPage;
+                    renderPage();
+                    renderPagination();
+                }
+            }
+
+            function goToPage(page) {
+                if (page >= 1 && page <= totalPages) {
+                    currentPage = page;
+                    renderPage();
+                    renderPagination();
+                }
+            }
+
+            function clearFilters() {
+                document.getElementById('searchCliente').value = '';
+                document.getElementById('searchBanco').value = '';
+                document.getElementById('filterTipo').value = '';
+                document.getElementById('filterArquivoDeletado').value = '';
+                loadHistorico();
             }
 
             function renderHistorico(reversoes) {
@@ -681,174 +871,15 @@
                 `;
             }
 
-            async function loadLogs() {
-                const search = document.getElementById('searchInput').value;
-
-                try {
-                    const url = `/reversao/listar?limit=100${search ? '&cliente=' + encodeURIComponent(search) : ''}`;
-                    const res = await fetch(url);
-                    const data = await res.json();
-
-                    allLogs = data.logs || [];
-                    renderTable();
-                } catch (e) {
-                    console.error('Erro:', e);
-                }
-            }
-
-            function renderTable() {
-                const container = document.getElementById('tableContent');
-
-                if (allLogs.length === 0) {
-                    container.innerHTML = `
-                    <div class="empty-state">
-                        <div class="icon">📭</div>
-                        <p>Nenhum processamento encontrado</p>
-                    </div>
-                `;
-                    return;
-                }
-
-                const rows = allLogs.map(log => {
-                    const statusClass = log.status === 'SUCESSO' ? 'success' : (log.status === 'FALHA' ? 'error' : 'warning');
-                    const checked = selectedIds.has(log.id) ? 'checked' : '';
-
-                    return `
-                    <tr>
-                        <td class="checkbox-cell">
-                            <input type="checkbox" ${checked} onchange="toggleSelect(${log.id})">
-                        </td>
-                        <td>${log.id}</td>
-                        <td style="font-size: 0.75rem; color: var(--text-muted);">${formatDate(log.processado_em)}</td>
-                        <td class="cliente-cell" title="${log.cliente_nome || 'N/A'}">${log.cliente_nome || 'N/A'}</td>
-                        <td>
-                            <span class="tag tag-tipo">${log.tipo_documento || '-'}</span>
-                            <span class="tag tag-banco">${log.banco || '-'}</span>
-                        </td>
-                        <td>${log.mes || '-'}/${log.ano || '-'}</td>
-                        <td><span class="status-badge ${statusClass}">${log.status}</span></td>
-                        <td><span class="exists-badge ${log.arquivo_existe ? 'yes' : 'no'}">${log.arquivo_existe ? 'SIM' : 'NAO'}</span></td>
-                        <td>
-                            <button class="action-btn" onclick="reverterUm(${log.id})">🗑️ Reverter</button>
-                        </td>
-                    </tr>
-                `;
-                }).join('');
-
-                container.innerHTML = `
-                <table>
-                    <thead>
-                        <tr>
-                            <th class="checkbox-cell"><input type="checkbox" id="selectAll" onchange="toggleSelectAll()"></th>
-                            <th>ID</th>
-                            <th>Data</th>
-                            <th>Cliente</th>
-                            <th>Tipo / Banco</th>
-                            <th>Período</th>
-                            <th>Status</th>
-                            <th>Arquivo</th>
-                            <th>Ação</th>
-                        </tr>
-                    </thead>
-                    <tbody>${rows}</tbody>
-                </table>
-            `;
-            }
-
-            function toggleSelect(id) {
-                if (selectedIds.has(id)) {
-                    selectedIds.delete(id);
-                } else {
-                    selectedIds.add(id);
-                }
-                updateSelectionInfo();
-            }
-
-            function toggleSelectAll() {
-                const selectAll = document.getElementById('selectAll').checked;
-                if (selectAll) {
-                    allLogs.forEach(log => selectedIds.add(log.id));
-                } else {
-                    selectedIds.clear();
-                }
-                renderTable();
-                updateSelectionInfo();
-            }
-
-            function clearSelection() {
-                selectedIds.clear();
-                renderTable();
-                updateSelectionInfo();
-            }
-
-            function updateSelectionInfo() {
-                const info = document.getElementById('selectionInfo');
-                const count = document.getElementById('selectedCount');
-                count.textContent = selectedIds.size;
-                info.classList.toggle('active', selectedIds.size > 0);
-            }
-
-            function reverterUm(id) {
-                showModal(`Reverter o registro ID ${id}? O arquivo será deletado do disco.`, async () => {
-                    try {
-                        const res = await fetch(`/reversao/${id}`, { method: 'DELETE' });
-                        const data = await res.json();
-
-                        if (data.success) {
-                            showToast('Registro revertido com sucesso!', 'success');
-                            loadData();
-                        } else {
-                            showToast('Erro: ' + data.message, 'error');
-                        }
-                    } catch (e) {
-                        showToast('Erro ao reverter', 'error');
-                    }
-                });
-            }
-
-            function reverterSelecionados() {
-                if (selectedIds.size === 0) return;
-
-                showModal(`Reverter ${selectedIds.size} registros? Os arquivos serão deletados do disco.`, async () => {
-                    try {
-                        const res = await fetch('/reversao/lote', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify(Array.from(selectedIds))
-                        });
-                        const data = await res.json();
-
-                        showToast(`${data.sucesso} revertidos, ${data.arquivos_deletados} arquivos deletados`, 'success');
-                        selectedIds.clear();
-                        updateSelectionInfo();
-                        loadData();
-                    } catch (e) {
-                        showToast('Erro ao reverter lote', 'error');
-                    }
-                });
-            }
-
-            function showModal(message, onConfirm) {
-                document.getElementById('modalMessage').textContent = message;
-                document.getElementById('modalOverlay').classList.add('active');
-                document.getElementById('modalConfirmBtn').onclick = () => {
-                    closeModal();
-                    onConfirm();
-                };
-            }
-
-            function closeModal() {
-                document.getElementById('modalOverlay').classList.remove('active');
-            }
-
-            function showToast(message, type = 'success') {
-                const toast = document.getElementById('toast');
-                toast.textContent = message;
-                toast.className = `toast ${type} show`;
-                setTimeout(() => toast.classList.remove('show'), 4000);
-            }
-
             function formatDate(isoString) {
+                if (!isoString) return '-';
+                const date = new Date(isoString);
+                return date.toLocaleString('pt-BR', {
+                    day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit'
+                });
+            }
+
+            function formatDateShort(isoString) {
                 if (!isoString) return '-';
                 const date = new Date(isoString);
                 return date.toLocaleString('pt-BR', {
@@ -856,11 +887,12 @@
                 });
             }
 
-            // Search com debounce
-            let searchTimeout;
-            document.getElementById('searchInput').addEventListener('input', () => {
-                clearTimeout(searchTimeout);
-                searchTimeout = setTimeout(loadLogs, 300);
+            // Busca com Enter
+            document.getElementById('searchCliente').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') loadHistorico();
+            });
+            document.getElementById('searchBanco').addEventListener('keypress', (e) => {
+                if (e.key === 'Enter') loadHistorico();
             });
 
             // Carrega dados iniciais
