@@ -171,6 +171,17 @@ async def monitor_dashboard():
     return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
 
 
+@app.get("/extratos", response_class=HTMLResponse)
+async def extratos_page():
+    """Pagina inicial de extratos (placeholder)."""
+    template_path = Path(__file__).parent / "templates" / "extratos.html"
+    
+    if not template_path.exists():
+        raise HTTPException(status_code=500, detail="Template de extratos nao encontrado")
+    
+    return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
+
+
 @app.get("/monitor/stats")
 async def monitor_stats():
     """Retorna estatísticas do sistema de arquivos."""

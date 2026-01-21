@@ -21,6 +21,7 @@ pydantic-settings>=2.1.0
 # Banco de Dados
 # ============================================
 sqlalchemy>=2.0.0
+pymysql>=1.1.0
 
 # ============================================
 # Processamento de PDF

@@ -9,6 +9,6 @@ REM Ativa o ambiente virtual
 call venv\Scripts\activate.bat
 
 REM Inicia o servidor
-python -m uvicorn app.main:app --host 0.0.0.0 --port 8888 --reload
+python -m uvicorn app.main:app --host 0.0.0.0 --port 7777 --reload
 
 pause

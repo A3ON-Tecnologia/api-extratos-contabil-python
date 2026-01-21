@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Extratos | Extratos Contabeis</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon-monitor.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tech-navbar.css">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #0d1520;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border-color: #1e3a5f;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .page-wrapper {
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            margin-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            padding-bottom: 1rem;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .placeholder {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            color: var(--text-secondary);
+        }
+    </style>
+</head>
+
+<body>
+    <!-- Tech Navbar -->
+    <nav class="tech-navbar collapsed" id="techNavbar">
+        <div class="navbar-header">
+            <span class="navbar-title">Extratos API</span>
+        </div>
+        <div class="navbar-nav">
+            <div class="nav-item">
+                <a href="/monitor" class="nav-link">
+                    <span class="nav-icon">M</span>
+                    <span class="nav-text">Monitor</span>
+                    <span class="nav-status"></span>
+                </a>
+                <span class="nav-tooltip">Monitor</span>
+            </div>
+            <div class="nav-item">
+                <a href="/test" class="nav-link">
+                    <span class="nav-icon">T</span>
+                    <span class="nav-text">Modo Teste</span>
+                </a>
+                <span class="nav-tooltip">Modo Teste</span>
+            </div>
+            <div class="nav-item">
+                <a href="/reversao" class="nav-link">
+                    <span class="nav-icon">R</span>
+                    <span class="nav-text">Reversao</span>
+                </a>
+                <span class="nav-tooltip">Reversao</span>
+            </div>
+            <div class="nav-item active">
+                <a href="/extratos" class="nav-link">
+                    <span class="nav-icon">E</span>
+                    <span class="nav-text">Extratos</span>
+                </a>
+                <span class="nav-tooltip">Extratos</span>
+            </div>
+        </div>
+        <div class="navbar-footer">
+            <div class="footer-status"></div>
+            <span class="footer-text">Sistema Online</span>
+        </div>
+        <button class="navbar-toggle" id="navbarToggle">
+            <span class="arrow">></span>
+        </button>
+    </nav>
+
+    <div class="page-wrapper navbar-collapsed" id="mainContent">
+        <div class="container">
+            <header class="header">
+                <h1>Extratos</h1>
+            </header>
+            <div class="placeholder">
+                View criada. Conteudo em breve.
+            </div>
+        </div>
+    </div>
+
+    <script src="/static/js/tech-navbar.js"></script>
+</body>
+
+</html>
