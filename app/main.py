@@ -18,11 +18,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 
 from app.config import get_settings
-from app.events import EventType, ProcessingEvent, get_event_manager
+from app.events import EventType, ProcessingEvent, get_event_manager, get_test_event_manager
 from app.schemas.api import ProcessingResult, ProcessingStatus, UploadResponse
 from app.schemas.client import MatchMethod
 from app.services import (
-    AuditService,
     ClientService,
     LLMService,
     MatchingService,
@@ -104,7 +103,6 @@ _llm_service: LLMService | None = None
 _client_service: ClientService | None = None
 _matching_service: MatchingService | None = None
 _storage_service: StorageService | None = None
-_audit_service: AuditService | None = None
 
 
 def get_pdf_service() -> PDFService:
@@ -147,13 +145,6 @@ def get_storage_service() -> StorageService:
     if _storage_service is None:
         _storage_service = StorageService()
     return _storage_service
-
-
-def get_audit_service() -> AuditService:
-    global _audit_service
-    if _audit_service is None:
-        _audit_service = AuditService()
-    return _audit_service
 
 
 # ============================================================
@@ -201,7 +192,7 @@ async def monitor_stats():
 
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
-    """Endpoint WebSocket para atualizacoes em tempo real."""
+    """Endpoint WebSocket para atualizacoes em tempo real (PRODUÇÃO)."""
     event_manager = get_event_manager()
     await event_manager.connect(websocket)
     
@@ -210,6 +201,19 @@ async def websocket_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         event_manager.disconnect(websocket)
+
+
+@app.websocket("/ws/test")
+async def websocket_test_endpoint(websocket: WebSocket):
+    """Endpoint WebSocket para atualizacoes em tempo real (TESTE)."""
+    test_event_manager = get_test_event_manager()
+    await test_event_manager.connect(websocket)
+    
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        test_event_manager.disconnect(websocket)
 
 
 # ============================================================
@@ -332,7 +336,8 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
     """
     Processa o arquivo em background e atualiza o status do job.
     """
-    event_manager = get_event_manager()
+    # Usa o event manager correto baseado no modo
+    event_manager = get_test_event_manager() if test_mode else get_event_manager()
     jobs_dict = _test_jobs if test_mode else _jobs
     
     try:
@@ -385,7 +390,8 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
 
 async def process_zip_async(zip_data: bytes, filename: str, job_id: str | None = None, test_mode: bool = False) -> UploadResponse:
     """Processa um arquivo ZIP contendo PDFs."""
-    event_manager = get_event_manager()
+    # Usa o event manager correto baseado no modo
+    event_manager = get_test_event_manager() if test_mode else get_event_manager()
     zip_service = get_zip_service()
     jobs_dict = _test_jobs if test_mode else _jobs
     
@@ -438,7 +444,8 @@ async def process_zip_async(zip_data: bytes, filename: str, job_id: str | None =
 
 async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None = None, test_mode: bool = False) -> ProcessingResult:
     """Processa um unico arquivo PDF."""
-    event_manager = get_event_manager()
+    # Usa o event manager correto baseado no modo
+    event_manager = get_test_event_manager() if test_mode else get_event_manager()
     file_hash = compute_hash(pdf_data)
     jobs_dict = _test_jobs if test_mode else _jobs
     
@@ -628,26 +635,40 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
             proc_status = ProcessingStatus.NAO_IDENTIFICADO
             cliente_nome = None
         
-        # 6. Registra no log (apenas se nao for teste, ou deve registrar?)
-        # Audit service grava em arquivo JSON. O usuário pediu "igual producao, so nao salva arquivo final".
-        # Vou manter o log de auditoria tambem? Talvez polua. Vou pular se test_mode.
+        # 6. Registra no log do banco de dados
+        log_id = None
         if not test_mode:
             await event_manager.emit(ProcessingEvent(
                 event_type=EventType.LOG_WRITING,
                 filename=filename,
-                message="Registrando no log...",
+                message="Registrando no banco de dados...",
                 progress=90
             ))
             
-            audit_service = get_audit_service()
-            audit_service.log_result(
-                nome_cliente=cliente_nome,
-                tipo_extrato=extraction.tipo_documento,
-                ano=ano,
-                mes=mes,
-                status=proc_status,
-                nome_arquivo_final=saved_path,
-            )
+            # Salva log no banco de dados ANTES de emitir evento de conclusão
+            try:
+                db_log_service = get_db_log_service()
+                log_entry = db_log_service.log_extrato(
+                    arquivo_original=filename,
+                    status=proc_status.value,
+                    arquivo_salvo=saved_path,
+                    hash_arquivo=file_hash,
+                    cliente_nome=cliente_nome,
+                    cliente_cod=match_result.cliente.cod if match_result.identificado else None,
+                    cliente_cnpj=extraction.cnpj,
+                    banco=extraction.banco,
+                    tipo_documento=extraction.tipo_documento,
+                    agencia=extraction.agencia,
+                    conta=extraction.conta,
+                    ano=ano,
+                    mes=mes,
+                    metodo_identificacao=match_result.metodo.value,
+                    confianca_ia=extraction.confianca,
+                    erro=match_result.motivo_fallback if not match_result.identificado else None,
+                )
+                log_id = log_entry.id
+            except Exception as e:
+                logger.error(f"Erro ao salvar log no banco de dados: {e}")
             
             await event_manager.emit(ProcessingEvent(
                 event_type=EventType.LOG_WRITTEN,
@@ -655,35 +676,9 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                 message="Log registrado",
                 progress=95
             ))
-        
-        await event_manager.emit(ProcessingEvent(
-            event_type=EventType.PROCESSING_COMPLETED,
-            filename=filename,
-            message=f"Processamento concluido: {proc_status.value}",
-            details={
-                "status": proc_status.value,
-                "cliente": cliente_nome,
-                "path": saved_path,
-                "banco": extraction.banco,
-                "tipo": extraction.tipo_documento,
-                "ano": ano,
-                "mes": mes,
-                "metodo": match_result.metodo.value,
-            },
-            progress=100
-        ))
-        
-        event_manager.update_stats(
-            sucesso=(proc_status == ProcessingStatus.SUCESSO),
-            nao_identificado=(proc_status == ProcessingStatus.NAO_IDENTIFICADO)
-        )
-        event_manager.end_processing()
-        await event_manager.emit_stats()
-        
-        # Salva log no banco de dados
-        try:
-            if test_mode:
-                # MODO TESTE: Salva apenas registro de teste
+        else:
+            # MODO TESTE: Salva apenas registro de teste
+            try:
                 db_teste_service = get_db_log_teste_service()
                 db_teste_service.log_extrato_teste(
                     arquivo_original=filename,
@@ -703,29 +698,33 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                     confianca_ia=extraction.confianca,
                     erro=match_result.motivo_fallback if not match_result.identificado else None,
                 )
-            else:
-                # MODO PRODUÇÃO: Salva log oficial
-                db_log_service = get_db_log_service()
-                db_log_service.log_extrato(
-                    arquivo_original=filename,
-                    status=proc_status.value,
-                    arquivo_salvo=saved_path,
-                    hash_arquivo=file_hash,
-                    cliente_nome=cliente_nome,
-                    cliente_cod=match_result.cliente.cod if match_result.identificado else None,
-                    cliente_cnpj=extraction.cnpj,
-                    banco=extraction.banco,
-                    tipo_documento=extraction.tipo_documento,
-                    agencia=extraction.agencia,
-                    conta=extraction.conta,
-                    ano=ano,
-                    mes=mes,
-                    metodo_identificacao=match_result.metodo.value,
-                    confianca_ia=extraction.confianca,
-                    erro=match_result.motivo_fallback if not match_result.identificado else None,
-                )
-        except Exception as e:
-            logger.error(f"Erro ao salvar log no banco de dados: {e}")
+            except Exception as e:
+                logger.error(f"Erro ao salvar log de teste no banco de dados: {e}")
+        
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PROCESSING_COMPLETED,
+            filename=filename,
+            message=f"Processamento concluido: {proc_status.value}",
+            details={
+                "status": proc_status.value,
+                "cliente": cliente_nome,
+                "path": saved_path,
+                "banco": extraction.banco,
+                "tipo": extraction.tipo_documento,
+                "ano": ano,
+                "mes": mes,
+                "metodo": match_result.metodo.value,
+                "log_id": log_id,  # ID do log no banco para reversão
+            },
+            progress=100
+        ))
+        
+        event_manager.update_stats(
+            sucesso=(proc_status == ProcessingStatus.SUCESSO),
+            nao_identificado=(proc_status == ProcessingStatus.NAO_IDENTIFICADO)
+        )
+        event_manager.end_processing()
+        await event_manager.emit_stats()
         
         logger.info(f"Processamento concluido: {filename} -> {proc_status.value} (cliente: {cliente_nome or 'N/A'})")
         
@@ -772,16 +771,6 @@ async def create_failure_result(filename: str, file_hash: str, error: str) -> Pr
     event_manager.end_processing()
     await event_manager.emit_stats()
     
-    audit_service = get_audit_service()
-    audit_service.log_result(
-        nome_cliente=None,
-        tipo_extrato=None,
-        ano=None,
-        mes=None,
-        status=ProcessingStatus.FALHA,
-        nome_arquivo_final=None,
-    )
-    
     return ProcessingResult(
         nome_arquivo_original=filename,
         status=ProcessingStatus.FALHA,
@@ -825,24 +814,31 @@ async def reload_settings():
 
 @app.get("/monitor/history")
 async def get_history():
-    """Retorna o histórico de processamento persistente."""
+    """Retorna o histórico de processamento persistente do banco de dados."""
     try:
-        audit_service = get_audit_service()
-        # Executa em thread separada pois leitura de excel pode ser bloqueante
-        loop = asyncio.get_event_loop()
-        history = await loop.run_in_executor(_executor, audit_service.get_recent_logs, 100)
-        return history
+        db_log_service = get_db_log_service()
+        logs = db_log_service.get_logs(limit=100)
+        
+        # Mapeia para o formato esperado pelo frontend
+        result = []
+        for log in logs:
+            result.append({
+                "timestamp": log.processado_em.isoformat() if log.processado_em else None,
+                "data_hora_formatada": log.processado_em.strftime("%d/%m/%Y, %H:%M:%S") if log.processado_em else "-",
+                "cliente": log.cliente_nome or "NÃO IDENTIFICADO",
+                "tipo": log.tipo_documento or "-",
+                "banco": log.banco or "-",
+                "status": log.status,
+                "filename": log.arquivo_original or "-",
+                "full_path": log.arquivo_salvo or "-",
+                "periodo": f"{log.mes}/{log.ano}" if log.ano and log.mes else "-",
+                "log_id": log.id,  # ID para reversão
+            })
+        
+        return result
     except Exception as e:
         logger.error(f"Erro ao buscar histórico: {e}")
         return []
-
-
-@app.post("/merge-fallback-logs")
-async def merge_fallback_logs():
-    """Mescla logs de fallback no arquivo principal."""
-    audit_service = get_audit_service()
-    merged = audit_service.merge_fallback_logs()
-    return {"message": "Logs de fallback mesclados", "entries_merged": merged}
 
 
 @app.get("/debug/clients")

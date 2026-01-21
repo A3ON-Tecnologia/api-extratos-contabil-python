@@ -677,7 +677,8 @@
 
             function connectWebSocket() {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                ws = new WebSocket(`${protocol}//${window.location.host}/ws`);
+                // Usa /ws/test para eventos separados da producao
+                ws = new WebSocket(`${protocol}//${window.location.host}/ws/test`);
 
                 ws.onopen = () => {
                     document.getElementById('liveIndicator').classList.add('connected');
