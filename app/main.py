@@ -995,7 +995,73 @@ async def get_log_detail(log_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ====== ENDPOINTS DE TESTE (NÃO SALVA ARQUIVOS) ======
+
+@app.get("/logs/{log_id}/view")
+async def view_log_file(log_id: int):
+    """
+    Retorna o conteúdo do arquivo associado ao log para visualização.
+    Serve tanto para logs de produção quanto para logs de teste (simulado).
+    """
+    try:
+        from fastapi.responses import FileResponse
+        import os
+        
+        # 1. Tenta buscar no log de PRODUÇÃO
+        db_service = get_db_log_service()
+        log = db_service.get_log_by_id(log_id)
+        
+        file_path = None
+        filename = None
+        
+        if log:
+            file_path = log.arquivo_salvo
+            filename = log.arquivo_original
+        else:
+            # 2. Se não achar, tenta buscar no log de TESTE
+            db_teste_service = get_db_log_teste_service()
+            # O serviço de teste geralmente não tem get_by_id exposto simples
+            # Mas vamos tentar buscar nos logs recentes ou idealmente implementar um get_by_id no serviço de teste
+            # Como hack rápido, vamos instanciar uma busca direta ou assumir que o ID pode ser de teste
+            
+            # Vamos tentar ler a tabela de testes diretamente
+            from app.services.db_log_teste_service import TesteLog
+            from app.database import SessionLocal
+            
+            db = SessionLocal()
+            try:
+                log_teste = db.query(TesteLog).filter(TesteLog.id == log_id).first()
+                if log_teste:
+                    file_path = log_teste.arquivo_salvo
+                    filename = log_teste.arquivo_original
+            finally:
+                db.close()
+            
+        if not file_path or file_path == '-':
+            # Se não tem caminho salvo, tenta procurar nos Nao Identificados
+            # (Caso comum em falhas)
+            if filename:
+                 settings = get_settings()
+                 potential_path = settings.unidentified_path / filename
+                 if potential_path.exists():
+                     file_path = str(potential_path)
+        
+        if not file_path or not os.path.exists(file_path):
+             raise HTTPException(status_code=404, detail="Arquivo físico não encontrado no servidor.")
+             
+        # Serve o arquivo
+        return FileResponse(
+            path=file_path,
+            filename=filename or "documento.pdf",
+            media_type="application/pdf",
+            content_disposition_type="inline" # Abre no navegador em vez de baixar
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao visualizar arquivo: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/test", response_class=HTMLResponse)
 async def test_monitor_page():
@@ -1324,45 +1390,82 @@ async def listar_para_reversao(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+def _remove_logs_from_memory(logs):
+    """Reflete a remoção no cache em memória (_jobs) para evitar inconsistência."""
+    if not logs:
+        return
+        
+    hashes_to_remove = {log.hash_arquivo for log in logs if log.hash_arquivo}
+    names_to_remove = {log.arquivo_original for log in logs if log.arquivo_original}
+    
+    # Percorre todos os jobs em memória
+    for job_key in list(_jobs.keys()):
+        job = _jobs[job_key]
+        if not job.get("results") or "resultados" not in job["results"]:
+            continue
+            
+        # Filtra os resultados mantendo apenas os que NÃO foram removidos
+        original_results = job["results"]["resultados"]
+        new_results = []
+        changed = False
+        
+        for res in original_results:
+            h = res.get("hash_arquivo")
+            n = res.get("nome_arquivo_original")
+            
+            # Se hash bater ou nome bater, ignora (foi removido)
+            if (h and h in hashes_to_remove) or (n and n in names_to_remove):
+                changed = True
+                continue
+            new_results.append(res)
+            
+        if changed:
+            job["results"]["resultados"] = new_results
+            # Se ficou vazio, poderiamos remover o job, mas talvez seja melhor manter o histórico de que houve um job
+            # Mas vamos atualizar os contadores do job para refletir
+            res_list = job["results"].get("resultados", [])
+            job["results"]["arquivos_sucesso"] = sum(1 for r in res_list if r.get("status") == "SUCESSO")
+            job["results"]["arquivos_falha"] = sum(1 for r in res_list if r.get("status") == "FALHA")
+            job["results"]["arquivos_nao_identificados"] = sum(1 for r in res_list if r.get("status") == "NAO_IDENTIFICADO")
+            job["results"]["total_arquivos"] = len(res_list)
+
+
 @app.delete("/reversao/{log_id}")
 async def reverter_por_id(log_id: int, deletar_arquivo: bool = True):
     """Reverte um único processamento pelo ID."""
     try:
-        # Recuperar estado original antes de reverter para saber qual contador decrementar
-        # Como o serviço já deleta, precisaríamos consultar antes ou returning.
-        # Simplificação: O ReversaoService poderia retornar o status do item revertido.
-        # Vamos assumir que o frontend atualiza localmente, mas para garantir consistência global:
-        # Melhor abordagem: O ReversaoServie.reverter_por_id deveria retornar o STATUS original do item revertido.
-        
-        # Como não quero mudar a assinatura do service agora, vou consultar aqui (race condition pequena aceitável)
-        # Na verdade, o reverter_por_id já retorna o cliente, mas não o status.
-        # Vou apenas notificar o frontend que houve uma reversão para ele recarregar se quiser,
-        # mas como o usuário pediu para afetar os indicadores... vamos usar o decrement_stats.
-        
-        # Hack rápido: O ReversaoService deleta. Vamos fazer um "peek" manual ou alterar o service?
-        # O service é Singleton. Vamos alterar o endpoint para ser esperto.
-        
-        reversao_service = get_reversao_service()
-        
-        # Recupera log antes de deletar para saber status
-        # (Idealmente isso estaria no retorno do service, mas para não quebrar contrato agora...)
         from app.database import SessionLocal
         from app.models.extrato_log import ExtratoLog
         
         db = SessionLocal()
         status_original = None
+        log_obj = None
+        
         try:
             log = db.query(ExtratoLog).filter(ExtratoLog.id == log_id).first()
             if log:
                 status_original = log.status
+                # Cria objeto leve para passar para limpeza de memória
+                # Precisamos copiar dados pois o objeto será deletado ou detatched
+                from types import SimpleNamespace
+                log_obj = SimpleNamespace(
+                    hash_arquivo=log.hash_arquivo, 
+                    arquivo_original=log.arquivo_original
+                )
         finally:
             db.close()
             
+        reversao_service = get_reversao_service()
         resultado = reversao_service.reverter_por_id(log_id, deletar_arquivo)
         
         if not resultado["success"]:
             raise HTTPException(status_code=400, detail=resultado["message"])
         
+        # Limpa da memória global _jobs
+        if log_obj:
+            _remove_logs_from_memory([log_obj])
+
         # Atualiza estatísticas globais se tivermos o status
         if status_original:
             event_manager = get_event_manager()
@@ -1385,24 +1488,25 @@ async def reverter_por_id(log_id: int, deletar_arquivo: bool = True):
 async def reverter_lote(ids: List[int], deletar_arquivos: bool = True):
     """Reverte múltiplos processamentos."""
     try:
-        # Para lote, precisamos saber quantos de cada tipo foram revertidos.
-        # Vamos consultar os metadados antes de reverter.
         from app.database import SessionLocal
         from app.models.extrato_log import ExtratoLog
         from sqlalchemy import func
+        from types import SimpleNamespace
         
         db = SessionLocal()
         stats_diff = {"SUCESSO": 0, "NAO_IDENTIFICADO": 0, "FALHA": 0}
+        logs_to_clean = []
         
         try:
-            # Conta quantos de cada status serão revertidos
-            counts = db.query(ExtratoLog.status, func.count(ExtratoLog.status))\
-                .filter(ExtratoLog.id.in_(ids))\
-                .group_by(ExtratoLog.status).all()
-            
-            for status_val, count in counts:
-                if status_val in stats_diff:
-                    stats_diff[status_val] = count
+            # Busca logs completos para limpeza de memória
+            logs = db.query(ExtratoLog).filter(ExtratoLog.id.in_(ids)).all()
+            for log in logs:
+                if log.status in stats_diff:
+                    stats_diff[log.status] += 1
+                logs_to_clean.append(SimpleNamespace(
+                    hash_arquivo=log.hash_arquivo, 
+                    arquivo_original=log.arquivo_original
+                ))
         finally:
             db.close()
             
@@ -1410,6 +1514,10 @@ async def reverter_lote(ids: List[int], deletar_arquivos: bool = True):
         resultado = reversao_service.reverter_lote(ids, deletar_arquivos)
         
         if resultado.get("success"):
+            # Limpa memória
+            _remove_logs_from_memory(logs_to_clean)
+            
+            # Atualiza stats
             event_manager = get_event_manager()
             event_manager.decrement_stats(
                 sucesso=stats_diff["SUCESSO"],

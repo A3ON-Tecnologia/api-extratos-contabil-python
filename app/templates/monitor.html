@@ -1418,6 +1418,39 @@
 
             const meses = ['', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
+            // Adiciona CSS dinamicamente se não existir
+            if (!document.getElementById('icon-btn-style')) {
+                const style = document.createElement('style');
+                style.id = 'icon-btn-style';
+                style.innerHTML = `
+                    .icon-btn {
+                        background: none;
+                        border: none;
+                        font-size: 1.1rem;
+                        cursor: pointer;
+                        padding: 4px 8px;
+                        border-radius: 4px;
+                        transition: background-color 0.2s;
+                        line-height: 1;
+                    }
+                    .icon-btn:hover {
+                        background-color: rgba(255, 255, 255, 0.1);
+                        transform: scale(1.1);
+                    }
+                    .view-btn { color: #60a5fa; }
+                    .revert-btn { color: #f87171; }
+                `;
+                document.head.appendChild(style);
+            }
+
+            // Função global para visualizar arquivo
+            window.viewFile = function (logId) {
+                if (!logId) return;
+                // Abre em nova aba
+                const url = `/logs/${logId}/view`;
+                window.open(url, '_blank');
+            };
+
             tbody.innerHTML = filtered.map((e, index) => {
                 const realIndex = processedExtratos.indexOf(e);
                 // Permite reverter se tiver logId, independentemente do status
@@ -1425,15 +1458,20 @@
                 const isSelected = selectedItems.has(e.logId);
                 return `
                 <tr data-status="${e.statusClass}" data-index="${realIndex}" class="${isSelected ? 'selected' : ''}">
-                    <td class="checkbox-col">
+                    <td class="checkbox-col" style="text-align: center;">
                         ${canRevert ?
                         `<input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSelection(${e.logId}, ${realIndex})" data-logid="${e.logId}">` :
                         ''
                     }
                     </td>
-                    <td class="action-col">
+                    <td class="action-col" style="text-align: center;">
                         ${canRevert ?
-                        `<button class="revert-btn" onclick="reverterExtrato(${e.logId}, ${realIndex})" title="Reverter processamento e deletar arquivo">🔄 Reverter</button>` :
+                        `<button class="view-btn icon-btn" onclick="viewFile(${e.logId})" title="Visualizar Documento">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                                <circle cx="12" cy="12" r="3"/>
+                            </svg>
+                        </button>` :
                         `<span style="color: var(--text-muted); font-size: 0.65rem;">-</span>`
                     }
                     </td>

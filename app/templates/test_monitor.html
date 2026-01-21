@@ -541,7 +541,6 @@
     <!-- Tech Navbar -->
     <nav class="tech-navbar collapsed" id="techNavbar">
         <div class="navbar-header">
-            <div class="navbar-logo">📊</div>
             <span class="navbar-title">Extratos API</span>
         </div>
         <div class="navbar-nav">
@@ -867,6 +866,14 @@
                             </td>
                             <td>${log.mes || '-'}/${log.ano || '-'}</td>
                             <td><span class="status ${statusClass}">${statusIcon} ${log.status}</span></td>
+                            <td>
+                                <button class="btn-outline" style="border:none; background:none; cursor:pointer;" onclick="window.open('/logs/${log.id}/view', '_blank')" title="Visualizar Documento">
+                                    <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6366f1" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                        <path d="M2 12s3-7 10-7 10 7 10 7-3 7-10 7-10-7-10-7Z"/>
+                                        <circle cx="12" cy="12" r="3"/>
+                                    </svg>
+                                </button>
+                            </td>
                         </tr>
                     `;
                     }).join('');
@@ -880,6 +887,7 @@
                                 <th>Tipo / Banco</th>
                                 <th>Período</th>
                                 <th>Status</th>
+                                <th>Ações</th>
                             </tr>
                         </thead>
                         <tbody>${rows}</tbody>
