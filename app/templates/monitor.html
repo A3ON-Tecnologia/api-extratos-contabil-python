@@ -140,20 +140,20 @@
         /* Stats Grid */
         .stats-grid {
             display: grid;
-            grid-template-columns: repeat(5, 1fr);
+            grid-template-columns: repeat(4, 1fr);
             gap: 1rem;
             margin-bottom: 1.5rem;
         }
 
         @media (max-width: 1024px) {
             .stats-grid {
-                grid-template-columns: repeat(3, 1fr);
+                grid-template-columns: repeat(2, 1fr);
             }
         }
 
         @media (max-width: 640px) {
             .stats-grid {
-                grid-template-columns: repeat(2, 1fr);
+                grid-template-columns: 1fr;
             }
         }
 
@@ -217,6 +217,10 @@
             display: grid;
             grid-template-columns: 1fr 350px;
             gap: 1.5rem;
+            max-width: 1600px;
+            margin: 0 auto;
+            padding: 0 1.5rem 2rem 1.5rem;
+            /* Alinha com o container superior */
         }
 
         @media (max-width: 1200px) {
@@ -780,536 +784,530 @@
                         <div class="label">Falhas</div>
                     </div>
                 </div>
-                <div class="stat-card processing">
-                    <div class="icon">⚡</div>
-                    <div class="info">
-                        <div class="value" id="statProcessing">0</div>
-                        <div class="label">Em Processamento</div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Extratos Processados -->
+            <div class="panel">
+                <div class="panel-header" style="flex-direction: column; align-items: stretch; gap: 1rem;">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h2>📋 Extratos Processados</h2>
                     </div>
+                    <div class="filters-container">
+                        <div class="filter-group">
+                            <button class="filter-btn active" onclick="filterExtratos('all')">Todos</button>
+                            <button class="filter-btn" onclick="filterExtratos('success')">✅ Sucesso</button>
+                            <button class="filter-btn" onclick="filterExtratos('warning')">⚠️ Não ID</button>
+                            <button class="filter-btn" onclick="filterExtratos('error')">❌ Falha</button>
+                            <button class="batch-revert-btn" id="batchRevertBtn" onclick="openBatchRevertModal()">
+                                🔄 Reverter Selecionados <span class="count" id="selectedCount">0</span>
+                            </button>
+                        </div>
+                        <div class="filter-group" style="flex: 1; justify-content: flex-end;">
+                            <input type="text" id="searchName" class="filter-input" placeholder="Buscar Empresa..."
+                                style="min-width: 200px;">
+                            <input type="number" id="searchYear" class="filter-input" placeholder="Ano"
+                                style="width: 80px;">
+                            <select id="searchMonth" class="filter-input">
+                                <option value="">Mês</option>
+                                <option value="1">Jan</option>
+                                <option value="2">Fev</option>
+                                <option value="3">Mar</option>
+                                <option value="4">Abr</option>
+                                <option value="5">Mai</option>
+                                <option value="6">Jun</option>
+                                <option value="7">Jul</option>
+                                <option value="8">Ago</option>
+                                <option value="9">Set</option>
+                                <option value="10">Out</option>
+                                <option value="11">Nov</option>
+                                <option value="12">Dez</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                <div class="panel-body" style="padding: 0; max-height: 500px;">
+                    <table class="extratos-table" id="extratosTable">
+                        <thead>
+                            <tr>
+                                <th class="checkbox-col">
+                                    <input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll()"
+                                        title="Selecionar todos">
+                                </th>
+                                <th class="action-col"></th>
+                                <th>Data/Hora</th>
+                                <th>Empresa</th>
+                                <th>Arquivo</th>
+                                <th>Tipo</th>
+                                <th>Banco</th>
+                                <th>Período</th>
+                                <th>Status</th>
+                                <th>Caminho Salvo</th>
+                            </tr>
+                        </thead>
+                        <tbody id="extratosBody">
+                            <tr>
+                                <td colspan="9">
+                                    <div class="empty-state">
+                                        <div class="icon">📭</div>
+                                        <p>Nenhum extrato processado ainda</p>
+                                    </div>
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
                 </div>
             </div>
 
-            <!-- Main Content -->
-            <div class="main-content">
-                <!-- Extratos Processados -->
+            <!-- Right Column -->
+            <div style="display: flex; flex-direction: column; gap: 1rem;">
+                <!-- Current Processing -->
                 <div class="panel">
-                    <div class="panel-header" style="flex-direction: column; align-items: stretch; gap: 1rem;">
-                        <div style="display: flex; justify-content: space-between; align-items: center;">
-                            <h2>📋 Extratos Processados</h2>
+                    <div class="panel-header">
+                        <div style="display: flex; align-items: center; gap: 0.5rem;">
+                            <h2>🔄 Processando Agora</h2>
+                            <button id="btnStopProcessing" onclick="resetProcessing()"
+                                title="Encerrar processamento atual (Emergência)"
+                                style="background: #ef4444; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 0.75rem; padding: 4px 8px; display: none; font-weight: bold;">
+                                PARAR
+                            </button>
                         </div>
-                        <div class="filters-container">
-                            <div class="filter-group">
-                                <button class="filter-btn active" onclick="filterExtratos('all')">Todos</button>
-                                <button class="filter-btn" onclick="filterExtratos('success')">✅ Sucesso</button>
-                                <button class="filter-btn" onclick="filterExtratos('warning')">⚠️ Não ID</button>
-                                <button class="filter-btn" onclick="filterExtratos('error')">❌ Falha</button>
-                                <button class="batch-revert-btn" id="batchRevertBtn" onclick="openBatchRevertModal()">
-                                    🔄 Reverter Selecionados <span class="count" id="selectedCount">0</span>
-                                </button>
-                            </div>
-                            <div class="filter-group" style="flex: 1; justify-content: flex-end;">
-                                <input type="text" id="searchName" class="filter-input" placeholder="Buscar Empresa..."
-                                    style="min-width: 200px;">
-                                <input type="number" id="searchYear" class="filter-input" placeholder="Ano"
-                                    style="width: 80px;">
-                                <select id="searchMonth" class="filter-input">
-                                    <option value="">Mês</option>
-                                    <option value="1">Jan</option>
-                                    <option value="2">Fev</option>
-                                    <option value="3">Mar</option>
-                                    <option value="4">Abr</option>
-                                    <option value="5">Mai</option>
-                                    <option value="6">Jun</option>
-                                    <option value="7">Jul</option>
-                                    <option value="8">Ago</option>
-                                    <option value="9">Set</option>
-                                    <option value="10">Out</option>
-                                    <option value="11">Nov</option>
-                                    <option value="12">Dez</option>
-                                </select>
-                            </div>
-                        </div>
+                        <div class="spinner" id="processingSpinner" style="display: none;"></div>
                     </div>
-                    <div class="panel-body" style="padding: 0; max-height: 500px;">
-                        <table class="extratos-table" id="extratosTable">
-                            <thead>
-                                <tr>
-                                    <th class="checkbox-col">
-                                        <input type="checkbox" id="selectAllCheckbox" onclick="toggleSelectAll()"
-                                            title="Selecionar todos">
-                                    </th>
-                                    <th class="action-col"></th>
-                                    <th>Data/Hora</th>
-                                    <th>Empresa</th>
-                                    <th>Arquivo</th>
-                                    <th>Tipo</th>
-                                    <th>Banco</th>
-                                    <th>Período</th>
-                                    <th>Status</th>
-                                    <th>Caminho Salvo</th>
-                                </tr>
-                            </thead>
-                            <tbody id="extratosBody">
-                                <tr>
-                                    <td colspan="9">
-                                        <div class="empty-state">
-                                            <div class="icon">📭</div>
-                                            <p>Nenhum extrato processado ainda</p>
-                                        </div>
-                                    </td>
-                                </tr>
-                            </tbody>
-                        </table>
+                    <div class="current-processing" id="currentProcessing">
+                        <div class="no-processing">
+                            <div class="icon">📭</div>
+                            <p>Aguardando...</p>
+                        </div>
                     </div>
                 </div>
 
-                <!-- Right Column -->
-                <div style="display: flex; flex-direction: column; gap: 1rem;">
-                    <!-- Current Processing -->
-                    <div class="panel">
-                        <div class="panel-header">
-                            <div style="display: flex; align-items: center; gap: 0.5rem;">
-                                <h2>🔄 Processando Agora</h2>
-                                <button id="btnStopProcessing" onclick="resetProcessing()"
-                                    title="Encerrar processamento atual (Emergência)"
-                                    style="background: #ef4444; border: none; border-radius: 4px; color: white; cursor: pointer; font-size: 0.75rem; padding: 4px 8px; display: none; font-weight: bold;">
-                                    PARAR
-                                </button>
-                            </div>
-                            <div class="spinner" id="processingSpinner" style="display: none;"></div>
-                        </div>
-                        <div class="current-processing" id="currentProcessing">
-                            <div class="no-processing">
-                                <div class="icon">📭</div>
-                                <p>Aguardando...</p>
-                            </div>
-                        </div>
+                <!-- Event Log -->
+                <div class="panel" style="flex: 1;">
+                    <div class="panel-header">
+                        <h2>📝 Log</h2>
+                        <button onclick="clearLog()"
+                            style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 0.75rem;">Limpar</button>
                     </div>
-
-                    <!-- Event Log -->
-                    <div class="panel" style="flex: 1;">
-                        <div class="panel-header">
-                            <h2>📝 Log</h2>
-                            <button onclick="clearLog()"
-                                style="background: none; border: none; color: var(--text-secondary); cursor: pointer; font-size: 0.75rem;">Limpar</button>
-                        </div>
-                        <div class="panel-body" id="eventLog" style="max-height: 300px;">
-                        </div>
+                    <div class="panel-body" id="eventLog" style="max-height: 300px;">
                     </div>
                 </div>
             </div>
         </div>
+    </div>
 
-        <!-- Modal de Confirmação de Reversão -->
-        <div id="revertModal" class="modal-overlay" style="display: none;">
-            <div class="modal-container">
-                <div class="modal-header">
-                    <div class="modal-icon">🔄</div>
-                    <h3>Reverter Processamento</h3>
-                </div>
-                <div class="modal-body">
-                    <p class="modal-description">Tem certeza que deseja reverter este processamento?</p>
+    <!-- Modal de Confirmação de Reversão -->
+    <div id="revertModal" class="modal-overlay" style="display: none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <div class="modal-icon">🔄</div>
+                <h3>Reverter Processamento</h3>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">Tem certeza que deseja reverter este processamento?</p>
 
-                    <div class="modal-info-card">
-                        <div class="info-row">
-                            <span class="info-label">📄 Arquivo:</span>
-                            <span class="info-value" id="modalFileName">-</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">🏢 Cliente:</span>
-                            <span class="info-value" id="modalClientName">-</span>
-                        </div>
-                        <div class="info-row">
-                            <span class="info-label">🏦 Banco:</span>
-                            <span class="info-value" id="modalBankName">-</span>
-                        </div>
+                <div class="modal-info-card">
+                    <div class="info-row">
+                        <span class="info-label">📄 Arquivo:</span>
+                        <span class="info-value" id="modalFileName">-</span>
                     </div>
-
-                    <div class="modal-warning">
-                        <div class="warning-icon">⚠️</div>
-                        <div class="warning-text">
-                            <strong>Esta ação irá:</strong>
-                            <ul>
-                                <li>Deletar o registro do banco de dados</li>
-                                <li>Deletar o arquivo físico do disco</li>
-                                <li>Registrar no histórico de reversões</li>
-                            </ul>
-                            <p class="warning-note">Esta ação não pode ser desfeita!</p>
-                        </div>
+                    <div class="info-row">
+                        <span class="info-label">🏢 Cliente:</span>
+                        <span class="info-value" id="modalClientName">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">🏦 Banco:</span>
+                        <span class="info-value" id="modalBankName">-</span>
                     </div>
                 </div>
-                <div class="modal-footer">
-                    <button class="modal-btn modal-btn-cancel" onclick="closeRevertModal()">
-                        ✕ Cancelar
-                    </button>
-                    <button class="modal-btn modal-btn-confirm" id="confirmRevertBtn">
-                        🔄 Confirmar Reversão
-                    </button>
+
+                <div class="modal-warning">
+                    <div class="warning-icon">⚠️</div>
+                    <div class="warning-text">
+                        <strong>Esta ação irá:</strong>
+                        <ul>
+                            <li>Deletar o registro do banco de dados</li>
+                            <li>Deletar o arquivo físico do disco</li>
+                            <li>Registrar no histórico de reversões</li>
+                        </ul>
+                        <p class="warning-note">Esta ação não pode ser desfeita!</p>
+                    </div>
                 </div>
             </div>
+            <div class="modal-footer">
+                <button class="modal-btn modal-btn-cancel" onclick="closeRevertModal()">
+                    ✕ Cancelar
+                </button>
+                <button class="modal-btn modal-btn-confirm" id="confirmRevertBtn">
+                    🔄 Confirmar Reversão
+                </button>
+            </div>
         </div>
+    </div>
 
-        <style>
-            /* Modal Styles */
-            .modal-overlay {
-                position: fixed;
-                top: 0;
-                left: 0;
-                width: 100%;
-                height: 100%;
-                background: rgba(0, 0, 0, 0.7);
-                backdrop-filter: blur(5px);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                z-index: 1000;
-                opacity: 0;
-                animation: fadeIn 0.2s ease forwards;
+    <style>
+        /* Modal Styles */
+        .modal-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.7);
+            backdrop-filter: blur(5px);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            z-index: 1000;
+            opacity: 0;
+            animation: fadeIn 0.2s ease forwards;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+            }
+        }
+
+        .modal-container {
+            background: linear-gradient(145deg, #1a1a24, #12121a);
+            border: 1px solid rgba(249, 115, 22, 0.3);
+            border-radius: 16px;
+            width: 90%;
+            max-width: 480px;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5),
+                0 0 40px rgba(249, 115, 22, 0.1);
+            transform: scale(0.9);
+            animation: scaleIn 0.2s ease forwards;
+        }
+
+        @keyframes scaleIn {
+            to {
+                transform: scale(1);
+            }
+        }
+
+        .modal-header {
+            display: flex;
+            align-items: center;
+            gap: 12px;
+            padding: 1.25rem 1.5rem;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .modal-icon {
+            font-size: 1.75rem;
+            animation: rotate 2s linear infinite;
+        }
+
+        @keyframes rotate {
+            from {
+                transform: rotate(0deg);
             }
 
-            @keyframes fadeIn {
-                to {
-                    opacity: 1;
+            to {
+                transform: rotate(360deg);
+            }
+        }
+
+        .modal-header h3 {
+            margin: 0;
+            font-size: 1.25rem;
+            font-weight: 600;
+            color: #f97316;
+        }
+
+        .modal-body {
+            padding: 1.5rem;
+        }
+
+        .modal-description {
+            margin: 0 0 1rem 0;
+            color: var(--text-primary);
+            font-size: 1rem;
+        }
+
+        .modal-info-card {
+            background: rgba(0, 0, 0, 0.3);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 12px;
+            padding: 1rem;
+            margin-bottom: 1rem;
+        }
+
+        .info-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 0.5rem 0;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .info-row:last-child {
+            border-bottom: none;
+        }
+
+        .info-label {
+            color: var(--text-secondary);
+            font-size: 0.875rem;
+        }
+
+        .info-value {
+            color: var(--text-primary);
+            font-size: 0.875rem;
+            font-weight: 500;
+            max-width: 250px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+        }
+
+        .modal-warning {
+            display: flex;
+            gap: 12px;
+            background: rgba(239, 68, 68, 0.1);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            border-radius: 12px;
+            padding: 1rem;
+        }
+
+        .warning-icon {
+            font-size: 1.5rem;
+            flex-shrink: 0;
+        }
+
+        .warning-text {
+            color: #fca5a5;
+            font-size: 0.875rem;
+        }
+
+        .warning-text strong {
+            color: #ef4444;
+        }
+
+        .warning-text ul {
+            margin: 0.5rem 0;
+            padding-left: 1.25rem;
+        }
+
+        .warning-text li {
+            margin: 0.25rem 0;
+        }
+
+        .warning-note {
+            margin: 0.75rem 0 0 0;
+            font-weight: 600;
+            color: #ef4444;
+        }
+
+        .modal-footer {
+            display: flex;
+            justify-content: flex-end;
+            gap: 12px;
+            padding: 1rem 1.5rem;
+            border-top: 1px solid rgba(255, 255, 255, 0.1);
+        }
+
+        .modal-btn {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 0.75rem 1.5rem;
+            border-radius: 8px;
+            font-size: 0.875rem;
+            font-weight: 500;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            border: none;
+        }
+
+        .modal-btn-cancel {
+            background: rgba(255, 255, 255, 0.1);
+            color: var(--text-secondary);
+        }
+
+        .modal-btn-cancel:hover {
+            background: rgba(255, 255, 255, 0.2);
+            color: var(--text-primary);
+        }
+
+        .modal-btn-confirm {
+            background: linear-gradient(135deg, #f97316, #ea580c);
+            color: white;
+        }
+
+        .modal-btn-confirm:hover {
+            background: linear-gradient(135deg, #fb923c, #f97316);
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(249, 115, 22, 0.3);
+        }
+
+        .modal-btn-confirm:active {
+            transform: translateY(0);
+        }
+    </style>
+
+    <script>
+        // Estado
+        let processedExtratos = [];
+        let currentFilter = 'all';
+        let currentProcessingFiles = {};
+        let selectedItems = new Set();  // IDs selecionados para reversão em lote
+
+        // WebSocket
+        let ws = null;
+        let reconnectAttempts = 0;
+
+        function connect() {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}/ws`;
+
+            ws = new WebSocket(wsUrl);
+
+            ws.onopen = () => {
+                reconnectAttempts = 0;
+                updateConnectionStatus(true);
+                addEvent('info', 'Conectado ao servidor');
+            };
+
+            ws.onclose = () => {
+                updateConnectionStatus(false);
+                if (reconnectAttempts < 10) {
+                    reconnectAttempts++;
+                    setTimeout(connect, Math.min(1000 * reconnectAttempts, 10000));
                 }
-            }
+            };
 
-            .modal-container {
-                background: linear-gradient(145deg, #1a1a24, #12121a);
-                border: 1px solid rgba(249, 115, 22, 0.3);
-                border-radius: 16px;
-                width: 90%;
-                max-width: 480px;
-                box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5),
-                    0 0 40px rgba(249, 115, 22, 0.1);
-                transform: scale(0.9);
-                animation: scaleIn 0.2s ease forwards;
-            }
+            ws.onerror = () => addEvent('error', 'Erro de conexão');
 
-            @keyframes scaleIn {
-                to {
-                    transform: scale(1);
+            ws.onmessage = (event) => {
+                try {
+                    handleEvent(JSON.parse(event.data));
+                } catch (e) {
+                    console.error('Erro ao processar mensagem:', e);
                 }
+            };
+        }
+
+        function updateConnectionStatus(connected) {
+            document.getElementById('statusDot').classList.toggle('connected', connected);
+            document.getElementById('statusText').textContent = connected ? 'Sistema Rodando' : 'Sistema Parado';
+        }
+
+        function handleEvent(data) {
+            const { event_type, filename, message, details, progress } = data;
+
+            // Atualizar estatísticas
+            if (details?.stats) updateStats(details.stats);
+
+            switch (event_type) {
+                case 'connected':
+                    addEvent('success', 'Conectado ao sistema');
+                    break;
+
+                case 'file_received':
+                case 'pdf_processing_start':
+                    startProcessing(filename);
+                    break;
+
+                case 'pdf_text_extracting':
+                    updateProcessingStep(filename, 'Extraindo texto...', 10);
+                    break;
+
+                case 'pdf_text_extracted':
+                    updateProcessingStep(filename, 'Texto extraído', 25);
+                    break;
+
+                case 'llm_analyzing':
+                    updateProcessingStep(filename, '🤖 Analisando com IA...', 30);
+                    break;
+
+                case 'llm_completed':
+                    updateProcessingStep(filename, `IA: ${details?.cliente || 'N/A'}`, 50);
+                    addEvent('info', `IA identificou: ${details?.cliente || 'N/A'}`);
+                    break;
+
+                case 'matching_start':
+                    updateProcessingStep(filename, 'Buscando cliente...', 55);
+                    break;
+
+                case 'matching_completed':
+                    updateProcessingStep(filename, details?.found ? `✅ ${details.cliente}` : '⚠️ Não encontrado', 70);
+                    break;
+
+                case 'file_saving':
+                    updateProcessingStep(filename, 'Salvando...', 80);
+                    break;
+
+                case 'file_saved':
+                    updateProcessingStep(filename, 'Salvo!', 90);
+                    break;
+
+                case 'processing_completed':
+                    endProcessing(filename, details);
+                    addEvent(details?.status === 'SUCESSO' ? 'success' : 'warning',
+                        `${filename}: ${details?.status} - ${details?.cliente || 'Não identificado'}`);
+                    break;
+
+                case 'processing_error':
+                    endProcessingError(filename, message);
+                    addEvent('error', `Erro: ${filename} - ${message}`);
+                    break;
+
+                case 'stats_update':
+                    break;
+
+                default:
+                    if (message) addEvent('info', message);
             }
+        }
 
-            .modal-header {
-                display: flex;
-                align-items: center;
-                gap: 12px;
-                padding: 1.25rem 1.5rem;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+        function updateStats(stats) {
+            document.getElementById('statTotal').textContent = stats.total_processados || 0;
+            document.getElementById('statSuccess').textContent = stats.sucesso || 0;
+            document.getElementById('statWarning').textContent = stats.nao_identificados || 0;
+            document.getElementById('statError').textContent = stats.falhas || 0;
+
+            const processingCount = stats.em_processamento || 0;
+            document.getElementById('statProcessing').textContent = processingCount;
+
+            // Mostra/Oculta botão de parar
+            const btnStop = document.getElementById('btnStopProcessing');
+            if (btnStop) {
+                btnStop.style.display = processingCount > 0 ? 'block' : 'none';
             }
+        }
 
-            .modal-icon {
-                font-size: 1.75rem;
-                animation: rotate 2s linear infinite;
-            }
+        function startProcessing(filename) {
+            currentProcessingFiles[filename] = { step: 'Iniciando...', progress: 0 };
+            renderCurrentProcessing();
+            document.getElementById('processingSpinner').style.display = 'block';
+        }
 
-            @keyframes rotate {
-                from {
-                    transform: rotate(0deg);
-                }
-
-                to {
-                    transform: rotate(360deg);
-                }
-            }
-
-            .modal-header h3 {
-                margin: 0;
-                font-size: 1.25rem;
-                font-weight: 600;
-                color: #f97316;
-            }
-
-            .modal-body {
-                padding: 1.5rem;
-            }
-
-            .modal-description {
-                margin: 0 0 1rem 0;
-                color: var(--text-primary);
-                font-size: 1rem;
-            }
-
-            .modal-info-card {
-                background: rgba(0, 0, 0, 0.3);
-                border: 1px solid rgba(255, 255, 255, 0.1);
-                border-radius: 12px;
-                padding: 1rem;
-                margin-bottom: 1rem;
-            }
-
-            .info-row {
-                display: flex;
-                justify-content: space-between;
-                padding: 0.5rem 0;
-                border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-            }
-
-            .info-row:last-child {
-                border-bottom: none;
-            }
-
-            .info-label {
-                color: var(--text-secondary);
-                font-size: 0.875rem;
-            }
-
-            .info-value {
-                color: var(--text-primary);
-                font-size: 0.875rem;
-                font-weight: 500;
-                max-width: 250px;
-                overflow: hidden;
-                text-overflow: ellipsis;
-                white-space: nowrap;
-            }
-
-            .modal-warning {
-                display: flex;
-                gap: 12px;
-                background: rgba(239, 68, 68, 0.1);
-                border: 1px solid rgba(239, 68, 68, 0.3);
-                border-radius: 12px;
-                padding: 1rem;
-            }
-
-            .warning-icon {
-                font-size: 1.5rem;
-                flex-shrink: 0;
-            }
-
-            .warning-text {
-                color: #fca5a5;
-                font-size: 0.875rem;
-            }
-
-            .warning-text strong {
-                color: #ef4444;
-            }
-
-            .warning-text ul {
-                margin: 0.5rem 0;
-                padding-left: 1.25rem;
-            }
-
-            .warning-text li {
-                margin: 0.25rem 0;
-            }
-
-            .warning-note {
-                margin: 0.75rem 0 0 0;
-                font-weight: 600;
-                color: #ef4444;
-            }
-
-            .modal-footer {
-                display: flex;
-                justify-content: flex-end;
-                gap: 12px;
-                padding: 1rem 1.5rem;
-                border-top: 1px solid rgba(255, 255, 255, 0.1);
-            }
-
-            .modal-btn {
-                display: flex;
-                align-items: center;
-                gap: 8px;
-                padding: 0.75rem 1.5rem;
-                border-radius: 8px;
-                font-size: 0.875rem;
-                font-weight: 500;
-                cursor: pointer;
-                transition: all 0.2s ease;
-                border: none;
-            }
-
-            .modal-btn-cancel {
-                background: rgba(255, 255, 255, 0.1);
-                color: var(--text-secondary);
-            }
-
-            .modal-btn-cancel:hover {
-                background: rgba(255, 255, 255, 0.2);
-                color: var(--text-primary);
-            }
-
-            .modal-btn-confirm {
-                background: linear-gradient(135deg, #f97316, #ea580c);
-                color: white;
-            }
-
-            .modal-btn-confirm:hover {
-                background: linear-gradient(135deg, #fb923c, #f97316);
-                transform: translateY(-2px);
-                box-shadow: 0 5px 20px rgba(249, 115, 22, 0.3);
-            }
-
-            .modal-btn-confirm:active {
-                transform: translateY(0);
-            }
-        </style>
-
-        <script>
-            // Estado
-            let processedExtratos = [];
-            let currentFilter = 'all';
-            let currentProcessingFiles = {};
-            let selectedItems = new Set();  // IDs selecionados para reversão em lote
-
-            // WebSocket
-            let ws = null;
-            let reconnectAttempts = 0;
-
-            function connect() {
-                const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                const wsUrl = `${protocol}//${window.location.host}/ws`;
-
-                ws = new WebSocket(wsUrl);
-
-                ws.onopen = () => {
-                    reconnectAttempts = 0;
-                    updateConnectionStatus(true);
-                    addEvent('info', 'Conectado ao servidor');
-                };
-
-                ws.onclose = () => {
-                    updateConnectionStatus(false);
-                    if (reconnectAttempts < 10) {
-                        reconnectAttempts++;
-                        setTimeout(connect, Math.min(1000 * reconnectAttempts, 10000));
-                    }
-                };
-
-                ws.onerror = () => addEvent('error', 'Erro de conexão');
-
-                ws.onmessage = (event) => {
-                    try {
-                        handleEvent(JSON.parse(event.data));
-                    } catch (e) {
-                        console.error('Erro ao processar mensagem:', e);
-                    }
-                };
-            }
-
-            function updateConnectionStatus(connected) {
-                document.getElementById('statusDot').classList.toggle('connected', connected);
-                document.getElementById('statusText').textContent = connected ? 'Sistema Rodando' : 'Sistema Parado';
-            }
-
-            function handleEvent(data) {
-                const { event_type, filename, message, details, progress } = data;
-
-                // Atualizar estatísticas
-                if (details?.stats) updateStats(details.stats);
-
-                switch (event_type) {
-                    case 'connected':
-                        addEvent('success', 'Conectado ao sistema');
-                        break;
-
-                    case 'file_received':
-                    case 'pdf_processing_start':
-                        startProcessing(filename);
-                        break;
-
-                    case 'pdf_text_extracting':
-                        updateProcessingStep(filename, 'Extraindo texto...', 10);
-                        break;
-
-                    case 'pdf_text_extracted':
-                        updateProcessingStep(filename, 'Texto extraído', 25);
-                        break;
-
-                    case 'llm_analyzing':
-                        updateProcessingStep(filename, '🤖 Analisando com IA...', 30);
-                        break;
-
-                    case 'llm_completed':
-                        updateProcessingStep(filename, `IA: ${details?.cliente || 'N/A'}`, 50);
-                        addEvent('info', `IA identificou: ${details?.cliente || 'N/A'}`);
-                        break;
-
-                    case 'matching_start':
-                        updateProcessingStep(filename, 'Buscando cliente...', 55);
-                        break;
-
-                    case 'matching_completed':
-                        updateProcessingStep(filename, details?.found ? `✅ ${details.cliente}` : '⚠️ Não encontrado', 70);
-                        break;
-
-                    case 'file_saving':
-                        updateProcessingStep(filename, 'Salvando...', 80);
-                        break;
-
-                    case 'file_saved':
-                        updateProcessingStep(filename, 'Salvo!', 90);
-                        break;
-
-                    case 'processing_completed':
-                        endProcessing(filename, details);
-                        addEvent(details?.status === 'SUCESSO' ? 'success' : 'warning',
-                            `${filename}: ${details?.status} - ${details?.cliente || 'Não identificado'}`);
-                        break;
-
-                    case 'processing_error':
-                        endProcessingError(filename, message);
-                        addEvent('error', `Erro: ${filename} - ${message}`);
-                        break;
-
-                    case 'stats_update':
-                        break;
-
-                    default:
-                        if (message) addEvent('info', message);
-                }
-            }
-
-            function updateStats(stats) {
-                document.getElementById('statTotal').textContent = stats.total_processados || 0;
-                document.getElementById('statSuccess').textContent = stats.sucesso || 0;
-                document.getElementById('statWarning').textContent = stats.nao_identificados || 0;
-                document.getElementById('statError').textContent = stats.falhas || 0;
-
-                const processingCount = stats.em_processamento || 0;
-                document.getElementById('statProcessing').textContent = processingCount;
-
-                // Mostra/Oculta botão de parar
-                const btnStop = document.getElementById('btnStopProcessing');
-                if (btnStop) {
-                    btnStop.style.display = processingCount > 0 ? 'block' : 'none';
-                }
-            }
-
-            function startProcessing(filename) {
-                currentProcessingFiles[filename] = { step: 'Iniciando...', progress: 0 };
+        function updateProcessingStep(filename, step, progress) {
+            if (currentProcessingFiles[filename]) {
+                currentProcessingFiles[filename] = { step, progress };
                 renderCurrentProcessing();
-                document.getElementById('processingSpinner').style.display = 'block';
             }
+        }
 
-            function updateProcessingStep(filename, step, progress) {
-                if (currentProcessingFiles[filename]) {
-                    currentProcessingFiles[filename] = { step, progress };
-                    renderCurrentProcessing();
-                }
-            }
+        function renderCurrentProcessing() {
+            const container = document.getElementById('currentProcessing');
+            const files = Object.entries(currentProcessingFiles);
 
-            function renderCurrentProcessing() {
-                const container = document.getElementById('currentProcessing');
-                const files = Object.entries(currentProcessingFiles);
-
-                if (files.length === 0) {
-                    container.innerHTML = `
+            if (files.length === 0) {
+                container.innerHTML = `
                     <div class="no-processing">
                         <div class="icon">📭</div>
                         <p>Aguardando...</p>
                     </div>
                 `;
-                    document.getElementById('processingSpinner').style.display = 'none';
-                    return;
-                }
+                document.getElementById('processingSpinner').style.display = 'none';
+                return;
+            }
 
-                container.innerHTML = files.map(([filename, data]) => `
+            container.innerHTML = files.map(([filename, data]) => `
                 <div class="processing-card">
                     <div class="filename">📄 ${filename}</div>
                     <div class="progress-bar">
@@ -1321,88 +1319,88 @@
                     </div>
                 </div>
             `).join('');
+        }
+
+        function endProcessing(filename, details) {
+            delete currentProcessingFiles[filename];
+            renderCurrentProcessing();
+
+            // Adiciona à tabela
+            const extrato = {
+                hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                empresa: details?.cliente || 'NÃO IDENTIFICADO',
+                arquivo: filename,
+                tipo: details?.tipo || '-',
+                banco: details?.banco || '-',
+                ano: details?.ano || '-',
+                mes: details?.mes || '-',
+                status: details?.status || 'SUCESSO',
+                metodo: details?.metodo || '-',
+                path: details?.path || '-',
+                logId: details?.log_id || null,  // ID do log no banco para reversão
+                statusClass: details?.status === 'SUCESSO' ? 'success' :
+                    (details?.status === 'FALHA' ? 'error' : 'warning')
+            };
+
+            processedExtratos.unshift(extrato);
+            renderExtratosTable();
+        }
+
+        function endProcessingError(filename, message) {
+            delete currentProcessingFiles[filename];
+            renderCurrentProcessing();
+
+            const extrato = {
+                hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                empresa: 'ERRO',
+                arquivo: filename,
+                tipo: '-',
+                banco: '-',
+                ano: '-',
+                mes: '-',
+                status: 'FALHA',
+                metodo: '-',
+                path: '-',
+                statusClass: 'error',
+                erro: message
+            };
+
+            processedExtratos.unshift(extrato);
+            renderExtratosTable();
+        }
+
+        function renderExtratosTable() {
+            const tbody = document.getElementById('extratosBody');
+
+            // Get filter values
+            const searchName = document.getElementById('searchName').value.toLowerCase();
+            const searchYear = document.getElementById('searchYear').value;
+            const searchMonth = document.getElementById('searchMonth').value;
+
+            let filtered = processedExtratos;
+
+            // Filter by Status
+            if (currentFilter !== 'all') {
+                filtered = filtered.filter(e => e.statusClass === currentFilter);
             }
 
-            function endProcessing(filename, details) {
-                delete currentProcessingFiles[filename];
-                renderCurrentProcessing();
-
-                // Adiciona à tabela
-                const extrato = {
-                    hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                    empresa: details?.cliente || 'NÃO IDENTIFICADO',
-                    arquivo: filename,
-                    tipo: details?.tipo || '-',
-                    banco: details?.banco || '-',
-                    ano: details?.ano || '-',
-                    mes: details?.mes || '-',
-                    status: details?.status || 'SUCESSO',
-                    metodo: details?.metodo || '-',
-                    path: details?.path || '-',
-                    logId: details?.log_id || null,  // ID do log no banco para reversão
-                    statusClass: details?.status === 'SUCESSO' ? 'success' :
-                        (details?.status === 'FALHA' ? 'error' : 'warning')
-                };
-
-                processedExtratos.unshift(extrato);
-                renderExtratosTable();
+            // Filter by Name
+            if (searchName) {
+                filtered = filtered.filter(e => e.empresa.toLowerCase().includes(searchName));
             }
 
-            function endProcessingError(filename, message) {
-                delete currentProcessingFiles[filename];
-                renderCurrentProcessing();
-
-                const extrato = {
-                    hora: new Date().toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                    empresa: 'ERRO',
-                    arquivo: filename,
-                    tipo: '-',
-                    banco: '-',
-                    ano: '-',
-                    mes: '-',
-                    status: 'FALHA',
-                    metodo: '-',
-                    path: '-',
-                    statusClass: 'error',
-                    erro: message
-                };
-
-                processedExtratos.unshift(extrato);
-                renderExtratosTable();
+            // Filter by Year
+            if (searchYear) {
+                filtered = filtered.filter(e => String(e.ano) == searchYear);
             }
 
-            function renderExtratosTable() {
-                const tbody = document.getElementById('extratosBody');
+            // Filter by Month
+            if (searchMonth) {
+                filtered = filtered.filter(e => String(e.mes) == searchMonth);
+            }
 
-                // Get filter values
-                const searchName = document.getElementById('searchName').value.toLowerCase();
-                const searchYear = document.getElementById('searchYear').value;
-                const searchMonth = document.getElementById('searchMonth').value;
-
-                let filtered = processedExtratos;
-
-                // Filter by Status
-                if (currentFilter !== 'all') {
-                    filtered = filtered.filter(e => e.statusClass === currentFilter);
-                }
-
-                // Filter by Name
-                if (searchName) {
-                    filtered = filtered.filter(e => e.empresa.toLowerCase().includes(searchName));
-                }
-
-                // Filter by Year
-                if (searchYear) {
-                    filtered = filtered.filter(e => String(e.ano) == searchYear);
-                }
-
-                // Filter by Month
-                if (searchMonth) {
-                    filtered = filtered.filter(e => String(e.mes) == searchMonth);
-                }
-
-                if (filtered.length === 0) {
-                    tbody.innerHTML = `
+            if (filtered.length === 0) {
+                tbody.innerHTML = `
                     <tr>
                         <td colspan="9">
                             <div class="empty-state">
@@ -1412,29 +1410,29 @@
                         </td>
                     </tr>
                 `;
-                    return;
-                }
+                return;
+            }
 
-                const meses = ['', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
+            const meses = ['', 'Jan', 'Fev', 'Mar', 'Abr', 'Mai', 'Jun', 'Jul', 'Ago', 'Set', 'Out', 'Nov', 'Dez'];
 
-                tbody.innerHTML = filtered.map((e, index) => {
-                    // Encontra o índice real no array original para poder deletar corretamente
-                    const realIndex = processedExtratos.indexOf(e);
-                    const canRevert = e.logId && e.status === 'SUCESSO';
-                    const isSelected = selectedItems.has(e.logId);
-                    return `
+            tbody.innerHTML = filtered.map((e, index) => {
+                const realIndex = processedExtratos.indexOf(e);
+                // Permite reverter se tiver logId, independentemente do status
+                const canRevert = !!e.logId;
+                const isSelected = selectedItems.has(e.logId);
+                return `
                 <tr data-status="${e.statusClass}" data-index="${realIndex}" class="${isSelected ? 'selected' : ''}">
                     <td class="checkbox-col">
                         ${canRevert ?
-                            `<input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSelection(${e.logId}, ${realIndex})" data-logid="${e.logId}">` :
-                            ''
-                        }
+                        `<input type="checkbox" ${isSelected ? 'checked' : ''} onchange="toggleSelection(${e.logId}, ${realIndex})" data-logid="${e.logId}">` :
+                        ''
+                    }
                     </td>
                     <td class="action-col">
                         ${canRevert ?
-                            `<button class="revert-btn" onclick="reverterExtrato(${e.logId}, ${realIndex})" title="Reverter processamento e deletar arquivo">🔄 Reverter</button>` :
-                            `<span style="color: var(--text-muted); font-size: 0.65rem;">-</span>`
-                        }
+                        `<button class="revert-btn" onclick="reverterExtrato(${e.logId}, ${realIndex})" title="Reverter processamento e deletar arquivo">🔄 Reverter</button>` :
+                        `<span style="color: var(--text-muted); font-size: 0.65rem;">-</span>`
+                    }
                     </td>
                     <td class="hora">${e.hora}</td>
                     <td class="empresa" title="${e.empresa}">${e.empresa}</td>
@@ -1451,265 +1449,277 @@
                     <td class="path" title="${e.path}">${e.path}</td>
                 </tr>
             `}).join('');
+        }
+
+        // Add Listeners
+        document.getElementById('searchName').addEventListener('input', renderExtratosTable);
+        document.getElementById('searchYear').addEventListener('input', renderExtratosTable);
+        document.getElementById('searchMonth').addEventListener('change', renderExtratosTable);
+
+        function filterExtratos(filter) {
+            currentFilter = filter;
+
+            // Atualiza botões
+            document.querySelectorAll('.filter-btn').forEach(btn => {
+                btn.classList.remove('active');
+            });
+            event.target.classList.add('active');
+
+            renderExtratosTable();
+        }
+
+        function deleteExtrato(index) {
+            if (index >= 0 && index < processedExtratos.length) {
+                processedExtratos.splice(index, 1);
+                renderExtratosTable();
             }
+        }
 
-            // Add Listeners
-            document.getElementById('searchName').addEventListener('input', renderExtratosTable);
-            document.getElementById('searchYear').addEventListener('input', renderExtratosTable);
-            document.getElementById('searchMonth').addEventListener('change', renderExtratosTable);
+        // Variáveis do modal de reversão
+        let pendingRevert = { logId: null, index: null };
 
-            function filterExtratos(filter) {
-                currentFilter = filter;
+        function openRevertModal(logId, index) {
+            const extrato = processedExtratos[index];
+            if (!extrato) return;
 
-                // Atualiza botões
-                document.querySelectorAll('.filter-btn').forEach(btn => {
-                    btn.classList.remove('active');
+            // Preenche os dados no modal
+            document.getElementById('modalFileName').textContent = extrato.arquivo || '-';
+            document.getElementById('modalClientName').textContent = extrato.empresa || '-';
+            document.getElementById('modalBankName').textContent = extrato.banco || '-';
+
+            // Salva os dados pendentes
+            pendingRevert = { logId, index };
+
+            // Mostra o modal
+            document.getElementById('revertModal').style.display = 'flex';
+
+            // Configura o botão de confirmar
+            document.getElementById('confirmRevertBtn').onclick = () => executeRevert();
+        }
+
+        function closeRevertModal() {
+            document.getElementById('revertModal').style.display = 'none';
+            pendingRevert = { logId: null, index: null };
+        }
+
+        async function executeRevert() {
+            const { logId, index } = pendingRevert;
+            if (!logId) return;
+
+            // Desabilita o botão durante a execução
+            const confirmBtn = document.getElementById('confirmRevertBtn');
+            const originalText = confirmBtn.innerHTML;
+            confirmBtn.innerHTML = '⏳ Revertendo...';
+            confirmBtn.disabled = true;
+
+            try {
+                const response = await fetch(`/reversao/${logId}`, {
+                    method: 'DELETE'
                 });
-                event.target.classList.add('active');
+                const data = await response.json();
 
-                renderExtratosTable();
-            }
+                if (data.success) {
+                    // Pega o status do extrato antes de remover
+                    const extrato = processedExtratos[index];
+                    const wasSuccess = extrato && extrato.statusClass === 'success';
 
-            function deleteExtrato(index) {
-                if (index >= 0 && index < processedExtratos.length) {
-                    processedExtratos.splice(index, 1);
-                    renderExtratosTable();
-                }
-            }
-
-            // Variáveis do modal de reversão
-            let pendingRevert = { logId: null, index: null };
-
-            function openRevertModal(logId, index) {
-                const extrato = processedExtratos[index];
-                if (!extrato) return;
-
-                // Preenche os dados no modal
-                document.getElementById('modalFileName').textContent = extrato.arquivo || '-';
-                document.getElementById('modalClientName').textContent = extrato.empresa || '-';
-                document.getElementById('modalBankName').textContent = extrato.banco || '-';
-
-                // Salva os dados pendentes
-                pendingRevert = { logId, index };
-
-                // Mostra o modal
-                document.getElementById('revertModal').style.display = 'flex';
-
-                // Configura o botão de confirmar
-                document.getElementById('confirmRevertBtn').onclick = () => executeRevert();
-            }
-
-            function closeRevertModal() {
-                document.getElementById('revertModal').style.display = 'none';
-                pendingRevert = { logId: null, index: null };
-            }
-
-            async function executeRevert() {
-                const { logId, index } = pendingRevert;
-                if (!logId) return;
-
-                // Desabilita o botão durante a execução
-                const confirmBtn = document.getElementById('confirmRevertBtn');
-                const originalText = confirmBtn.innerHTML;
-                confirmBtn.innerHTML = '⏳ Revertendo...';
-                confirmBtn.disabled = true;
-
-                try {
-                    const response = await fetch(`/reversao/${logId}`, {
-                        method: 'DELETE'
-                    });
-                    const data = await response.json();
-
-                    if (data.success) {
-                        // Pega o status do extrato antes de remover
-                        const extrato = processedExtratos[index];
-                        const wasSuccess = extrato && extrato.statusClass === 'success';
-
-                        // Remove da lista local
-                        if (index >= 0 && index < processedExtratos.length) {
-                            processedExtratos.splice(index, 1);
-                            renderExtratosTable();
-                        }
-
-                        // Atualiza estatísticas locais
-                        if (wasSuccess) {
-                            const statSuccess = document.getElementById('statSuccess');
-                            const statTotal = document.getElementById('statTotal');
-                            if (statSuccess) {
-                                statSuccess.textContent = Math.max(0, parseInt(statSuccess.textContent) - 1);
-                            }
-                            if (statTotal) {
-                                statTotal.textContent = Math.max(0, parseInt(statTotal.textContent) - 1);
-                            }
-                        }
-
-                        // Fecha o modal
-                        closeRevertModal();
-
-                        // Mostra mensagem de sucesso
-                        addEvent('success', `Reversão concluída: ${data.cliente || 'Registro'} - Arquivo ${data.arquivo_deletado ? 'deletado' : 'não encontrado'}`);
-                    } else {
-                        addEvent('error', `Erro na reversão: ${data.message}`);
-                        closeRevertModal();
-                        alert('Erro ao reverter: ' + data.message);
-                    }
-                } catch (error) {
-                    console.error('Erro ao reverter:', error);
-                    addEvent('error', `Erro na reversão: ${error.message}`);
-                    closeRevertModal();
-                    alert('Erro ao conectar com o servidor');
-                } finally {
-                    confirmBtn.innerHTML = originalText;
-                    confirmBtn.disabled = false;
-                }
-            }
-
-            // Função chamada pelo botão na tabela
-            function reverterExtrato(logId, index) {
-                openRevertModal(logId, index);
-            }
-
-            // Fecha modal ao clicar fora
-            document.getElementById('revertModal').addEventListener('click', (e) => {
-                if (e.target.id === 'revertModal') {
-                    closeRevertModal();
-                }
-            });
-
-            // Fecha modal com ESC
-            document.addEventListener('keydown', (e) => {
-                if (e.key === 'Escape' && document.getElementById('revertModal').style.display === 'flex') {
-                    closeRevertModal();
-                }
-            });
-
-            // ============================================
-            // FUNÇÕES DE SELEÇÃO EM LOTE
-            // ============================================
-
-            function toggleSelection(logId, index) {
-                if (selectedItems.has(logId)) {
-                    selectedItems.delete(logId);
-                } else {
-                    selectedItems.add(logId);
-                }
-                updateBatchButton();
-                renderExtratosTable();
-            }
-
-            function toggleSelectAll() {
-                const selectAllCheckbox = document.getElementById('selectAllCheckbox');
-                const allRevertable = processedExtratos.filter(e => e.logId && e.status === 'SUCESSO');
-
-                if (selectAllCheckbox.checked) {
-                    // Seleciona todos que podem ser revertidos
-                    allRevertable.forEach(e => selectedItems.add(e.logId));
-                } else {
-                    // Desmarca todos
-                    selectedItems.clear();
-                }
-                updateBatchButton();
-                renderExtratosTable();
-            }
-
-            function updateBatchButton() {
-                const btn = document.getElementById('batchRevertBtn');
-                const count = document.getElementById('selectedCount');
-                count.textContent = selectedItems.size;
-
-                if (selectedItems.size > 0) {
-                    btn.style.display = 'flex';
-                } else {
-                    btn.style.display = 'none';
-                }
-            }
-
-            function openBatchRevertModal() {
-                if (selectedItems.size === 0) return;
-
-                // Atualiza o modal para mostrar quantidade
-                document.getElementById('modalFileName').textContent = `${selectedItems.size} arquivo(s) selecionado(s)`;
-                document.getElementById('modalClientName').textContent = 'Múltiplos clientes';
-                document.getElementById('modalBankName').textContent = '-';
-
-                // Mostra o modal
-                document.getElementById('revertModal').style.display = 'flex';
-
-                // Configura o botão de confirmar para reversão em lote
-                document.getElementById('confirmRevertBtn').onclick = () => executeBatchRevert();
-            }
-
-            async function executeBatchRevert() {
-                if (selectedItems.size === 0) return;
-
-                // Desabilita o botão durante a execução
-                const confirmBtn = document.getElementById('confirmRevertBtn');
-                const originalText = confirmBtn.innerHTML;
-                confirmBtn.innerHTML = '⏳ Revertendo...';
-                confirmBtn.disabled = true;
-
-                const logIds = Array.from(selectedItems);
-                let successCount = 0;
-                let errorCount = 0;
-
-                try {
-                    // Usa o endpoint de reversão em lote
-                    const response = await fetch('/reversao/lote', {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ log_ids: logIds })
-                    });
-                    const data = await response.json();
-
-                    if (data.success) {
-                        successCount = data.revertidos || 0;
-                        errorCount = data.erros || 0;
-
-                        // Remove os itens revertidos da lista local
-                        processedExtratos = processedExtratos.filter(e => !selectedItems.has(e.logId));
-
-                        // Limpa a seleção
-                        selectedItems.clear();
-                        document.getElementById('selectAllCheckbox').checked = false;
-                        updateBatchButton();
+                    // Remove da lista local
+                    if (index >= 0 && index < processedExtratos.length) {
+                        processedExtratos.splice(index, 1);
                         renderExtratosTable();
-
-                        // Atualiza estatísticas
-                        const statSuccess = document.getElementById('statSuccess');
-                        const statTotal = document.getElementById('statTotal');
-                        if (statSuccess) {
-                            statSuccess.textContent = Math.max(0, parseInt(statSuccess.textContent) - successCount);
-                        }
-                        if (statTotal) {
-                            statTotal.textContent = Math.max(0, parseInt(statTotal.textContent) - successCount);
-                        }
-
-                        // Fecha o modal
-                        closeRevertModal();
-
-                        // Mostra mensagem de sucesso
-                        addEvent('success', `Reversão em lote: ${successCount} revertido(s), ${errorCount} erro(s)`);
-                    } else {
-                        addEvent('error', `Erro na reversão em lote: ${data.message}`);
-                        closeRevertModal();
-                        alert('Erro ao reverter: ' + data.message);
                     }
-                } catch (error) {
-                    console.error('Erro ao reverter em lote:', error);
-                    addEvent('error', `Erro na reversão em lote: ${error.message}`);
+
+                    // Atualiza estatísticas locais
+                    if (extrato) {
+                        const statTotal = document.getElementById('statTotal');
+                        if (statTotal) statTotal.textContent = Math.max(0, parseInt(statTotal.textContent) - 1);
+
+                        if (extrato.statusClass === 'success') {
+                            const statSuccess = document.getElementById('statSuccess');
+                            if (statSuccess) statSuccess.textContent = Math.max(0, parseInt(statSuccess.textContent) - 1);
+                        } else if (extrato.statusClass === 'error') {
+                            const statError = document.getElementById('statError');
+                            if (statError) statError.textContent = Math.max(0, parseInt(statError.textContent) - 1);
+                        } else if (extrato.statusClass === 'warning') {
+                            const statWarning = document.getElementById('statWarning');
+                            if (statWarning) statWarning.textContent = Math.max(0, parseInt(statWarning.textContent) - 1);
+                        }
+                    }
+
+                    // Fecha o modal
                     closeRevertModal();
-                    alert('Erro ao conectar com o servidor');
-                } finally {
-                    confirmBtn.innerHTML = originalText;
-                    confirmBtn.disabled = false;
+
+                    // Mostra mensagem de sucesso
+                    addEvent('success', `Reversão concluída: ${data.cliente || 'Registro'} - Arquivo ${data.arquivo_deletado ? 'deletado' : 'não encontrado'}`);
+                } else {
+                    addEvent('error', `Erro na reversão: ${data.message}`);
+                    closeRevertModal();
+                    alert('Erro ao reverter: ' + data.message);
                 }
+            } catch (error) {
+                console.error('Erro ao reverter:', error);
+                addEvent('error', `Erro na reversão: ${error.message}`);
+                closeRevertModal();
+                alert('Erro ao conectar com o servidor');
+            } finally {
+                confirmBtn.innerHTML = originalText;
+                confirmBtn.disabled = false;
             }
+        }
 
-            function addEvent(type, message) {
-                const log = document.getElementById('eventLog');
-                const time = new Date().toLocaleTimeString('pt-BR');
+        // Função chamada pelo botão na tabela
+        function reverterExtrato(logId, index) {
+            openRevertModal(logId, index);
+        }
 
-                const eventHtml = `
+        // Fecha modal ao clicar fora
+        document.getElementById('revertModal').addEventListener('click', (e) => {
+            if (e.target.id === 'revertModal') {
+                closeRevertModal();
+            }
+        });
+
+        // Fecha modal com ESC
+        document.addEventListener('keydown', (e) => {
+            if (e.key === 'Escape' && document.getElementById('revertModal').style.display === 'flex') {
+                closeRevertModal();
+            }
+        });
+
+        // ============================================
+        // FUNÇÕES DE SELEÇÃO EM LOTE
+        // ============================================
+
+        function toggleSelection(logId, index) {
+            if (selectedItems.has(logId)) {
+                selectedItems.delete(logId);
+            } else {
+                selectedItems.add(logId);
+            }
+            updateBatchButton();
+            renderExtratosTable();
+        }
+
+        function toggleSelectAll() {
+            const selectAllCheckbox = document.getElementById('selectAllCheckbox');
+            const allRevertable = processedExtratos.filter(e => !!e.logId);
+
+            if (selectAllCheckbox.checked) {
+                // Seleciona todos que podem ser revertidos
+                allRevertable.forEach(e => selectedItems.add(e.logId));
+            } else {
+                // Desmarca todos
+                selectedItems.clear();
+            }
+            updateBatchButton();
+            renderExtratosTable();
+        }
+
+        function updateBatchButton() {
+            const btn = document.getElementById('batchRevertBtn');
+            const count = document.getElementById('selectedCount');
+            count.textContent = selectedItems.size;
+
+            if (selectedItems.size > 0) {
+                btn.style.display = 'flex';
+            } else {
+                btn.style.display = 'none';
+            }
+        }
+
+        function openBatchRevertModal() {
+            if (selectedItems.size === 0) return;
+
+            // Atualiza o modal para mostrar quantidade
+            document.getElementById('modalFileName').textContent = `${selectedItems.size} arquivo(s) selecionado(s)`;
+            document.getElementById('modalClientName').textContent = 'Múltiplos clientes';
+            document.getElementById('modalBankName').textContent = '-';
+
+            // Mostra o modal
+            document.getElementById('revertModal').style.display = 'flex';
+
+            // Configura o botão de confirmar para reversão em lote
+            document.getElementById('confirmRevertBtn').onclick = () => executeBatchRevert();
+        }
+
+        async function executeBatchRevert() {
+            if (selectedItems.size === 0) return;
+
+            // Desabilita o botão durante a execução
+            const confirmBtn = document.getElementById('confirmRevertBtn');
+            const originalText = confirmBtn.innerHTML;
+            confirmBtn.innerHTML = '⏳ Revertendo...';
+            confirmBtn.disabled = true;
+
+            const logIds = Array.from(selectedItems);
+            let successCount = 0;
+            let errorCount = 0;
+
+            try {
+                // Usa o endpoint de reversão em lote
+                const response = await fetch('/reversao/lote', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(logIds)
+                });
+                const data = await response.json();
+
+                if (data.success) {
+                    successCount = data.revertidos || 0;
+                    errorCount = data.erros || 0;
+
+                    // Remove os itens revertidos da lista local
+                    processedExtratos = processedExtratos.filter(e => !selectedItems.has(e.logId));
+
+                    // Limpa a seleção
+                    selectedItems.clear();
+                    document.getElementById('selectAllCheckbox').checked = false;
+                    updateBatchButton();
+                    renderExtratosTable();
+
+                    // Atualiza estatísticas
+                    // Recalcula estatísticas com base na lista atualizada
+                    const newTotal = processedExtratos.length;
+                    const newSuccess = processedExtratos.filter(e => e.statusClass === 'success').length;
+                    const newWarning = processedExtratos.filter(e => e.statusClass === 'warning').length;
+                    const newError = processedExtratos.filter(e => e.statusClass === 'error').length;
+
+                    const elTotal = document.getElementById('statTotal');
+                    const elSuccess = document.getElementById('statSuccess');
+                    const elWarning = document.getElementById('statWarning');
+                    const elError = document.getElementById('statError');
+
+                    if (elTotal) elTotal.textContent = newTotal;
+                    if (elSuccess) elSuccess.textContent = newSuccess;
+                    if (elWarning) elWarning.textContent = newWarning;
+                    if (elError) elError.textContent = newError;
+
+                    // Fecha o modal
+                    closeRevertModal();
+
+                    // Mostra mensagem de sucesso
+                    addEvent('success', `Reversão em lote: ${successCount} revertido(s), ${errorCount} erro(s)`);
+                } else {
+                    addEvent('error', `Erro na reversão em lote: ${data.message}`);
+                    closeRevertModal();
+                    alert('Erro ao reverter: ' + data.message);
+                }
+            } catch (error) {
+                console.error('Erro ao reverter em lote:', error);
+                addEvent('error', `Erro na reversão em lote: ${error.message}`);
+                closeRevertModal();
+                alert('Erro ao conectar com o servidor');
+            } finally {
+                confirmBtn.innerHTML = originalText;
+                confirmBtn.disabled = false;
+            }
+        }
+
+        function addEvent(type, message) {
+            const log = document.getElementById('eventLog');
+            const time = new Date().toLocaleTimeString('pt-BR');
+
+            const eventHtml = `
                 <div class="event-item">
                     <div class="time">${time}</div>
                     <div class="content">
@@ -1719,162 +1729,162 @@
                 </div>
             `;
 
-                log.insertAdjacentHTML('afterbegin', eventHtml);
+            log.insertAdjacentHTML('afterbegin', eventHtml);
 
-                // Limita a 30 eventos
-                while (log.children.length > 30) {
-                    log.removeChild(log.lastChild);
-                }
+            // Limita a 30 eventos
+            while (log.children.length > 30) {
+                log.removeChild(log.lastChild);
             }
+        }
 
-            function clearLog() {
-                document.getElementById('eventLog').innerHTML = '';
-                addEvent('info', 'Log limpo');
-            }
+        function clearLog() {
+            document.getElementById('eventLog').innerHTML = '';
+            addEvent('info', 'Log limpo');
+        }
 
-            // Iniciar conexão
-            connect();
+        // Iniciar conexão
+        connect();
 
-            // Carregar jobs existentes via API
-            fetch('/jobs')
-                .then(r => r.json())
-                .then(data => {
-                    if (data.jobs) {
-                        data.jobs.forEach(job => {
-                            if (job.results?.resultados) {
-                                job.results.resultados.forEach(r => {
-                                    processedExtratos.push({
-                                        hora: new Date(job.completed_at || job.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
-                                        empresa: r.cliente_identificado || 'NÃO IDENTIFICADO',
-                                        arquivo: r.nome_arquivo_original,
-                                        banco: '-',
-                                        ano: r.ano || '-',
-                                        mes: r.mes || '-',
-                                        status: r.status,
-                                        metodo: r.metodo_identificacao || '-',
-                                        path: r.nome_arquivo_final || '-',
-                                        statusClass: r.status === 'SUCESSO' ? 'success' :
-                                            (r.status === 'FALHA' ? 'error' : 'warning')
-                                    });
+        // Carregar jobs existentes via API
+        fetch('/jobs')
+            .then(r => r.json())
+            .then(data => {
+                if (data.jobs) {
+                    data.jobs.forEach(job => {
+                        if (job.results?.resultados) {
+                            job.results.resultados.forEach(r => {
+                                processedExtratos.push({
+                                    hora: new Date(job.completed_at || job.created_at).toLocaleString('pt-BR', { timeZone: 'America/Sao_Paulo', day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+                                    empresa: r.cliente_identificado || 'NÃO IDENTIFICADO',
+                                    arquivo: r.nome_arquivo_original,
+                                    banco: '-',
+                                    ano: r.ano || '-',
+                                    mes: r.mes || '-',
+                                    status: r.status,
+                                    metodo: r.metodo_identificacao || '-',
+                                    path: r.nome_arquivo_final || '-',
+                                    statusClass: r.status === 'SUCESSO' ? 'success' :
+                                        (r.status === 'FALHA' ? 'error' : 'warning')
                                 });
-                            }
-                        });
-                        renderExtratosTable();
-                    }
-                })
-                .catch(console.error);
-
-            async function resetProcessing() {
-                if (!confirm('Tem certeza que deseja forçar a parada de todos os processamentos? Isso pode deixar arquivos incompletos.')) {
-                    return;
-                }
-
-                try {
-                    const response = await fetch('/monitor/reset', { method: 'POST' });
-                    const result = await response.json();
-                    console.log(result.message);
-
-                    // Força limpeza visual imediata
-                    currentProcessingFiles = {};
-                    renderProcessing();
-                    document.getElementById('processingSpinner').style.display = 'none';
-                    document.getElementById('btnStopProcessing').style.display = 'none';
-
-                } catch (e) {
-                    console.error("Erro ao resetar processamento:", e);
-                    alert("Erro ao tentar parar processamento.");
-                }
-            }
-
-            async function fetchFolderStats() {
-                try {
-                    const response = await fetch('/monitor/stats');
-                    const data = await response.json();
-
-                    // Atualiza o valor
-                    const elValue = document.getElementById('statFolderUnidentified');
-                    if (elValue) {
-                        const count = data.unidentified_files_count ?? 0;
-                        elValue.innerText = String(count); // Usa innerText e conversão explícita
-                    }
-
-                    // Atualiza o tooltip do card pai com o caminho
-                    const card = elValue?.closest('.stat-card');
-                    if (card) card.title = `Pasta: ${data.unidentified_path}`;
-
-                } catch (e) {
-                    console.error("Erro ao buscar stats da pasta:", e);
-                }
-            }
-
-            // Atualiza a cada 30 segundos
-            setInterval(fetchFolderStats, 30000);
-
-            async function loadHistory() {
-                try {
-                    const response = await fetch('/monitor/history');
-                    const history = await response.json();
-
-                    if (!Array.isArray(history)) return;
-
-                    // Mapeia para o formato usado na tabela
-                    const mappedHistory = history.map(item => ({
-                        hora: item.data_hora_formatada || '-',
-                        empresa: item.cliente || 'NÃO IDENTIFICADO',
-                        arquivo: item.filename || '-',
-                        tipo: item.tipo || '-',
-                        banco: item.banco || '-',
-                        ano: item.periodo ? item.periodo.split('/')[1] : '-',
-                        mes: item.periodo ? item.periodo.split('/')[0] : '-',
-                        status: item.status || '-',
-                        path: item.full_path || '-',
-                        logId: item.log_id || null,  // ID para reversão
-                        statusClass: item.status === 'SUCESSO' ? 'success' :
-                            (item.status === 'FALHA' ? 'error' : 'warning')
-                    }));
-
-                    // Substitui o estado inicial com os dados do banco
-                    processedExtratos = mappedHistory;
+                            });
+                        }
+                    });
                     renderExtratosTable();
-
-                    // Atualiza contadores baseados no histórico
-                    updateStatsFromHistory(mappedHistory);
-
-                } catch (e) {
-                    console.error("Erro ao carregar histórico:", e);
                 }
+            })
+            .catch(console.error);
+
+        async function resetProcessing() {
+            if (!confirm('Tem certeza que deseja forçar a parada de todos os processamentos? Isso pode deixar arquivos incompletos.')) {
+                return;
             }
 
-            function updateStatsFromHistory(history) {
-                // Recalcula stats baseado no historico carregado
-                const stats = {
-                    total_processados: history.length,
-                    sucesso: history.filter(i => i.status === 'SUCESSO').length,
-                    nao_identificados: history.filter(i => i.status === 'NAO_IDENTIFICADO').length,
-                    falhas: history.filter(i => i.status === 'FALHA' || i.status === 'ERRO').length,
-                    em_processamento: 0 // Historico é estático
-                };
+            try {
+                const response = await fetch('/monitor/reset', { method: 'POST' });
+                const result = await response.json();
+                console.log(result.message);
 
-                // Só atualiza os cards de contagem TOTAL, mantendo o "em processamento" zerado ou gerenciado pelo WS
-                document.getElementById('statTotal').textContent = stats.total_processados;
-                // document.getElementById('statSuccess').textContent = stats.sucesso; // Opcional: atualizar cards com histórico
-                // document.getElementById('statError').textContent = stats.falhas;
+                // Força limpeza visual imediata
+                currentProcessingFiles = {};
+                renderProcessing();
+                document.getElementById('processingSpinner').style.display = 'none';
+                document.getElementById('btnStopProcessing').style.display = 'none';
 
-                // Nota: Os cards superiores geralmente mostram o estado "da sessão" ou "do dia". 
-                // Se o usuário quer histórico de dias anteriores, talvez os cards devam refletir isso ou ter cards separados.
-                // Por padrão, vou deixar os cards refletirem o que está na tabela.
-                document.getElementById('statSuccess').textContent = stats.sucesso;
-                document.getElementById('statError').textContent = stats.falhas;
-                // O card de "Não Identificados (Pasta)" é gerado pelo backend (scan de pasta), então não mexo nele aqui.
+            } catch (e) {
+                console.error("Erro ao resetar processamento:", e);
+                alert("Erro ao tentar parar processamento.");
             }
+        }
 
-            // Chama ao iniciar
-            fetchFolderStats();
-            loadHistory(); // Carrega histórico persistente
+        async function fetchFolderStats() {
+            try {
+                const response = await fetch('/monitor/stats');
+                const data = await response.json();
 
-            // Conexão WebSocket iniciada no onload ou similar se houver, ou:
-            if (!ws) connect();
-        </script>
+                // Atualiza o valor
+                const elValue = document.getElementById('statFolderUnidentified');
+                if (elValue) {
+                    const count = data.unidentified_files_count ?? 0;
+                    elValue.innerText = String(count); // Usa innerText e conversão explícita
+                }
+
+                // Atualiza o tooltip do card pai com o caminho
+                const card = elValue?.closest('.stat-card');
+                if (card) card.title = `Pasta: ${data.unidentified_path}`;
+
+            } catch (e) {
+                console.error("Erro ao buscar stats da pasta:", e);
+            }
+        }
+
+        // Atualiza a cada 30 segundos
+        setInterval(fetchFolderStats, 30000);
+
+        async function loadHistory() {
+            try {
+                const response = await fetch('/monitor/history');
+                const history = await response.json();
+
+                if (!Array.isArray(history)) return;
+
+                // Mapeia para o formato usado na tabela
+                const mappedHistory = history.map(item => ({
+                    hora: item.data_hora_formatada || '-',
+                    empresa: item.cliente || 'NÃO IDENTIFICADO',
+                    arquivo: item.filename || '-',
+                    tipo: item.tipo || '-',
+                    banco: item.banco || '-',
+                    ano: item.periodo ? item.periodo.split('/')[1] : '-',
+                    mes: item.periodo ? item.periodo.split('/')[0] : '-',
+                    status: item.status || '-',
+                    path: item.full_path || '-',
+                    logId: item.log_id || null,  // ID para reversão
+                    statusClass: item.status === 'SUCESSO' ? 'success' :
+                        (item.status === 'FALHA' ? 'error' : 'warning')
+                }));
+
+                // Substitui o estado inicial com os dados do banco
+                processedExtratos = mappedHistory;
+                renderExtratosTable();
+
+                // Atualiza contadores baseados no histórico
+                updateStatsFromHistory(mappedHistory);
+
+            } catch (e) {
+                console.error("Erro ao carregar histórico:", e);
+            }
+        }
+
+        function updateStatsFromHistory(history) {
+            // Recalcula stats baseado no historico carregado
+            const stats = {
+                total_processados: history.length,
+                sucesso: history.filter(i => i.status === 'SUCESSO').length,
+                nao_identificados: history.filter(i => i.status === 'NAO_IDENTIFICADO').length,
+                falhas: history.filter(i => i.status === 'FALHA' || i.status === 'ERRO').length,
+                em_processamento: 0 // Historico é estático
+            };
+
+            // Só atualiza os cards de contagem TOTAL, mantendo o "em processamento" zerado ou gerenciado pelo WS
+            document.getElementById('statTotal').textContent = stats.total_processados;
+            // document.getElementById('statSuccess').textContent = stats.sucesso; // Opcional: atualizar cards com histórico
+            // document.getElementById('statError').textContent = stats.falhas;
+
+            // Nota: Os cards superiores geralmente mostram o estado "da sessão" ou "do dia". 
+            // Se o usuário quer histórico de dias anteriores, talvez os cards devam refletir isso ou ter cards separados.
+            // Por padrão, vou deixar os cards refletirem o que está na tabela.
+            document.getElementById('statSuccess').textContent = stats.sucesso;
+            document.getElementById('statError').textContent = stats.falhas;
+            // O card de "Não Identificados (Pasta)" é gerado pelo backend (scan de pasta), então não mexo nele aqui.
+        }
+
+        // Chama ao iniciar
+        fetchFolderStats();
+        loadHistory(); // Carrega histórico persistente
+
+        // Conexão WebSocket iniciada no onload ou similar se houver, ou:
+        if (!ws) connect();
+    </script>
     </div> <!-- Fecha container e main-content -->
 
     <script src="/static/js/tech-navbar.js"></script>
