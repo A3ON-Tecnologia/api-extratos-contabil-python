@@ -153,6 +153,43 @@ class DatabaseLogService:
         finally:
             db.close()
 
+    def update_batch(self, ids: list[int], updates: dict) -> int:
+        """
+        Atualiza múltiplos logs com os valores fornecidos em updates.
+        
+        Args:
+            ids: Lista de IDs para atualizar
+            updates: Dicionário com campos e valores a atualizar (ex: {"banco": "SICREDI"})
+            
+        Returns:
+            Número de registros atualizados
+        """
+        db = SessionLocal()
+        try:
+            # Filtra apenas campos válidos do modelo para evitar erros
+            valid_fields = {
+                k: v for k, v in updates.items() 
+                if hasattr(ExtratoLog, k) and k not in ['id', 'processado_em', 'created_at']
+            }
+            
+            if not valid_fields:
+                return 0
+                
+            # Executa update em lote
+            query = db.query(ExtratoLog).filter(ExtratoLog.id.in_(ids))
+            count = query.update(valid_fields, synchronize_session=False)
+            db.commit()
+            
+            logger.info(f"Update em lote: {count} registros atualizados. Campos: {valid_fields}")
+            return count
+            
+        except Exception as e:
+            db.rollback()
+            logger.error(f"Erro ao atualizar logs em lote: {e}")
+            raise
+        finally:
+            db.close()
+
 
 # Instância singleton
 _db_log_service: Optional[DatabaseLogService] = None

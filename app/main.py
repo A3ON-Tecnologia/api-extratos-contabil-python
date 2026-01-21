@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from app.config import get_settings
 from app.events import EventType, ProcessingEvent, get_event_manager, get_test_event_manager
@@ -552,15 +553,47 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.LLM_COMPLETED,
             filename=filename,
-            message=f"Analise concluida: {extraction.cliente_sugerido or 'N/A'}",
+            message=f"Analise textual concluida: {extraction.cliente_sugerido or 'N/A'}",
             details={
                 "cliente": extraction.cliente_sugerido,
                 "banco": extraction.banco,
                 "tipo": extraction.tipo_documento,
                 "confianca": extraction.confianca
             },
-            progress=50
+            progress=40
         ))
+
+        # --- FALLBACK VISUAL: Se não achou banco, tenta olhar o logo ---
+        if not extraction.banco and pdf_service.is_valid_pdf(pdf_data):
+            try:
+                await event_manager.emit(ProcessingEvent(
+                    event_type=EventType.LLM_ANALYZING,
+                    filename=filename,
+                    message="Banco não identificado no texto. Analisando logos (Visão IA)...",
+                    progress=45
+                ))
+                
+                # Extrai imagens da primeira página
+                images = await loop.run_in_executor(_executor, pdf_service.extract_first_page_images, pdf_data)
+                
+                if images:
+                    # Pergunta pra LLM via visão
+                    banco_visual = await loop.run_in_executor(_executor, llm_service.identify_bank_from_images, images)
+                    
+                    if banco_visual:
+                        extraction.banco = banco_visual
+                        logger.info(f"Banco identificado visualmente: {banco_visual}")
+                        
+                        await event_manager.emit(ProcessingEvent(
+                            event_type=EventType.LLM_COMPLETED,
+                            filename=filename,
+                            message=f"Banco identificado visualmente: {banco_visual}",
+                            details={"banco": banco_visual},
+                            progress=50
+                        ))
+            except Exception as e:
+                logger.warning(f"Erro no fallback visual: {e}")
+        # ----------------------------------------------------------------
         
         # 3. Faz matching do cliente
         await event_manager.emit(ProcessingEvent(
@@ -895,6 +928,63 @@ async def debug_clients():
         result["traceback"] = traceback.format_exc()
         
     return result
+
+
+@app.delete("/logs")
+async def clear_all_logs():
+    """
+    Limpa TODOS os logs de produção.
+    Usa o serviço de reversão para garantir que arquivos físicos também sejam removidos (se existirem)
+    e que as estatísticas sejam atualizadas corretamente.
+    Força a limpeza do cache em memória (_jobs) para evitar dados fantasmas.
+    """
+    try:
+        from app.database import SessionLocal
+        from app.models.extrato_log import ExtratoLog
+        
+        # IMPORTANTE: Limpa caches em memória incondicionalmente
+        # Isso resolve o problema de dados fantasmas que persistem após limpeza manual do banco/arquivos
+        qtde_memory = len(_jobs)
+        _jobs.clear()
+        _processed_hashes.clear()
+        
+        # 1. Busca todos os IDs
+        db = SessionLocal()
+        try:
+            logs = db.query(ExtratoLog).with_entities(ExtratoLog.id).all()
+            log_ids = [l.id for l in logs]
+        finally:
+            db.close()
+            
+        count_db = 0
+        resultado_detalhes = {}
+        
+        if log_ids:
+            # 2. Chama reverter_lote para garantir consistência de arquivos e banco
+            reversao_service = get_reversao_service()
+            resultado = reversao_service.reverter_lote(log_ids)
+            count_db = len(log_ids)
+            resultado_detalhes = resultado
+        
+        # 3. Emite evento de zeramento total para atualizar todos os clientes conectados
+        event_manager.emit_stats()
+        
+        return {
+            "success": True, 
+            "message": f"Limpeza completa realizada. Banco: {count_db} registros, Memória: {qtde_memory} jobs.",
+            "details": resultado_detalhes
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao limpar logs: {e}")
+        # Retorna erro JSON válido para o frontend
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False, 
+                "message": f"Erro interno ao limpar logs: {str(e)}"
+            }
+        )
 
 
 @app.post("/monitor/reset")
@@ -1351,6 +1441,33 @@ async def websocket_test_endpoint(websocket: WebSocket):
         logger.error(f"Erro no WebSocket de teste: {e}")
         event_manager.disconnect(websocket)
 
+
+
+class UpdateBatchRequest(BaseModel):
+    ids: list[int]
+    updates: dict
+
+@app.patch("/logs/update-batch")
+async def update_batch_logs(payload: UpdateBatchRequest):
+    """
+    Atualiza múltiplos logs com os valores fornecidos.
+    Útil para corrigir dados como banco, cliente, etc. em massa.
+    """
+    try:
+        db_log_service = get_db_log_service()
+        count = db_log_service.update_batch(payload.ids, payload.updates)
+        
+        # Emite evento para atualizar o monitor (força reload para todos)
+        event_manager.emit_stats()
+        
+        return {
+            "success": True, 
+            "message": f"{count} registros atualizados com sucesso.",
+            "updated_count": count
+        }
+    except Exception as e:
+        logger.error(f"Erro ao atualizar logs em lote: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 # ====== ENDPOINTS DE REVERSÃO ======
 

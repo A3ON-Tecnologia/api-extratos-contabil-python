@@ -1264,13 +1264,23 @@
         }
 
         function updateStats(stats) {
-            document.getElementById('statTotal').textContent = stats.total_processados || 0;
-            document.getElementById('statSuccess').textContent = stats.sucesso || 0;
-            document.getElementById('statWarning').textContent = stats.nao_identificados || 0;
-            document.getElementById('statError').textContent = stats.falhas || 0;
+            const elTotal = document.getElementById('statTotal');
+            if (elTotal) elTotal.textContent = stats.total_processados || 0;
+
+            const elSuccess = document.getElementById('statSuccess');
+            if (elSuccess) elSuccess.textContent = stats.sucesso || 0;
+
+            // statWarning foi removido ou substituído por statFolderUnidentified (gerenciado separadamente)
+            const elWarning = document.getElementById('statWarning');
+            if (elWarning) elWarning.textContent = stats.nao_identificados || 0;
+
+            const elError = document.getElementById('statError');
+            if (elError) elError.textContent = stats.falhas || 0;
 
             const processingCount = stats.em_processamento || 0;
-            document.getElementById('statProcessing').textContent = processingCount;
+            // statProcessing foi removido da UI
+            const elProcessing = document.getElementById('statProcessing');
+            if (elProcessing) elProcessing.textContent = processingCount;
 
             // Mostra/Oculta botão de parar
             const btnStop = document.getElementById('btnStopProcessing');
@@ -1444,11 +1454,34 @@
             }
 
             // Função global para visualizar arquivo
+            // Função global para visualizar arquivo
             window.viewFile = function (logId) {
                 if (!logId) return;
-                // Abre em nova aba
-                const url = `/logs/${logId}/view`;
-                window.open(url, '_blank');
+
+                const modal = document.getElementById('viewDocumentModal');
+                const iframe = document.getElementById('documentViewer');
+                const loading = document.getElementById('viewLoading');
+
+                // Reset state
+                iframe.src = '';
+                iframe.style.display = 'none';
+                loading.style.display = 'block';
+
+                // Set new src
+                iframe.src = `/logs/${logId}/view`;
+
+                // Show modal
+                modal.style.display = 'block';
+                document.body.style.overflow = 'hidden';
+            };
+
+            window.closeViewModal = function () {
+                const modal = document.getElementById('viewDocumentModal');
+                const iframe = document.getElementById('documentViewer');
+
+                modal.style.display = 'none';
+                iframe.src = '';
+                document.body.style.overflow = '';
             };
 
             tbody.innerHTML = filtered.map((e, index) => {
@@ -1657,14 +1690,83 @@
         }
 
         function updateBatchButton() {
-            const btn = document.getElementById('batchRevertBtn');
-            const count = document.getElementById('selectedCount');
-            count.textContent = selectedItems.size;
+            const btnRevert = document.getElementById('batchRevertBtn');
+            const countSpan = document.getElementById('selectedCount');
+            const btnEditBank = document.getElementById('batchEditBankBtn');
 
             if (selectedItems.size > 0) {
-                btn.style.display = 'flex';
+                btnRevert.style.display = 'flex';
+                btnEditBank.style.display = 'flex';
+                countSpan.textContent = selectedItems.size;
             } else {
-                btn.style.display = 'none';
+                btnRevert.style.display = 'none';
+                btnEditBank.style.display = 'none';
+            }
+        }
+
+        async function openEditBankModal() {
+            if (selectedItems.size === 0) return;
+            document.getElementById('editBankCount').textContent = selectedItems.size;
+            document.getElementById('editBankModal').style.display = 'flex';
+        }
+
+        function closeEditBankModal() {
+            document.getElementById('editBankModal').style.display = 'none';
+        }
+
+        async function confirmEditBank() {
+            const banco = document.getElementById('selectBankInput').value;
+            if (!banco) {
+                alert('Selecione um banco!');
+                return;
+            }
+
+            const confirmBtn = document.getElementById('confirmEditBankBtn');
+            const originalText = confirmBtn.innerText;
+            confirmBtn.disabled = true;
+            confirmBtn.innerText = "Atualizando...";
+
+            try {
+                const response = await fetch('/logs/update-batch', {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        ids: Array.from(selectedItems),
+                        updates: { banco: banco }
+                    })
+                });
+
+                const data = await response.json();
+
+                if (data.success) {
+                    addEvent('success', data.message);
+                    closeEditBankModal();
+                    selectedItems.clear();
+                    updateSelectionUI();
+                    loadHistory();
+                } else {
+                    addEvent('error', 'Erro ao atualizar: ' + data.message);
+                }
+            } catch (e) {
+                console.error("Erro na atualização em lote:", e);
+                addEvent('error', 'Erro de conexão ao atualizar.');
+            } finally {
+                confirmBtn.disabled = false;
+                confirmBtn.innerText = originalText;
+            }
+        }
+
+        }
+
+        function updateBatchButton() {
+            const btnRevert = document.getElementById('batchRevertBtn');
+            const countSpan = document.getElementById('selectedCount');
+
+            if (selectedItems.size > 0) {
+                btnRevert.style.display = 'flex';
+                countSpan.textContent = selectedItems.size;
+            } else {
+                btnRevert.style.display = 'none';
             }
         }
 
@@ -1837,6 +1939,28 @@
             }
         }
 
+        async function clearAllLogs() {
+            if (!confirm('ATENÇÃO: Isso apagará TODO o histórico de processamento do monitor de produção e tentará remover os arquivos físicos associados.\n\nEsta ação não pode ser desfeita. Tem certeza?')) return;
+
+            try {
+                const response = await fetch('/logs', { method: 'DELETE' });
+                const data = await response.json();
+
+                if (data.success) {
+                    addEvent('success', data.message);
+                    loadHistory(); // Recarrega tabela vazia
+                    // Zera contadores visuais imediatamente
+                    updateStats({ total_processados: 0, sucesso: 0, nao_identificados: 0, falhas: 0, em_processamento: 0 });
+                } else {
+                    addEvent('error', 'Erro ao limpar logs: ' + data.message);
+                    alert('Erro: ' + data.message);
+                }
+            } catch (e) {
+                console.error("Erro ao limpar logs:", e);
+                addEvent('error', 'Erro na requisição de limpeza.');
+            }
+        }
+
         async function fetchFolderStats() {
             try {
                 const response = await fetch('/monitor/stats');
@@ -1927,6 +2051,82 @@
         if (!ws) connect();
     </script>
     </div> <!-- Fecha container e main-content -->
+
+    <!-- Modal de Visualização de Arquivo -->
+    <div id="viewDocumentModal" class="modal" onclick="if(event.target === this) closeViewModal()"
+        style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: hidden; background-color: rgba(0,0,0,0.8); backdrop-filter: blur(5px);">
+        <div class="modal-content"
+            style="background-color: #1e1e1e; margin: 2% auto; padding: 0; border: 1px solid #333; width: 90%; height: 90%; border-radius: 8px; display: flex; flex-direction: column; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1), 0 2px 4px -1px rgba(0, 0, 0, 0.06);">
+            <div class="modal-header"
+                style="padding: 1rem; border-bottom: 1px solid #333; display: flex; justify-content: space-between; align-items: center; background: #2d2d2d; border-radius: 8px 8px 0 0;">
+                <h3 style="margin: 0; color: #fff; font-size: 1.1rem; display: flex; align-items: center; gap: 8px;">
+                    <span style="color: #60a5fa;">📄</span> Visualização de Documento
+                </h3>
+                <span class="close-modal" onclick="closeViewModal()"
+                    style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer; transition: color 0.2s;">&times;</span>
+            </div>
+            <div class="modal-body"
+                style="flex: 1; padding: 0; overflow: hidden; position: relative; background: #111;">
+                <div id="viewLoading"
+                    style="position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #666;">
+                    Carregando...</div>
+                <iframe id="documentViewer" style="width: 100%; height: 100%; border: none; display: none;"
+                    onload="document.getElementById('viewLoading').style.display='none'; this.style.display='block';"></iframe>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal de Edição de Banco -->
+    <div id="editBankModal" class="modal-overlay" style="display: none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <div class="modal-icon">🏦</div>
+                <h3>Definir Banco</h3>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">Selecione o banco para aplicar aos <strong id="editBankCount">0</strong>
+                    itens selecionados:</p>
+
+                <div class="form-group" style="margin-top: 1rem;">
+                    <label style="display: block; margin-bottom: 0.5rem; color: #aaa;">Banco:</label>
+                    <select id="selectBankInput"
+                        style="width: 100%; padding: 0.75rem; background: #2d2d2d; border: 1px solid #444; color: white; border-radius: 4px;">
+                        <option value="">Selecione...</option>
+                        <option value="SICREDI">SICREDI</option>
+                        <option value="BANCO DO BRASIL">BANCO DO BRASIL</option>
+                        <option value="ITAU">ITAU</option>
+                        <option value="BRADESCO">BRADESCO</option>
+                        <option value="CAIXA">CAIXA</option>
+                        <option value="SANTANDER">SANTANDER</option>
+                        <option value="SICOOB">SICOOB</option>
+                        <option value="VIACREDI">VIACREDI</option>
+                        <option value="SAFRA">SAFRA</option>
+                        <option value="BTG">BTG</option>
+                        <option value="INTER">INTER</option>
+                        <option value="NUBANK">NUBANK</option>
+                        <option value="ORIGINAL">ORIGINAL</option>
+                        <option value="Outros">Outros</option>
+                    </select>
+                </div>
+
+                <div class="modal-warning" style="margin-top: 1rem;">
+                    <div class="warning-icon">ℹ️</div>
+                    <div class="warning-text">
+                        Isso atualizará apenas o registro no sistema. O arquivo original não será renomeado.
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn modal-btn-cancel" onclick="closeEditBankModal()">
+                    ✕ Cancelar
+                </button>
+                <button class="modal-btn modal-btn-confirm" id="confirmEditBankBtn" onclick="confirmEditBank()"
+                    style="background: linear-gradient(135deg, #6366f1, #4f46e5);">
+                    💾 Salvar Alterações
+                </button>
+            </div>
+        </div>
+    </div>
 
     <script src="/static/js/tech-navbar.js"></script>
 </body>

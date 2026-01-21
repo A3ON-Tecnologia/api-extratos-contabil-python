@@ -174,3 +174,37 @@ class PDFService:
             return True
         except Exception:
             return False
+
+    def extract_first_page_images(self, pdf_data: bytes | BinaryIO) -> list[str]:
+        """
+        Extrai as imagens da primeira página do PDF e retorna como base64.
+        Útil para identificar logos de bancos quando não há texto.
+        """
+        import base64
+        
+        if isinstance(pdf_data, bytes):
+            pdf_data = io.BytesIO(pdf_data)
+        
+        pdf_data.seek(0)
+        images_base64 = []
+        
+        try:
+            reader = PdfReader(pdf_data)
+            if len(reader.pages) > 0:
+                page = reader.pages[0]
+                # Pega as 3 maiores imagens (logos geralmente são médias/grandes, mas ícones são pequenos, vamos pegar tudo mas limitar qtd)
+                # Na verdade, logos de banco em cabeçalho costumam ser a primeira ou segunda imagem.
+                
+                count = 0
+                for image_file_object in page.images:
+                    if count >= 3: break
+                    
+                    # Converte para base64
+                    img_b64 = base64.b64encode(image_file_object.data).decode('utf-8')
+                    images_base64.append(img_b64)
+                    count += 1
+                    
+        except Exception as e:
+            logger.warning(f"Erro ao extrair imagens do PDF: {e}")
+            
+        return images_base64
