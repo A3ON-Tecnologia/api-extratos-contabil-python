@@ -43,4 +43,5 @@ def init_db():
     """
     from app.models.extrato_log import ExtratoLog  # noqa
     from app.models.extrato_log_teste import ExtratoLogTeste  # noqa
+    from app.models.reversao_log import ReversaoLog  # noqa
     Base.metadata.create_all(bind=engine)

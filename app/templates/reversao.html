@@ -4,7 +4,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>🔄 Reversão | Extratos Contábeis</title>
+    <title>Reversão | Extratos Contábeis</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon-reversao.svg">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
         :root {
@@ -73,9 +74,30 @@
             -webkit-text-fill-color: transparent;
         }
 
-        .header p {
-            color: var(--text-secondary);
+        .header .badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.5rem 1.5rem;
+            background: rgba(249, 115, 22, 0.15);
+            border: 1px solid var(--accent-revert);
+            border-radius: 50px;
+            font-size: 0.875rem;
+            color: var(--accent-revert);
             margin-top: 0.5rem;
+            animation: pulse 2s infinite;
+        }
+
+        @keyframes pulse {
+
+            0%,
+            100% {
+                box-shadow: 0 0 0 0 rgba(249, 115, 22, 0.4);
+            }
+
+            50% {
+                box-shadow: 0 0 20px 5px rgba(249, 115, 22, 0.2);
+            }
         }
 
         /* Stats */
@@ -495,8 +517,8 @@
     <div class="page-wrapper navbar-collapsed" id="mainContent">
         <div class="container">
             <header class="header">
-                <h1><span style="-webkit-text-fill-color: initial;">🔄</span> Gestão de Reversão</h1>
-                <p>Reverter processamentos e deletar arquivos salvos incorretamente</p>
+                <h1><span style="-webkit-text-fill-color: initial;">🔄</span> Reversão</h1>
+                <span class="badge">⚠️ GERENCIAR E REVERTER PROCESSAMENTOS</span>
             </header>
 
             <div class="stats-grid">
@@ -545,6 +567,25 @@
                     </div>
                 </div>
             </div>
+
+            <!-- Seção de Histórico de Reversões -->
+            <div class="table-container" style="margin-top: 2rem;">
+                <div class="table-header">
+                    <h2>📜 Histórico de Reversões <span class="count" id="historicoCount">0</span></h2>
+                    <div style="display: flex; gap: 0.5rem; align-items: center;">
+                        <span style="font-size: 0.8rem; color: var(--text-muted);">
+                            Total: <strong id="statTotalReversoes">0</strong> |
+                            Arquivos Deletados: <strong id="statArquivosDeletados">0</strong>
+                        </span>
+                    </div>
+                </div>
+                <div id="historicoContent">
+                    <div class="empty-state">
+                        <div class="icon">📜</div>
+                        <p>Nenhuma reversão realizada ainda</p>
+                    </div>
+                </div>
+            </div>
         </div>
 
         <script>
@@ -552,7 +593,7 @@
             let selectedIds = new Set();
 
             async function loadData() {
-                await Promise.all([loadStats(), loadLogs()]);
+                await Promise.all([loadStats(), loadLogs(), loadHistorico()]);
             }
 
             async function loadStats() {
@@ -563,9 +604,81 @@
                     document.getElementById('statSucesso').textContent = data.sucesso || 0;
                     document.getElementById('statNaoId').textContent = data.nao_identificado || 0;
                     document.getElementById('statArquivos').textContent = data.arquivos_existentes || 0;
+                    document.getElementById('statTotalReversoes').textContent = data.total_reversoes || 0;
                 } catch (e) {
                     console.error('Erro:', e);
                 }
+            }
+
+            async function loadHistorico() {
+                try {
+                    const res = await fetch('/reversao/historico?limit=50');
+                    const data = await res.json();
+
+                    document.getElementById('historicoCount').textContent = data.total || 0;
+
+                    // Carrega estatísticas de reversões
+                    const statsRes = await fetch('/reversao/historico/stats');
+                    const statsData = await statsRes.json();
+                    document.getElementById('statArquivosDeletados').textContent = statsData.arquivos_deletados || 0;
+
+                    renderHistorico(data.reversoes || []);
+                } catch (e) {
+                    console.error('Erro ao carregar histórico:', e);
+                }
+            }
+
+            function renderHistorico(reversoes) {
+                const container = document.getElementById('historicoContent');
+
+                if (reversoes.length === 0) {
+                    container.innerHTML = `
+                        <div class="empty-state">
+                            <div class="icon">📜</div>
+                            <p>Nenhuma reversão realizada ainda</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                const rows = reversoes.map(rev => {
+                    const deletadoClass = rev.arquivo_deletado ? 'yes' : 'no';
+                    const deletadoText = rev.arquivo_deletado ? 'SIM' : 'NÃO';
+
+                    return `
+                        <tr>
+                            <td>${rev.id}</td>
+                            <td style="font-size: 0.75rem; color: var(--text-muted);">${formatDate(rev.revertido_em)}</td>
+                            <td class="cliente-cell" title="${rev.cliente_nome || 'N/A'}">${rev.cliente_nome || 'N/A'}</td>
+                            <td>
+                                <span class="tag tag-tipo">${rev.tipo_documento || '-'}</span>
+                                <span class="tag tag-banco">${rev.banco || '-'}</span>
+                            </td>
+                            <td>${rev.mes || '-'}/${rev.ano || '-'}</td>
+                            <td><span class="status-badge warning">${rev.status_original || '-'}</span></td>
+                            <td><span class="exists-badge ${deletadoClass}">${deletadoText}</span></td>
+                            <td><span class="tag" style="background: rgba(249, 115, 22, 0.15); color: var(--accent-primary);">${rev.tipo_reversao}</span></td>
+                        </tr>
+                    `;
+                }).join('');
+
+                container.innerHTML = `
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>ID</th>
+                                <th>Data Reversão</th>
+                                <th>Cliente</th>
+                                <th>Tipo / Banco</th>
+                                <th>Período</th>
+                                <th>Status Original</th>
+                                <th>Arquivo Deletado</th>
+                                <th>Tipo Reversão</th>
+                            </tr>
+                        </thead>
+                        <tbody>${rows}</tbody>
+                    </table>
+                `;
             }
 
             async function loadLogs() {
