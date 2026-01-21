@@ -8,10 +8,15 @@ dependencies = [
     "fastapi>=0.109.0",
     "uvicorn[standard]>=0.27.0",
     "python-multipart>=0.0.6",
+    "websockets>=12.0",
     
     # Configuração
     "pydantic>=2.5.0",
     "pydantic-settings>=2.1.0",
+    "python-dotenv>=1.0.0",
+    
+    # Banco de Dados
+    "sqlalchemy>=2.0.0",
     
     # PDF
     "pypdf>=4.0.0",
@@ -20,6 +25,8 @@ dependencies = [
     # LLM
     "langchain>=0.1.0",
     "langchain-openai>=0.0.5",
+    "langchain-core>=0.1.0",
+    "openai>=1.0.0",
     
     # Excel
     "openpyxl>=3.1.0",
@@ -30,6 +37,9 @@ dependencies = [
     
     # Logging estruturado
     "structlog>=24.1.0",
+    
+    # Utilitários
+    "aiofiles>=23.0.0",
 ]
 
 [project.optional-dependencies]
