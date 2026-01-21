@@ -51,7 +51,7 @@ FORMATO DE RESPOSTA:
 Retorne APENAS um JSON válido, sem explicações adicionais, com a seguinte estrutura:
 
 {
-    "cliente_sugerido": "string ou null - nome da empresa/pessoa identificada",
+    "cliente_sugerido": "string ou null - nome da empresa/pessoa identificada. IMPORTANTE: Remova prefixos como 'ASSOCIADO:', 'CLIENTE:', números de conta e códigos que antecedem o nome. Ex: de 'ASSOCIADO: 123 - EMPRESA X' retorne apenas 'EMPRESA X'",
     "cnpj": "string ou null - CNPJ encontrado",
     "banco": "string ou null - nome do banco (ex: Bradesco, Itaú, Banco do Brasil)",
     "agencia": "string ou null - número da agência",

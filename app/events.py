@@ -160,6 +160,7 @@ class EventManager:
         """Envia evento para um socket específico."""
         await websocket.send_text(event.to_json())
     
+    
     def update_stats(self, sucesso: bool = False, nao_identificado: bool = False, falha: bool = False):
         """Atualiza estatísticas."""
         self.stats["total_processados"] += 1
@@ -169,6 +170,14 @@ class EventManager:
             self.stats["nao_identificados"] += 1
         if falha:
             self.stats["falhas"] += 1
+
+    def decrement_stats(self, sucesso: int = 0, nao_identificado: int = 0, falha: int = 0):
+        """Decrementa estatísticas (usado na reversão)."""
+        total_revertido = sucesso + nao_identificado + falha
+        self.stats["total_processados"] = max(0, self.stats["total_processados"] - total_revertido)
+        self.stats["sucesso"] = max(0, self.stats["sucesso"] - sucesso)
+        self.stats["nao_identificados"] = max(0, self.stats["nao_identificados"] - nao_identificado)
+        self.stats["falhas"] = max(0, self.stats["falhas"] - falha)
     
     def start_processing(self):
         """Marca início de processamento."""

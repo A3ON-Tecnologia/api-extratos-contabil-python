@@ -351,6 +351,27 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
                 resultados=[result],
             )
         
+        # Se for ZIP, precisamos emitir um evento de conclusão para o arquivo ZIP principal
+        # para que o frontend remova o card de processamento
+        if is_zip:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.PROCESSING_COMPLETED,
+                filename=filename,
+                message=f"ZIP processado: {result.total_arquivos} arquivos.",
+                details={
+                    "status": "SUCESSO",
+                    "cliente": "LOTE ZIP COMPLETO",
+                    "path": "-",
+                    "banco": "-",
+                    "tipo": "ZIP",
+                    "ano": "-",
+                    "mes": "-",
+                    "metodo": "-",
+                    "log_id": None
+                },
+                progress=100
+            ))
+        
         # Atualiza o job com sucesso
         jobs_dict[job_id].update({
             "status": "completed",
@@ -1307,11 +1328,50 @@ async def listar_para_reversao(
 async def reverter_por_id(log_id: int, deletar_arquivo: bool = True):
     """Reverte um único processamento pelo ID."""
     try:
+        # Recuperar estado original antes de reverter para saber qual contador decrementar
+        # Como o serviço já deleta, precisaríamos consultar antes ou returning.
+        # Simplificação: O ReversaoService poderia retornar o status do item revertido.
+        # Vamos assumir que o frontend atualiza localmente, mas para garantir consistência global:
+        # Melhor abordagem: O ReversaoServie.reverter_por_id deveria retornar o STATUS original do item revertido.
+        
+        # Como não quero mudar a assinatura do service agora, vou consultar aqui (race condition pequena aceitável)
+        # Na verdade, o reverter_por_id já retorna o cliente, mas não o status.
+        # Vou apenas notificar o frontend que houve uma reversão para ele recarregar se quiser,
+        # mas como o usuário pediu para afetar os indicadores... vamos usar o decrement_stats.
+        
+        # Hack rápido: O ReversaoService deleta. Vamos fazer um "peek" manual ou alterar o service?
+        # O service é Singleton. Vamos alterar o endpoint para ser esperto.
+        
         reversao_service = get_reversao_service()
+        
+        # Recupera log antes de deletar para saber status
+        # (Idealmente isso estaria no retorno do service, mas para não quebrar contrato agora...)
+        from app.database import SessionLocal
+        from app.models.extrato_log import ExtratoLog
+        
+        db = SessionLocal()
+        status_original = None
+        try:
+            log = db.query(ExtratoLog).filter(ExtratoLog.id == log_id).first()
+            if log:
+                status_original = log.status
+        finally:
+            db.close()
+            
         resultado = reversao_service.reverter_por_id(log_id, deletar_arquivo)
         
         if not resultado["success"]:
             raise HTTPException(status_code=400, detail=resultado["message"])
+        
+        # Atualiza estatísticas globais se tivermos o status
+        if status_original:
+            event_manager = get_event_manager()
+            event_manager.decrement_stats(
+                sucesso=1 if status_original == 'SUCESSO' else 0,
+                nao_identificado=1 if status_original == 'NAO_IDENTIFICADO' else 0,
+                falha=1 if status_original == 'FALHA' else 0
+            )
+            await event_manager.emit_stats()
         
         return resultado
     except HTTPException:
@@ -1325,8 +1385,39 @@ async def reverter_por_id(log_id: int, deletar_arquivo: bool = True):
 async def reverter_lote(ids: List[int], deletar_arquivos: bool = True):
     """Reverte múltiplos processamentos."""
     try:
+        # Para lote, precisamos saber quantos de cada tipo foram revertidos.
+        # Vamos consultar os metadados antes de reverter.
+        from app.database import SessionLocal
+        from app.models.extrato_log import ExtratoLog
+        from sqlalchemy import func
+        
+        db = SessionLocal()
+        stats_diff = {"SUCESSO": 0, "NAO_IDENTIFICADO": 0, "FALHA": 0}
+        
+        try:
+            # Conta quantos de cada status serão revertidos
+            counts = db.query(ExtratoLog.status, func.count(ExtratoLog.status))\
+                .filter(ExtratoLog.id.in_(ids))\
+                .group_by(ExtratoLog.status).all()
+            
+            for status_val, count in counts:
+                if status_val in stats_diff:
+                    stats_diff[status_val] = count
+        finally:
+            db.close()
+            
         reversao_service = get_reversao_service()
         resultado = reversao_service.reverter_lote(ids, deletar_arquivos)
+        
+        if resultado.get("success"):
+            event_manager = get_event_manager()
+            event_manager.decrement_stats(
+                sucesso=stats_diff["SUCESSO"],
+                nao_identificado=stats_diff["NAO_IDENTIFICADO"],
+                falha=stats_diff["FALHA"]
+            )
+            await event_manager.emit_stats()
+            
         return resultado
     except Exception as e:
         logger.error(f"Erro ao reverter lote: {e}")
