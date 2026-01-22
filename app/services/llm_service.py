@@ -62,7 +62,7 @@ FORMATO DE RESPOSTA:
 Retorne APENAS um JSON válido, sem explicações adicionais:
 
 {
-    "cliente_sugerido": "string ou null - nome da empresa/pessoa identificada",
+    "cliente_sugerido": "string ou null - nome da empresa/pessoa identificada. IMPORTANTE: Remova prefixos como 'ASSOCIADO:', 'CLIENTE:', números de conta e códigos que antecedem o nome. Ex: de 'ASSOCIADO: 123 - EMPRESA X' retorne apenas 'EMPRESA X'",
     "cnpj": "string ou null - CNPJ encontrado",
     "banco": "string ou null - nome simplificado do banco em UPPERCASE",
     "agencia": "string ou null - número da agência",
@@ -202,3 +202,40 @@ class LLMService:
                 confianca=0.0,
             )
 
+
+    def identify_bank_from_images(self, images_base64: list[str]) -> str | None:
+        """
+        Tenta identificar o banco analisando as imagens (logos) extraídas.
+        Usa a capacidade de Visão do modelo.
+        """
+        if not images_base64:
+            return None
+            
+        try:
+            # Prepara mensagens com imagens
+            content_parts = [
+                {"type": "text", "text": "Analise estas imagens extraídas de um documento financeiro. Identifique se alguma delas é o LOGOTIPO de um banco ou instituição financeira. Se encontrar, retorne APENAS o nome do banco (ex: 'Sicredi', 'Banco do Brasil', 'Itaú'). Se não encontrar nenhum logo de banco claro, retorne 'null'."}
+            ]
+            
+            for img_b64 in images_base64:
+                content_parts.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{img_b64}"
+                    }
+                })
+                
+            message = HumanMessage(content=content_parts)
+            
+            response = self.llm.invoke([message])
+            text = response.content.strip().replace("'", "").replace('"', "").strip()
+            
+            if text.lower() == "null" or len(text) > 50: # 50 chars é muito para um nome de banco
+                return None
+                
+            logger.info(f"Banco identificado por VISÃO: {text}")
+            return text
+            
+        except Exception as e:
+            logger.error(f"Erro na identificação visual do banco: {e}")
+            return None

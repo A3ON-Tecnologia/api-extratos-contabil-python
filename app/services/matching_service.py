@@ -178,6 +178,44 @@ class MatchingService:
             motivo_fallback=f"Conta/Agência não encontrada: Ag {agencia} / Cc {conta}"
         )
     
+
+    def _clean_company_name(self, name: str) -> str:
+        """
+        Limpa o nome da empresa removendo artefatos comuns de extratos.
+        Ex: 'ASSOCIADO...: 12345 - EMPRESA X' -> 'EMPRESA X'
+        """
+        import re
+        
+        # Remove prefixos comuns como "ASSOCIADO:", "CLIENTE:", etc, seguido de números/traços
+        # Padrão busca algo como "Palavra...: 123-4 -" no início
+        cleaned = re.sub(r'^[\w\.]+\s*:\s*[\d\.\-\/]+\s*-\s*', '', name)
+        
+        # Remove apenas números e traços do início se sobraram
+        cleaned = re.sub(r'^[\d\.\-\/]+\s*-\s*', '', cleaned)
+        
+        return cleaned.strip()
+
+    def _apply_abbreviations(self, text: str) -> str:
+        """Aplica abreviações comuns para melhorar o matching."""
+        replacements = {
+            "COOPERATIVA": "COOP",
+            "TRANSPORTADORES": "TRANSP",
+            "TRANSPORTES": "TRANSP",
+            "TRANSPORTE": "TRANSP",
+            "COMERCIO": "COM",
+            "LIMITADA": "LTDA",
+            "SERVICOS": "SERV",
+            "INDUSTRIA": "IND",
+            "SOCIEDADE": "SOC",
+            "ANONIMA": "SA",
+        }
+        
+        text_upper = text.upper()
+        for original, abbr in replacements.items():
+            text_upper = text_upper.replace(original, abbr)
+            
+        return text_upper
+    
     def _match_by_name(
         self,
         nome_sugerido: str,
@@ -188,7 +226,11 @@ class MatchingService:
         
         Utiliza rapidfuzz com threshold configurável.
         """
-        nome_normalized = normalize_text(nome_sugerido)
+        # Limpa o nome sugerido antes de normalizar
+        nome_limpo = self._clean_company_name(nome_sugerido)
+        nome_normalized = normalize_text(nome_limpo)
+        nome_abbr = normalize_text(self._apply_abbreviations(nome_limpo))
+        
         threshold = self.settings.similarity_threshold
         
         best_match: tuple[ClientInfo, float] | None = None
@@ -196,14 +238,20 @@ class MatchingService:
         for client in clients:
             client_nome = normalize_text(client.nome)
             
-            # Calcula similaridade usando múltiplos métodos
-            # e pega o maior score
-            scores = [
-                fuzz.ratio(nome_normalized, client_nome),
-                fuzz.partial_ratio(nome_normalized, client_nome),
-                fuzz.token_sort_ratio(nome_normalized, client_nome),
-            ]
-            score = max(scores)
+            # Calcula scores para nome normal e nome abreviado
+            def get_max_score(target_name: str, candidate_name: str) -> float:
+                return max([
+                    fuzz.ratio(target_name, candidate_name),
+                    fuzz.partial_ratio(target_name, candidate_name),
+                    fuzz.token_sort_ratio(target_name, candidate_name),
+                    fuzz.token_set_ratio(target_name, candidate_name),
+                    fuzz.WRatio(target_name, candidate_name),
+                ])
+            
+            score_normal = get_max_score(nome_normalized, client_nome)
+            score_abbr = get_max_score(nome_abbr, client_nome)
+            
+            score = max(score_normal, score_abbr)
             
             if score >= threshold:
                 if best_match is None or score > best_match[1]:

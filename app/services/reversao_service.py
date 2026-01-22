@@ -269,14 +269,28 @@ class ReversaoService:
             
             db.commit()
             
+            # Formata resposta para o frontend
+            return {
+                "success": True,
+                "message": "Reversão em lote processada",
+                "revertidos": resultados["sucesso"],
+                "erros": resultados["falha"],  # Count
+                "arquivos_deletados": resultados["arquivos_deletados"],
+                "detalhes_erros": resultados["erros"]  # List
+            }
+            
         except Exception as e:
             db.rollback()
             logger.error(f"Erro ao reverter lote: {e}")
-            resultados["erros"].append({"erro_geral": str(e)})
+            return {
+                "success": False,
+                "message": str(e),
+                "revertidos": 0,
+                "erros": len(ids),
+                "detalhes_erros": [{"erro_geral": str(e)}]
+            }
         finally:
             db.close()
-        
-        return resultados
     
     def reverter_ultimos(
         self,

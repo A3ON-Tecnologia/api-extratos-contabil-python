@@ -16,6 +16,7 @@ from concurrent.futures import ThreadPoolExecutor
 from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status, BackgroundTasks
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from app.config import get_settings
 from app.events import EventType, ProcessingEvent, get_event_manager, get_test_event_manager
@@ -1045,6 +1046,27 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
                 resultados=[result],
             )
         
+        # Se for ZIP, precisamos emitir um evento de conclusão para o arquivo ZIP principal
+        # para que o frontend remova o card de processamento
+        if is_zip:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.PROCESSING_COMPLETED,
+                filename=filename,
+                message=f"ZIP processado: {result.total_arquivos} arquivos.",
+                details={
+                    "status": "SUCESSO",
+                    "cliente": "LOTE ZIP COMPLETO",
+                    "path": "-",
+                    "banco": "-",
+                    "tipo": "ZIP",
+                    "ano": "-",
+                    "mes": "-",
+                    "metodo": "-",
+                    "log_id": None
+                },
+                progress=100
+            ))
+        
         # Atualiza o job com sucesso
         jobs_dict[job_id].update({
             "status": "completed",
@@ -1225,15 +1247,47 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.LLM_COMPLETED,
             filename=filename,
-            message=f"Analise concluida: {extraction.cliente_sugerido or 'N/A'}",
+            message=f"Analise textual concluida: {extraction.cliente_sugerido or 'N/A'}",
             details={
                 "cliente": extraction.cliente_sugerido,
                 "banco": extraction.banco,
                 "tipo": extraction.tipo_documento,
                 "confianca": extraction.confianca
             },
-            progress=50
+            progress=40
         ))
+
+        # --- FALLBACK VISUAL: Se não achou banco, tenta olhar o logo ---
+        if not extraction.banco and pdf_service.is_valid_pdf(pdf_data):
+            try:
+                await event_manager.emit(ProcessingEvent(
+                    event_type=EventType.LLM_ANALYZING,
+                    filename=filename,
+                    message="Banco não identificado no texto. Analisando logos (Visão IA)...",
+                    progress=45
+                ))
+                
+                # Extrai imagens da primeira página
+                images = await loop.run_in_executor(_executor, pdf_service.extract_first_page_images, pdf_data)
+                
+                if images:
+                    # Pergunta pra LLM via visão
+                    banco_visual = await loop.run_in_executor(_executor, llm_service.identify_bank_from_images, images)
+                    
+                    if banco_visual:
+                        extraction.banco = banco_visual
+                        logger.info(f"Banco identificado visualmente: {banco_visual}")
+                        
+                        await event_manager.emit(ProcessingEvent(
+                            event_type=EventType.LLM_COMPLETED,
+                            filename=filename,
+                            message=f"Banco identificado visualmente: {banco_visual}",
+                            details={"banco": banco_visual},
+                            progress=50
+                        ))
+            except Exception as e:
+                logger.warning(f"Erro no fallback visual: {e}")
+        # ----------------------------------------------------------------
         
         # 3. Faz matching do cliente
         await event_manager.emit(ProcessingEvent(
@@ -1589,6 +1643,63 @@ async def debug_clients():
     return result
 
 
+@app.delete("/logs")
+async def clear_all_logs():
+    """
+    Limpa TODOS os logs de produção.
+    Usa o serviço de reversão para garantir que arquivos físicos também sejam removidos (se existirem)
+    e que as estatísticas sejam atualizadas corretamente.
+    Força a limpeza do cache em memória (_jobs) para evitar dados fantasmas.
+    """
+    try:
+        from app.database import SessionLocal
+        from app.models.extrato_log import ExtratoLog
+        
+        # IMPORTANTE: Limpa caches em memória incondicionalmente
+        # Isso resolve o problema de dados fantasmas que persistem após limpeza manual do banco/arquivos
+        qtde_memory = len(_jobs)
+        _jobs.clear()
+        _processed_hashes.clear()
+        
+        # 1. Busca todos os IDs
+        db = SessionLocal()
+        try:
+            logs = db.query(ExtratoLog).with_entities(ExtratoLog.id).all()
+            log_ids = [l.id for l in logs]
+        finally:
+            db.close()
+            
+        count_db = 0
+        resultado_detalhes = {}
+        
+        if log_ids:
+            # 2. Chama reverter_lote para garantir consistência de arquivos e banco
+            reversao_service = get_reversao_service()
+            resultado = reversao_service.reverter_lote(log_ids)
+            count_db = len(log_ids)
+            resultado_detalhes = resultado
+        
+        # 3. Emite evento de zeramento total para atualizar todos os clientes conectados
+        event_manager.emit_stats()
+        
+        return {
+            "success": True, 
+            "message": f"Limpeza completa realizada. Banco: {count_db} registros, Memória: {qtde_memory} jobs.",
+            "details": resultado_detalhes
+        }
+        
+    except Exception as e:
+        logger.error(f"Erro ao limpar logs: {e}")
+        # Retorna erro JSON válido para o frontend
+        return JSONResponse(
+            status_code=500,
+            content={
+                "success": False, 
+                "message": f"Erro interno ao limpar logs: {str(e)}"
+            }
+        )
+
+
 @app.post("/monitor/reset")
 async def reset_processing():
     """Força o encerramento de todos os processamentos em andamento."""
@@ -1687,7 +1798,73 @@ async def get_log_detail(log_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
-# ====== ENDPOINTS DE TESTE (NÃO SALVA ARQUIVOS) ======
+
+@app.get("/logs/{log_id}/view")
+async def view_log_file(log_id: int):
+    """
+    Retorna o conteúdo do arquivo associado ao log para visualização.
+    Serve tanto para logs de produção quanto para logs de teste (simulado).
+    """
+    try:
+        from fastapi.responses import FileResponse
+        import os
+        
+        # 1. Tenta buscar no log de PRODUÇÃO
+        db_service = get_db_log_service()
+        log = db_service.get_log_by_id(log_id)
+        
+        file_path = None
+        filename = None
+        
+        if log:
+            file_path = log.arquivo_salvo
+            filename = log.arquivo_original
+        else:
+            # 2. Se não achar, tenta buscar no log de TESTE
+            db_teste_service = get_db_log_teste_service()
+            # O serviço de teste geralmente não tem get_by_id exposto simples
+            # Mas vamos tentar buscar nos logs recentes ou idealmente implementar um get_by_id no serviço de teste
+            # Como hack rápido, vamos instanciar uma busca direta ou assumir que o ID pode ser de teste
+            
+            # Vamos tentar ler a tabela de testes diretamente
+            from app.services.db_log_teste_service import TesteLog
+            from app.database import SessionLocal
+            
+            db = SessionLocal()
+            try:
+                log_teste = db.query(TesteLog).filter(TesteLog.id == log_id).first()
+                if log_teste:
+                    file_path = log_teste.arquivo_salvo
+                    filename = log_teste.arquivo_original
+            finally:
+                db.close()
+            
+        if not file_path or file_path == '-':
+            # Se não tem caminho salvo, tenta procurar nos Nao Identificados
+            # (Caso comum em falhas)
+            if filename:
+                 settings = get_settings()
+                 potential_path = settings.unidentified_path / filename
+                 if potential_path.exists():
+                     file_path = str(potential_path)
+        
+        if not file_path or not os.path.exists(file_path):
+             raise HTTPException(status_code=404, detail="Arquivo físico não encontrado no servidor.")
+             
+        # Serve o arquivo
+        return FileResponse(
+            path=file_path,
+            filename=filename or "documento.pdf",
+            media_type="application/pdf",
+            content_disposition_type="inline" # Abre no navegador em vez de baixar
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao visualizar arquivo: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/test", response_class=HTMLResponse)
 async def test_monitor_page():
@@ -1995,6 +2172,33 @@ async def websocket_test_endpoint(websocket: WebSocket):
         event_manager.disconnect(websocket)
 
 
+
+class UpdateBatchRequest(BaseModel):
+    ids: list[int]
+    updates: dict
+
+@app.patch("/logs/update-batch")
+async def update_batch_logs(payload: UpdateBatchRequest):
+    """
+    Atualiza múltiplos logs com os valores fornecidos.
+    Útil para corrigir dados como banco, cliente, etc. em massa.
+    """
+    try:
+        db_log_service = get_db_log_service()
+        count = db_log_service.update_batch(payload.ids, payload.updates)
+        
+        # Emite evento para atualizar o monitor (força reload para todos)
+        event_manager.emit_stats()
+        
+        return {
+            "success": True, 
+            "message": f"{count} registros atualizados com sucesso.",
+            "updated_count": count
+        }
+    except Exception as e:
+        logger.error(f"Erro ao atualizar logs em lote: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
 # ====== ENDPOINTS DE REVERSÃO ======
 
 @app.get("/reversao", response_class=HTMLResponse)
@@ -2033,15 +2237,91 @@ async def listar_para_reversao(
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+def _remove_logs_from_memory(logs):
+    """Reflete a remoção no cache em memória (_jobs) para evitar inconsistência."""
+    if not logs:
+        return
+        
+    hashes_to_remove = {log.hash_arquivo for log in logs if log.hash_arquivo}
+    names_to_remove = {log.arquivo_original for log in logs if log.arquivo_original}
+    
+    # Percorre todos os jobs em memória
+    for job_key in list(_jobs.keys()):
+        job = _jobs[job_key]
+        if not job.get("results") or "resultados" not in job["results"]:
+            continue
+            
+        # Filtra os resultados mantendo apenas os que NÃO foram removidos
+        original_results = job["results"]["resultados"]
+        new_results = []
+        changed = False
+        
+        for res in original_results:
+            h = res.get("hash_arquivo")
+            n = res.get("nome_arquivo_original")
+            
+            # Se hash bater ou nome bater, ignora (foi removido)
+            if (h and h in hashes_to_remove) or (n and n in names_to_remove):
+                changed = True
+                continue
+            new_results.append(res)
+            
+        if changed:
+            job["results"]["resultados"] = new_results
+            # Se ficou vazio, poderiamos remover o job, mas talvez seja melhor manter o histórico de que houve um job
+            # Mas vamos atualizar os contadores do job para refletir
+            res_list = job["results"].get("resultados", [])
+            job["results"]["arquivos_sucesso"] = sum(1 for r in res_list if r.get("status") == "SUCESSO")
+            job["results"]["arquivos_falha"] = sum(1 for r in res_list if r.get("status") == "FALHA")
+            job["results"]["arquivos_nao_identificados"] = sum(1 for r in res_list if r.get("status") == "NAO_IDENTIFICADO")
+            job["results"]["total_arquivos"] = len(res_list)
+
+
 @app.delete("/reversao/{log_id}")
 async def reverter_por_id(log_id: int, deletar_arquivo: bool = True):
     """Reverte um único processamento pelo ID."""
     try:
+        from app.database import SessionLocal
+        from app.models.extrato_log import ExtratoLog
+        
+        db = SessionLocal()
+        status_original = None
+        log_obj = None
+        
+        try:
+            log = db.query(ExtratoLog).filter(ExtratoLog.id == log_id).first()
+            if log:
+                status_original = log.status
+                # Cria objeto leve para passar para limpeza de memória
+                # Precisamos copiar dados pois o objeto será deletado ou detatched
+                from types import SimpleNamespace
+                log_obj = SimpleNamespace(
+                    hash_arquivo=log.hash_arquivo, 
+                    arquivo_original=log.arquivo_original
+                )
+        finally:
+            db.close()
+            
         reversao_service = get_reversao_service()
         resultado = reversao_service.reverter_por_id(log_id, deletar_arquivo)
         
         if not resultado["success"]:
             raise HTTPException(status_code=400, detail=resultado["message"])
+        
+        # Limpa da memória global _jobs
+        if log_obj:
+            _remove_logs_from_memory([log_obj])
+
+        # Atualiza estatísticas globais se tivermos o status
+        if status_original:
+            event_manager = get_event_manager()
+            event_manager.decrement_stats(
+                sucesso=1 if status_original == 'SUCESSO' else 0,
+                nao_identificado=1 if status_original == 'NAO_IDENTIFICADO' else 0,
+                falha=1 if status_original == 'FALHA' else 0
+            )
+            await event_manager.emit_stats()
         
         return resultado
     except HTTPException:
@@ -2055,8 +2335,44 @@ async def reverter_por_id(log_id: int, deletar_arquivo: bool = True):
 async def reverter_lote(ids: List[int], deletar_arquivos: bool = True):
     """Reverte múltiplos processamentos."""
     try:
+        from app.database import SessionLocal
+        from app.models.extrato_log import ExtratoLog
+        from sqlalchemy import func
+        from types import SimpleNamespace
+        
+        db = SessionLocal()
+        stats_diff = {"SUCESSO": 0, "NAO_IDENTIFICADO": 0, "FALHA": 0}
+        logs_to_clean = []
+        
+        try:
+            # Busca logs completos para limpeza de memória
+            logs = db.query(ExtratoLog).filter(ExtratoLog.id.in_(ids)).all()
+            for log in logs:
+                if log.status in stats_diff:
+                    stats_diff[log.status] += 1
+                logs_to_clean.append(SimpleNamespace(
+                    hash_arquivo=log.hash_arquivo, 
+                    arquivo_original=log.arquivo_original
+                ))
+        finally:
+            db.close()
+            
         reversao_service = get_reversao_service()
         resultado = reversao_service.reverter_lote(ids, deletar_arquivos)
+        
+        if resultado.get("success"):
+            # Limpa memória
+            _remove_logs_from_memory(logs_to_clean)
+            
+            # Atualiza stats
+            event_manager = get_event_manager()
+            event_manager.decrement_stats(
+                sucesso=stats_diff["SUCESSO"],
+                nao_identificado=stats_diff["NAO_IDENTIFICADO"],
+                falha=stats_diff["FALHA"]
+            )
+            await event_manager.emit_stats()
+            
         return resultado
     except Exception as e:
         logger.error(f"Erro ao reverter lote: {e}")
