@@ -31,6 +31,23 @@ MONTH_NAMES = {
     12: "DEZEMBRO",
 }
 
+# Mapeamento de tipos de documento para nomes de arquivo
+DOCUMENT_TYPE_MAPPING = {
+    "EXTRATO DA CONTA CAPITAL": "EXTRATO DA CONTA CAPITAL",
+    "EXTRATO DE CONTA CORRENTE": "EXTRATO DE CONTA CORRENTE",
+    "EXTRATO CONSOLIDADO RENDA FIXA": "EXTRATO CONSOLIDADO RENDA FIXA",
+    "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO": "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO",
+    "EXTRATO DE FATURA": "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO",
+    "RELATÓRIO - TÍTULOS POR PERÍODO": "REL RECEBIMENTO",
+    "RELATORIO TITULOS POR PERIODO": "REL RECEBIMENTO",
+    "EXTRATO CONTA POUPANÇA": "EXTRATO CONTA POUPANÇA",
+    "SALDO DE APLICAÇÃO": "EXTRATO APLICAÇÃO",
+    "EXTRATO APLICAÇÃO": "EXTRATO APLICAÇÃO",
+    "CC": "EXTRATO DE CONTA CORRENTE",
+    "POUPANÇA": "EXTRATO CONTA POUPANÇA",
+    "CARTÃO": "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO",
+}
+
 
 class StorageService:
     """Serviço de armazenamento de arquivos."""
@@ -59,36 +76,50 @@ class StorageService:
         original_filename: str,
         tipo_documento: str | None = None,
         banco: str | None = None,
+        conta_extrato: str | None = None,
     ) -> tuple[str, int, int]:
         """
         Salva o arquivo PDF no caminho correto.
-        
+
         Usa automaticamente o mês anterior ao processamento como período do documento.
-        NÃO cria pastas - todas as pastas já devem existir.
-        
+        Estrutura: ANO/MÊS/BANCO/CONTA/arquivo.pdf
+        CRIA as subpastas do banco e conta se não existirem.
+
+        Args:
+            conta_extrato: Número da conta extraído do extrato (prioritário sobre a conta da planilha)
+
         Returns:
             Tupla (caminho_salvo, ano, mes)
         """
         # Usa automaticamente o mês anterior
         ano, mes = self._get_previous_month()
-        
+
         target_path = None
-        
+
         if match_result.identificado:
             # Tenta resolver o caminho do cliente validando existência
             client_base_path = self._resolve_client_path(match_result.cliente)
-            
+
             if client_base_path:
-                target_path = self._build_path_structure(client_base_path, ano, mes)
-                
+                # Usa a conta extraída do extrato (se disponível) ou a conta da planilha
+                conta = conta_extrato or match_result.cliente.conta
+                banco_folder = banco or match_result.cliente.banco
+                target_path = self._build_path_structure(client_base_path, ano, mes, banco_folder, conta)
+
                 # Verifica se a pasta do mês existe
-                if not target_path.exists():
+                month_path = self._build_path_structure(client_base_path, ano, mes)
+                if not month_path.exists():
                     logger.warning(
-                        f"Pasta do mês não encontrada: {target_path}. "
+                        f"Pasta do mês não encontrada: {month_path}. "
                         "Salvando em NAO_IDENTIFICADOS."
                     )
                     target_path = None
                 else:
+                    # Cria a subpasta da conta se não existir
+                    if (banco_folder or conta) and not target_path.exists():
+                        logger.info(f"Criando subpasta do banco/conta: {target_path}")
+                        target_path.mkdir(parents=True, exist_ok=True)
+
                     filename = self._build_filename(
                         banco,
                         tipo_documento,
@@ -149,30 +180,48 @@ class StorageService:
         
         return None
     
-    def _build_path_structure(self, client_base_path: Path, ano: int, mes: int) -> Path:
+    def _build_path_structure(
+        self,
+        client_base_path: Path,
+        ano: int,
+        mes: int,
+        banco: str | None = None,
+        conta: str | None = None,
+    ) -> Path:
         """
         Constrói a estrutura de pastas dentro da pasta do cliente.
-        
-        Estrutura: cliente/Departamento Contábil/ANO/MÊS
-        Ex: cliente/Departamento Contábil/2025/12
-        
+
+        Estrutura: cliente/Departamento Contábil/ANO/MÊS/CONTA
+        Ex: cliente/Departamento Contábil/2025/12/45.841-4
+
+        Se conta for None, retorna apenas até o mês.
+
         Aceita tanto "Departamento Contábil" quanto "Departamento Contabil" (sem acento)
         """
         # Mês como número com 2 dígitos (01, 02, ..., 12)
         mes_str = str(mes).zfill(2)
-        
+
         # Tenta com acento primeiro
         dept_path = client_base_path / "Departamento Contábil"
         if dept_path.exists():
-            return dept_path / str(ano) / mes_str
-        
-        # Tenta sem acento
-        dept_path_sem_acento = client_base_path / "Departamento Contabil"
-        if dept_path_sem_acento.exists():
-            return dept_path_sem_acento / str(ano) / mes_str
-        
-        # Retorna o padrão com acento (mesmo que não exista, será tratado depois)
-        return client_base_path / "Departamento Contábil" / str(ano) / mes_str
+            base_path = dept_path / str(ano) / mes_str
+        else:
+            # Tenta sem acento
+            dept_path_sem_acento = client_base_path / "Departamento Contabil"
+            if dept_path_sem_acento.exists():
+                base_path = dept_path_sem_acento / str(ano) / mes_str
+            else:
+                # Retorna o padrão com acento (mesmo que não exista, será tratado depois)
+                base_path = client_base_path / "Departamento Contábil" / str(ano) / mes_str
+
+        if banco:
+            base_path = base_path / banco
+
+        # Adiciona a subpasta da conta se fornecida
+        if conta:
+            return base_path / conta
+        else:
+            return base_path
     
     def _build_unidentified_path(self, ano: int, mes: int) -> Path:
         """
@@ -193,32 +242,41 @@ class StorageService:
         original_filename: str = "",
     ) -> str:
         """
-        Constrói o nome do arquivo no formato padrão.
-        
-        Formato: TIPOEXTRATO_BANCO.ext
-        Ex: CC_SICREDI.pdf
+        Constrói o nome do arquivo usando o mapeamento de tipos de documento.
+
+        Formato: NOME_DO_TIPO_DOCUMENTO.pdf
+        Ex: EXTRATO DE CONTA CORRENTE.pdf
         """
-        # Tipo do extrato (padrão DOC se não informado)
-        safe_tipo = "DOC"
-        if tipo_documento:
-            # Pega apenas letras e números, uppercase
-            safe_tipo = "".join(c for c in tipo_documento if c.isalnum() or c == "_").upper()
-        
-        # Banco (padrão BANCO se não informado)
-        safe_banco = "BANCO"
-        if banco:
-            # Pega apenas letras e números, uppercase
-            safe_banco = "".join(c for c in banco if c.isalnum() or c in " ._-").strip()
-            safe_banco = safe_banco.replace(" ", "_").upper()
-             
         # Extensão (pega do original ou assume .pdf)
         ext = Path(original_filename).suffix.lower() if original_filename else ".pdf"
         if not ext:
             ext = ".pdf"
-            
-        base_name = f"{safe_tipo}_{safe_banco}"
-        filename = f"{base_name}{ext}"
-        
+
+        # Tenta mapear o tipo de documento
+        if tipo_documento:
+            # Normaliza o tipo para uppercase para buscar no mapeamento
+            tipo_upper = tipo_documento.upper()
+
+            # Busca no mapeamento (case-insensitive)
+            mapped_name = None
+            for key, value in DOCUMENT_TYPE_MAPPING.items():
+                if key.upper() == tipo_upper:
+                    mapped_name = value
+                    break
+
+            # Se encontrou no mapeamento, usa o nome mapeado
+            if mapped_name:
+                filename = f"{mapped_name}{ext}"
+            else:
+                # Se não encontrou, usa o tipo original
+                filename = f"{tipo_documento}{ext}"
+        else:
+            # Fallback: usa banco se disponível
+            if banco:
+                filename = f"EXTRATO_{banco.upper()}{ext}"
+            else:
+                filename = f"DOCUMENTO{ext}"
+
         # Se já existir arquivo com mesmo nome, será sobrescrito
         return filename
     

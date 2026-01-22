@@ -11,47 +11,132 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
-    """Configurações do sistema."""
-    
+    """Configurações do sistema carregadas do .env."""
+
     model_config = SettingsConfigDict(
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
     )
-    
-    # OpenAI
+
+    # ==================== OpenAI / LLM ====================
     openai_api_key: str
     llm_model: str = "gpt-4o-mini"
-    
-    # Caminhos
-    base_path: Path = Path(r"\\JPDC2\Dados$\JP Digital")
-    clients_excel_path: Path = Path(r"\\JPDC2\Dados$\JP Digital\000 - AUTOMAÇÕES\RELAÇÃO CLIENTES.xlsx")
-    log_excel_path: Path = Path(r"\\JPDC2\Dados$\JP Digital\000 - AUTOMAÇÕES\LOGS SUCESSO _ FALHA.xlsx")
-    
-    # Matching
+
+    # ==================== Caminhos do Sistema ====================
+    base_path: Path
+    clients_excel_path: Path
+    log_excel_path: Path
+
+    # ==================== Pasta de Extratos ====================
+    extratos_excel_path: Path
+    watch_folder_path: Path
+
+    # ==================== Matching ====================
     similarity_threshold: int = 85
-    
-    # Servidor
-    port: int = 8000
-    
-    # Banco de Dados MySQL
-    db_host: str = "localhost"
-    db_port: int = 3306
-    db_user: str = "ROOT"
-    db_password: str = ""
-    db_name: str = "extratos_contabil_python"
+
+    # ==================== Servidor ====================
+    port: int = 8888
+
+    # ==================== Banco de Dados MySQL ====================
+    db_host: str
+    db_port: int
+    db_user: str
+    db_password: str
+    db_name: str
     
     @property
     def unidentified_path(self) -> Path:
         """Caminho para arquivos não identificados."""
         return self.base_path / "000 - NAO_IDENTIFICADOS"
-    
+
     @property
     def database_url(self) -> str:
         """URL de conexão com o banco de dados MySQL."""
         from urllib.parse import quote_plus
         password_escaped = quote_plus(self.db_password)
         return f"mysql+pymysql://{self.db_user}:{password_escaped}@{self.db_host}:{self.db_port}/{self.db_name}"
+
+    def validate_paths(self) -> dict[str, bool]:
+        """
+        Valida se os caminhos essenciais existem.
+
+        Returns:
+            Dicionário com status de cada caminho.
+        """
+        return {
+            "base_path": self.base_path.exists(),
+            "clients_excel_path": self.clients_excel_path.exists(),
+            "log_excel_path": self.log_excel_path.exists(),
+            "extratos_excel_path": self.extratos_excel_path.exists(),
+            "watch_folder_path": self.watch_folder_path.exists(),
+            "unidentified_path": self.unidentified_path.exists(),
+        }
+
+    def validate_database_connection(self) -> dict[str, any]:
+        """
+        Testa a conexão com o banco de dados MySQL.
+
+        Returns:
+            Dicionário com status da conexão e mensagem.
+        """
+        try:
+            from sqlalchemy import create_engine, text
+
+            # Cria engine temporário para teste
+            test_engine = create_engine(
+                self.database_url,
+                pool_pre_ping=True,
+                connect_args={"connect_timeout": 5}
+            )
+
+            # Tenta executar query simples
+            with test_engine.connect() as conn:
+                conn.execute(text("SELECT 1"))
+
+            test_engine.dispose()
+
+            return {
+                "status": "success",
+                "connected": True,
+                "message": "Conexão com banco de dados estabelecida com sucesso",
+                "database": self.db_name,
+                "host": self.db_host,
+                "port": self.db_port,
+            }
+        except Exception as e:
+            return {
+                "status": "error",
+                "connected": False,
+                "message": f"Erro ao conectar ao banco de dados: {str(e)}",
+                "database": self.db_name,
+                "host": self.db_host,
+                "port": self.db_port,
+            }
+
+    def get_summary(self) -> dict:
+        """
+        Retorna um resumo das configurações (sem dados sensíveis).
+
+        Returns:
+            Dicionário com resumo das configurações.
+        """
+        return {
+            "llm_model": self.llm_model,
+            "base_path": str(self.base_path),
+            "clients_excel_path": str(self.clients_excel_path),
+            "log_excel_path": str(self.log_excel_path),
+            "extratos_excel_path": str(self.extratos_excel_path),
+            "watch_folder_path": str(self.watch_folder_path),
+            "similarity_threshold": self.similarity_threshold,
+            "port": self.port,
+            "database": {
+                "host": self.db_host,
+                "port": self.db_port,
+                "user": self.db_user,
+                "name": self.db_name,
+            },
+        }
 
 
 @lru_cache

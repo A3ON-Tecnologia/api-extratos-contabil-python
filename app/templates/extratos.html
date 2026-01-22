@@ -14,9 +14,14 @@
         :root {
             --bg-primary: #0a0a0f;
             --bg-secondary: #0d1520;
+            --bg-card: #111827;
             --text-primary: #f1f5f9;
             --text-secondary: #94a3b8;
             --border-color: #1e3a5f;
+            --accent-primary: #0ea5e9;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-error: #ef4444;
         }
 
         * {
@@ -37,15 +42,17 @@
         }
 
         .container {
-            max-width: 1200px;
+            max-width: 1400px;
             margin: 0 auto;
             padding: 2rem;
         }
 
         .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
             margin-bottom: 1.5rem;
-            border-bottom: 1px solid var(--border-color);
-            padding-bottom: 1rem;
         }
 
         .header h1 {
@@ -53,18 +60,145 @@
             font-weight: 700;
         }
 
-        .placeholder {
+        .controls {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            padding: 0.5rem 0.9rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn:hover {
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        .btn.success {
+            border-color: rgba(16, 185, 129, 0.4);
+            color: var(--accent-success);
+        }
+
+        .btn.danger {
+            border-color: rgba(239, 68, 68, 0.5);
+            color: var(--accent-error);
+        }
+
+        .status-pill {
             background: var(--bg-secondary);
             border: 1px solid var(--border-color);
-            border-radius: 0.75rem;
-            padding: 1.5rem;
+            padding: 0.35rem 0.75rem;
+            border-radius: 999px;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .status-pill.running {
+            border-color: rgba(16, 185, 129, 0.5);
+            color: var(--accent-success);
+        }
+
+        .card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.9rem;
+            overflow: hidden;
+        }
+
+        .card-header {
+            padding: 1rem 1.25rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+        }
+
+        .card-header h2 {
+            font-size: 1rem;
+            font-weight: 600;
+        }
+
+        .tabs {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .tab {
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            padding: 0.35rem 0.75rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.8rem;
+        }
+
+        .tab.active {
+            border-color: var(--accent-primary);
+            color: var(--text-primary);
+        }
+
+        .table-wrapper {
+            overflow: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            min-width: 900px;
+        }
+
+        th, td {
+            text-align: left;
+            padding: 0.75rem 1rem;
+            border-bottom: 1px solid var(--border-color);
+            font-size: 0.85rem;
+        }
+
+        th {
+            background: var(--bg-secondary);
+            color: var(--text-secondary);
+            text-transform: uppercase;
+            font-size: 0.7rem;
+            letter-spacing: 0.05em;
+        }
+
+        tbody tr:hover {
+            background: rgba(14, 165, 233, 0.08);
+        }
+
+        .muted {
+            color: var(--text-secondary);
+        }
+
+        .path-cell {
+            max-width: 320px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+            font-size: 0.75rem;
+        }
+
+        .empty {
+            padding: 2rem;
+            text-align: center;
             color: var(--text-secondary);
         }
     </style>
 </head>
 
 <body>
-    <!-- Tech Navbar -->
     <nav class="tech-navbar collapsed" id="techNavbar">
         <div class="navbar-header">
             <span class="navbar-title">Extratos API</span>
@@ -72,7 +206,7 @@
         <div class="navbar-nav">
             <div class="nav-item">
                 <a href="/monitor" class="nav-link">
-                    <span class="nav-icon">M</span>
+                    <span class="nav-icon">📺</span>
                     <span class="nav-text">Monitor</span>
                     <span class="nav-status"></span>
                 </a>
@@ -80,24 +214,31 @@
             </div>
             <div class="nav-item">
                 <a href="/test" class="nav-link">
-                    <span class="nav-icon">T</span>
+                    <span class="nav-icon">🧪</span>
                     <span class="nav-text">Modo Teste</span>
                 </a>
                 <span class="nav-tooltip">Modo Teste</span>
             </div>
             <div class="nav-item">
                 <a href="/reversao" class="nav-link">
-                    <span class="nav-icon">R</span>
-                    <span class="nav-text">Reversao</span>
+                    <span class="nav-icon">🔄</span>
+                    <span class="nav-text">Reversão</span>
                 </a>
-                <span class="nav-tooltip">Reversao</span>
+                <span class="nav-tooltip">Reversão</span>
             </div>
             <div class="nav-item active">
                 <a href="/extratos" class="nav-link">
-                    <span class="nav-icon">E</span>
+                    <span class="nav-icon">📄</span>
                     <span class="nav-text">Extratos</span>
                 </a>
                 <span class="nav-tooltip">Extratos</span>
+            </div>
+            <div class="nav-item">
+                <a href="/extratos/simular" class="nav-link">
+                    <span class="nav-icon">🔍</span>
+                    <span class="nav-text">Simulação</span>
+                </a>
+                <span class="nav-tooltip">Simulação</span>
             </div>
         </div>
         <div class="navbar-footer">
@@ -113,14 +254,294 @@
         <div class="container">
             <header class="header">
                 <h1>Extratos</h1>
+                <div class="controls">
+                    <button class="btn" id="btnMapear" style="border-color: rgba(239, 68, 68, 0.5); color: var(--accent-error);">Mapear</button>
+                    <span class="status-pill" id="watchStatus">Watcher parado</span>
+                    <button class="btn success" id="btnStart">Iniciar watcher</button>
+                    <button class="btn danger" id="btnStop">Parar watcher</button>
+                    <button class="btn" id="btnRefresh">Atualizar</button>
+                </div>
             </header>
-            <div class="placeholder">
-                View criada. Conteudo em breve.
-            </div>
+
+            <!-- Seção de arquivos mapeados -->
+            <section class="card" id="filesCard" style="display: none; margin-bottom: 1.5rem;">
+                <div class="card-header">
+                    <h2>Arquivos disponíveis na pasta</h2>
+                    <button class="btn" id="btnCloseFiles" style="font-size: 0.75rem; padding: 0.35rem 0.6rem;">Fechar</button>
+                </div>
+                <div class="table-wrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nome do arquivo</th>
+                                <th>Tamanho (MB)</th>
+                                <th>Modificado em</th>
+                            </tr>
+                        </thead>
+                        <tbody id="filesTableBody">
+                            <tr>
+                                <td colspan="3" class="empty">Nenhum arquivo mapeado ainda</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+
+            <section class="card">
+                <div class="card-header">
+                    <h2>Extratos processados</h2>
+                    <div class="tabs">
+                        <button class="tab active" data-tab="prod">Producao</button>
+                        <button class="tab" data-tab="test">Teste</button>
+                    </div>
+                </div>
+                <div class="table-wrapper" id="tableWrapper">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Nome antigo</th>
+                                <th>Nome novo</th>
+                                <th>Banco</th>
+                                <th>Tipo extrato</th>
+                                <th>Data processamento</th>
+                                <th>Local salvo</th>
+                                <th>Acoes</th>
+                            </tr>
+                        </thead>
+                        <tbody id="tableBody">
+                            <tr>
+                                <td colspan="7" class="empty">Carregando...</td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </section>
         </div>
     </div>
 
     <script src="/static/js/tech-navbar.js"></script>
+    <script>
+        const tableBody = document.getElementById('tableBody');
+        const watchStatus = document.getElementById('watchStatus');
+        const btnStart = document.getElementById('btnStart');
+        const btnStop = document.getElementById('btnStop');
+        const btnRefresh = document.getElementById('btnRefresh');
+        const btnMapear = document.getElementById('btnMapear');
+        const btnCloseFiles = document.getElementById('btnCloseFiles');
+        const filesCard = document.getElementById('filesCard');
+        const filesTableBody = document.getElementById('filesTableBody');
+        const tabs = document.querySelectorAll('.tab');
+
+        let currentTab = 'prod';
+
+        function formatDate(iso) {
+            if (!iso) return '-';
+            const date = new Date(iso);
+            return date.toLocaleString('pt-BR');
+        }
+
+        function basename(path) {
+            if (!path) return '-';
+            const parts = path.split(/[\\/]/);
+            return parts[parts.length - 1];
+        }
+
+        function setEmpty(message) {
+            tableBody.innerHTML = `<tr><td colspan="7" class="empty">${message}</td></tr>`;
+        }
+
+        async function loadLogs() {
+            setEmpty('Carregando...');
+            const url = currentTab === 'test' ? '/test/logs?limit=200' : '/logs?limit=200';
+
+            try {
+                const response = await fetch(url);
+                let data = {};
+                try {
+                    data = await response.json();
+                } catch (e) {
+                    data = {};
+                }
+
+                if (!response.ok) {
+                    const detail = data.detail || data.message || `HTTP ${response.status}`;
+                    setEmpty(`Erro ao carregar dados: ${detail}`);
+                    return;
+                }
+
+                const logs = data.logs || [];
+
+                if (!logs.length) {
+                    setEmpty('Nenhum extrato encontrado.');
+                    return;
+                }
+
+                tableBody.innerHTML = logs.map(log => {
+                    const nomeNovo = basename(log.arquivo_salvo);
+                    const localSalvo = log.arquivo_salvo || '-';
+                    const banco = log.banco || '-';
+                    const tipo = log.tipo_documento || '-';
+                    const dataProc = formatDate(log.processado_em);
+                    const actionBtn = currentTab === 'prod'
+                        ? `<button class="btn danger" onclick="reverter(${log.id})">Reverter</button>`
+                        : '<span class="muted">-</span>';
+
+                    return `
+                        <tr>
+                            <td title="${log.arquivo_original}">${log.arquivo_original}</td>
+                            <td title="${nomeNovo}">${nomeNovo}</td>
+                            <td>${banco}</td>
+                            <td>${tipo}</td>
+                            <td>${dataProc}</td>
+                            <td class="path-cell" title="${localSalvo}">${localSalvo}</td>
+                            <td>${actionBtn}</td>
+                        </tr>
+                    `;
+                }).join('');
+            } catch (e) {
+                console.error(e);
+                setEmpty('Erro ao carregar dados.');
+            }
+        }
+
+        async function updateWatchStatus() {
+            try {
+                const response = await fetch('/extratos/watch/status');
+                const data = await response.json();
+                const running = data.running;
+                watchStatus.textContent = running ? 'Watcher ativo' : 'Watcher parado';
+                watchStatus.classList.toggle('running', running);
+            } catch (e) {
+                watchStatus.textContent = 'Watcher indisponivel';
+            }
+        }
+
+        async function startWatcher() {
+            try {
+                const response = await fetch('/extratos/watch/start', { method: 'POST' });
+                if (!response.ok) {
+                    const data = await response.json();
+                    alert(data.detail || 'Falha ao iniciar watcher');
+                }
+                await updateWatchStatus();
+            } catch (e) {
+                alert('Falha ao iniciar watcher');
+            }
+        }
+
+        async function stopWatcher() {
+            try {
+                await fetch('/extratos/watch/stop', { method: 'POST' });
+                await updateWatchStatus();
+            } catch (e) {
+                alert('Falha ao parar watcher');
+            }
+        }
+
+        async function reverter(logId) {
+            if (!confirm('Deseja reverter este extrato?')) return;
+            try {
+                const response = await fetch(`/reversao/${logId}`, { method: 'DELETE' });
+                if (!response.ok) {
+                    let data = {};
+                    try {
+                        data = await response.json();
+                    } catch (e) {
+                        data = {};
+                    }
+                    alert(data.detail || data.message || `Falha ao reverter (HTTP ${response.status})`);
+                } else {
+                    await loadLogs();
+                }
+            } catch (e) {
+                alert('Falha ao reverter');
+            }
+        }
+
+        tabs.forEach(tab => {
+            tab.addEventListener('click', () => {
+                tabs.forEach(t => t.classList.remove('active'));
+                tab.classList.add('active');
+                currentTab = tab.dataset.tab;
+                loadLogs();
+            });
+        });
+
+        async function mapearArquivos() {
+            filesTableBody.innerHTML = '<tr><td colspan="3" class="empty">Carregando...</td></tr>';
+            filesCard.style.display = 'block';
+
+            try {
+                const response = await fetch('/extratos/mapear');
+                const data = await response.json();
+
+                if (!response.ok) {
+                    const detail = data.detail || data.message || `HTTP ${response.status}`;
+                    let errorMsg = `Erro: ${detail}`;
+
+                    // Mensagem específica para erro de permissão
+                    if (response.status === 403) {
+                        errorMsg += '<br><br>💡 Execute o servidor como administrador ou verifique as permissões da pasta.';
+                    }
+
+                    filesTableBody.innerHTML = `<tr><td colspan="3" class="empty">${errorMsg}</td></tr>`;
+                    return;
+                }
+
+                const arquivos = data.arquivos || [];
+                const avisos = data.avisos || [];
+
+                if (!arquivos.length && !avisos.length) {
+                    filesTableBody.innerHTML = '<tr><td colspan="3" class="empty">Nenhum arquivo PDF encontrado na pasta</td></tr>';
+                    return;
+                }
+
+                let html = '';
+
+                // Mostra avisos se houver
+                if (avisos.length > 0) {
+                    html += `
+                        <tr style="background: rgba(245, 158, 11, 0.1);">
+                            <td colspan="3" style="color: var(--accent-warning); padding: 0.75rem;">
+                                ⚠️ ${avisos.length} arquivo(s) com erro de leitura: ${avisos.join(', ')}
+                            </td>
+                        </tr>
+                    `;
+                }
+
+                // Mostra arquivos
+                html += arquivos.map(arquivo => {
+                    const dataModificacao = new Date(arquivo.modificado_em * 1000).toLocaleString('pt-BR');
+                    return `
+                        <tr>
+                            <td title="${arquivo.nome}">${arquivo.nome}</td>
+                            <td>${arquivo.tamanho_mb} MB</td>
+                            <td>${dataModificacao}</td>
+                        </tr>
+                    `;
+                }).join('');
+
+                filesTableBody.innerHTML = html;
+
+            } catch (e) {
+                console.error(e);
+                filesTableBody.innerHTML = '<tr><td colspan="3" class="empty">Erro ao carregar arquivos. Verifique o console para detalhes.</td></tr>';
+            }
+        }
+
+        function fecharArquivos() {
+            filesCard.style.display = 'none';
+        }
+
+        btnStart.addEventListener('click', startWatcher);
+        btnStop.addEventListener('click', stopWatcher);
+        btnRefresh.addEventListener('click', loadLogs);
+        btnMapear.addEventListener('click', mapearArquivos);
+        btnCloseFiles.addEventListener('click', fecharArquivos);
+
+        updateWatchStatus();
+        loadLogs();
+    </script>
 </body>
 
 </html>

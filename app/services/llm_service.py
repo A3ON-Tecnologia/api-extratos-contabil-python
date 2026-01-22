@@ -28,35 +28,46 @@ REGRAS IMPORTANTES:
 5. NÃO extraia datas - o sistema usará automaticamente o mês anterior
 
 CLASSIFICAÇÃO DE TIPO DE DOCUMENTO (Campo: tipo_documento):
-Você DEVE classificar o documento em EXATAMENTE UMA das categorias abaixo. Não use outros textos.
-- "CC" -> Para Extratos de Conta Corrente
-- "POUPANCA" -> Para Aplicação Poupança
-- "INVESTIMENTO" -> Para Aplicação Investimento, CDB, Fundos
-- "CARTAO_CREDITO" -> Para Cartão de Crédito, Maquininhas, Antecipação, Taxas de Cartão
-- "CONSORCIO" -> Para Extratos de Consórcio
-- "EMPRESTIMO" -> Para Empréstimos, Financiamentos, Mútuos
-- "CONTA_CAPITAL" -> Para Extratos de Conta Capital, Capital Social
-- "PIX" -> Para Extratos de Transferências PIX, Comprovantes PIX
-- "PAGAMENTOS" -> Para Pagamentos Realizados, Comprovantes de Pagamento
-- "DEPOSITO" -> Para Extratos de Depósito, Comprovantes de Depósito
-- "VENDAS" -> Para Histórico de Vendas, Relatório de Vendas
-- "TITULOS_CADASTRADOS" -> Para Relação de Títulos Cadastrados
-- "OUTROS" -> Se não se encaixar em nenhuma acima
+Você DEVE classificar o documento em EXATAMENTE UMA das categorias abaixo. Use APENAS estes textos:
 
-DICAS PARA IDENTIFICAÇÃO DE BANCOS:
-- "COOP DE CRED POUP INV SOMA PR/SC/SP" ou similar -> Banco: SICREDI
-- Sempre retorne o nome simplificado do banco (ex: "SICREDI", "BRADESCO", "ITAU", "CAIXA", "BANCO DO BRASIL")
+TIPOS PRINCIPAIS:
+- "EXTRATO DE CONTA CORRENTE" -> Para extratos de conta corrente, movimentação bancária
+- "EXTRATO DA CONTA CAPITAL" -> Para extratos de conta capital, capital social
+- "EXTRATO CONTA POUPANÇA" -> Para extratos de poupança
+- "EXTRATO APLICAÇÃO" -> Para saldo de aplicação, investimentos, CDB, fundos
+- "EXTRATO CONSOLIDADO RENDA FIXA" -> Para extratos consolidados de investimentos
+- "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO" -> Para faturas de cartão de crédito, maquininhas
+- "REL RECEBIMENTO" -> Para relatórios de títulos por período, recebimentos, títulos cadastrados
+
+CÓDIGOS CURTOS (use quando apropriado):
+- "CC" -> Conta Corrente (alternativa curta)
+- "POUPANÇA" -> Poupança (alternativa curta)
+- "CARTÃO" -> Cartão de Crédito (alternativa curta)
+
+OUTROS TIPOS:
+- "EXTRATO PIX" -> Para extratos de transferências PIX
+- "EXTRATO EMPRÉSTIMO" -> Para empréstimos, financiamentos
+- "EXTRATO CONSÓRCIO" -> Para consórcios
+- "OUTROS" -> Se não se encaixar em nenhuma categoria acima
+
+IDENTIFICAÇÃO DE BANCOS:
+- "COOP DE CRED POUP INV SOMA PR/SC/SP" -> Banco: SICREDI
+- "SICOOB" ou "COOPERATIVA" -> Banco: SICOOB (NÃO confunda com CRESOL)
+- "CRESOL" -> Banco: CRESOL (cooperativa de crédito CRESOL, diferente de SICOOB)
+- "CAIXA ECONOMICA" -> Banco: CAIXA
+- Sempre retorne o nome SIMPLIFICADO do banco em UPPERCASE (ex: "SICREDI", "SICOOB", "CRESOL", "BRADESCO", "ITAU", "CAIXA", "BANCO DO BRASIL", "SANTANDER")
+- Se não conseguir identificar com certeza, retorne null
 
 FORMATO DE RESPOSTA:
-Retorne APENAS um JSON válido, sem explicações adicionais, com a seguinte estrutura:
+Retorne APENAS um JSON válido, sem explicações adicionais:
 
 {
     "cliente_sugerido": "string ou null - nome da empresa/pessoa identificada",
     "cnpj": "string ou null - CNPJ encontrado",
-    "banco": "string ou null - nome do banco (ex: Bradesco, Itaú, Banco do Brasil)",
+    "banco": "string ou null - nome simplificado do banco em UPPERCASE",
     "agencia": "string ou null - número da agência",
     "conta": "string ou null - número da conta",
-    "tipo_documento": "string - OBRIGATÓRIO: Um dos códigos acima (ex: 'CC', 'PIX', 'PAGAMENTOS')",
+    "tipo_documento": "string - OBRIGATÓRIO: Um dos tipos acima",
     "confianca": "number - nível de confiança de 0.0 a 1.0"
 }"""
 
@@ -142,23 +153,45 @@ class LLMService:
             logger.error(f"Erro na chamada da LLM: {e}")
             raise
     
-    def extract_info_with_fallback(self, text: str) -> LLMExtractionResult:
+    def extract_info_with_fallback(self, text: str, pdf_data: bytes | None = None) -> LLMExtractionResult:
         """
-        Extrai informações com fallback para valores padrão.
-        
+        Extrai informações com fallback para valores padrão e visão.
+
         Se a extração falhar, retorna um resultado com valores padrão.
-        
+        Se o banco não for identificado, tenta usar visão computacional.
+
         Args:
             text: Texto extraído do documento PDF
-            
+            pdf_data: Bytes do PDF (opcional) para fallback de visão
+
         Returns:
             Resultado da extração (real ou fallback)
         """
         try:
-            return self.extract_info(text)
+            result = self.extract_info(text)
+
+            # Se o banco não foi identificado e temos os dados do PDF, tenta visão
+            if (not result.banco or result.banco == "null") and pdf_data:
+                logger.info("Banco não identificado no texto, tentando visão...")
+                try:
+                    from app.services.vision_service import VisionService
+                    vision_service = VisionService()
+                    banco_visual = vision_service.identify_from_first_page(pdf_data)
+
+                    if banco_visual:
+                        logger.info(f"Banco identificado por visão: {banco_visual}")
+                        result.banco = banco_visual
+                        # Aumenta a confiança se a visão conseguiu identificar
+                        if result.confianca < 0.9:
+                            result.confianca = 0.9
+                except Exception as e:
+                    logger.warning(f"Erro ao tentar identificar banco por visão: {e}")
+
+            return result
+
         except Exception as e:
             logger.warning(f"Usando fallback devido a erro: {e}")
-            
+
             return LLMExtractionResult(
                 cliente_sugerido=None,
                 cnpj=None,

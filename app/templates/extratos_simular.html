@@ -1,0 +1,683 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulação de Processamento | API Extratos</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon-monitor.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/tech-navbar.css">
+    <style>
+        :root {
+            --bg-primary: #0a0a0f;
+            --bg-secondary: #0d1520;
+            --bg-card: #111827;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --border-color: #1e3a5f;
+            --accent-primary: #0ea5e9;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-error: #ef4444;
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+        }
+
+        .page-wrapper {
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+            flex-wrap: wrap;
+        }
+
+        .header h1 {
+            font-size: 2rem;
+            font-weight: 700;
+        }
+
+        .badge {
+            background: var(--accent-warning);
+            color: #000;
+            padding: 0.25rem 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.75rem;
+            font-weight: 700;
+            text-transform: uppercase;
+        }
+
+        .controls {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .btn {
+            border: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            color: var(--text-primary);
+            padding: 0.5rem 0.9rem;
+            border-radius: 0.5rem;
+            cursor: pointer;
+            font-size: 0.85rem;
+            transition: all 0.2s ease;
+            font-family: 'Inter', sans-serif;
+        }
+
+        .btn:hover {
+            border-color: var(--accent-primary);
+            color: white;
+        }
+
+        .btn.primary {
+            border-color: rgba(14, 165, 233, 0.4);
+            color: var(--accent-primary);
+        }
+
+        .btn.success {
+            border-color: rgba(16, 185, 129, 0.4);
+            color: var(--accent-success);
+        }
+
+        .btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .info-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .info-card h2 {
+            font-size: 1.25rem;
+            margin-bottom: 0.75rem;
+            color: var(--accent-primary);
+        }
+
+        .info-card p {
+            color: var(--text-secondary);
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        .stats {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-bottom: 1.5rem;
+        }
+
+        .stat-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.25rem;
+        }
+
+        .stat-label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+        }
+
+        .stat-value {
+            font-size: 1.75rem;
+            font-weight: 700;
+            color: var(--text-primary);
+        }
+
+        .file-list {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            overflow: hidden;
+            margin-bottom: 1.5rem;
+        }
+
+        .file-list-header {
+            background: var(--bg-secondary);
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .file-list-header h3 {
+            font-size: 1.1rem;
+            color: var(--text-primary);
+        }
+
+        .file-item {
+            padding: 1rem 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .file-item:last-child {
+            border-bottom: none;
+        }
+
+        .file-info {
+            flex: 1;
+            min-width: 250px;
+        }
+
+        .file-name {
+            font-size: 0.95rem;
+            color: var(--text-primary);
+            margin-bottom: 0.25rem;
+        }
+
+        .file-meta {
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+        }
+
+        .file-actions {
+            display: flex;
+            gap: 0.5rem;
+            align-items: center;
+        }
+
+        .result-section {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.75rem;
+            padding: 1.5rem;
+            margin-top: 1rem;
+        }
+
+        .result-item {
+            margin-bottom: 1.5rem;
+            padding-bottom: 1.5rem;
+            border-bottom: 1px solid var(--border-color);
+        }
+
+        .result-item:last-child {
+            margin-bottom: 0;
+            padding-bottom: 0;
+            border-bottom: none;
+        }
+
+        .result-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 1rem;
+        }
+
+        .result-filename {
+            font-size: 1.1rem;
+            font-weight: 600;
+            color: var(--text-primary);
+        }
+
+        .status-badge {
+            padding: 0.35rem 0.75rem;
+            border-radius: 0.5rem;
+            font-size: 0.8rem;
+            font-weight: 600;
+        }
+
+        .status-badge.success {
+            background: rgba(16, 185, 129, 0.2);
+            color: var(--accent-success);
+        }
+
+        .status-badge.warning {
+            background: rgba(245, 158, 11, 0.2);
+            color: var(--accent-warning);
+        }
+
+        .status-badge.error {
+            background: rgba(239, 68, 68, 0.2);
+            color: var(--accent-error);
+        }
+
+        .result-details {
+            display: grid;
+            gap: 0.75rem;
+        }
+
+        .detail-row {
+            display: flex;
+            gap: 0.5rem;
+        }
+
+        .detail-label {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+            min-width: 150px;
+        }
+
+        .detail-value {
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            font-family: 'Courier New', monospace;
+        }
+
+        .path-display {
+            background: var(--bg-secondary);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 0.75rem;
+            margin-top: 0.5rem;
+            overflow-x: auto;
+        }
+
+        .path-display code {
+            color: var(--accent-primary);
+            font-size: 0.85rem;
+        }
+
+        .loading {
+            text-align: center;
+            padding: 2rem;
+            color: var(--text-secondary);
+        }
+
+        .spinner {
+            border: 3px solid var(--border-color);
+            border-top: 3px solid var(--accent-primary);
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 1rem;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .empty-state {
+            text-align: center;
+            padding: 3rem;
+            color: var(--text-secondary);
+        }
+
+        .empty-state svg {
+            width: 64px;
+            height: 64px;
+            margin-bottom: 1rem;
+            opacity: 0.5;
+        }
+    </style>
+</head>
+
+<body>
+    <nav class="tech-navbar collapsed" id="techNavbar">
+        <div class="navbar-header">
+            <span class="navbar-title">Extratos API</span>
+        </div>
+        <div class="navbar-nav">
+            <div class="nav-item">
+                <a href="/monitor" class="nav-link">
+                    <span class="nav-icon">📺</span>
+                    <span class="nav-text">Monitor</span>
+                    <span class="nav-status"></span>
+                </a>
+                <span class="nav-tooltip">Monitor</span>
+            </div>
+            <div class="nav-item">
+                <a href="/test" class="nav-link">
+                    <span class="nav-icon">🧪</span>
+                    <span class="nav-text">Modo Teste</span>
+                </a>
+                <span class="nav-tooltip">Modo Teste</span>
+            </div>
+            <div class="nav-item">
+                <a href="/reversao" class="nav-link">
+                    <span class="nav-icon">🔄</span>
+                    <span class="nav-text">Reversão</span>
+                </a>
+                <span class="nav-tooltip">Reversão</span>
+            </div>
+            <div class="nav-item">
+                <a href="/extratos" class="nav-link">
+                    <span class="nav-icon">📄</span>
+                    <span class="nav-text">Extratos</span>
+                </a>
+                <span class="nav-tooltip">Extratos</span>
+            </div>
+            <div class="nav-item active">
+                <a href="/extratos/simular" class="nav-link">
+                    <span class="nav-icon">🔍</span>
+                    <span class="nav-text">Simulação</span>
+                </a>
+                <span class="nav-tooltip">Simulação</span>
+            </div>
+
+        </div>
+        <div class="navbar-footer">
+            <div class="footer-status"></div>
+            <span class="footer-text">Sistema Online</span>
+        </div>
+        <button class="navbar-toggle" id="navbarToggle">
+            <span class="arrow">❯</span>
+        </button>
+    </nav>
+
+    <div class="page-wrapper navbar-collapsed" id="mainContent">
+        <div class="container">
+            <div class="header">
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <h1>Simulação de Processamento</h1>
+                    <span class="badge">MODO TESTE</span>
+                </div>
+                <div class="controls">
+                    <button class="btn" onclick="carregarArquivos()">
+                        🔄 Atualizar Lista
+                    </button>
+                    <button class="btn success" onclick="simularTodos()" id="btnSimularTodos" disabled>
+                        ▶️ Simular Todos
+                    </button>
+                </div>
+            </div>
+
+            <div class="info-card">
+                <h2>ℹ️ Como Funciona</h2>
+                <p>
+                    Esta ferramenta <strong>SIMULA</strong> o processamento dos arquivos PDF da pasta de extratos.
+                    Nenhum arquivo será salvo ou movido. O sistema irá:
+                </p>
+                <ul style="margin-top: 0.75rem; margin-left: 1.5rem; line-height: 1.8;">
+                    <li>Extrair o texto do PDF</li>
+                    <li>Analisar com IA (LLM) para identificar cliente, banco, tipo de documento, etc.</li>
+                    <li>Fazer matching com a planilha de clientes</li>
+                    <li>Calcular o caminho de destino onde o arquivo seria salvo</li>
+                    <li>Mostrar os resultados sem salvar nada</li>
+                </ul>
+            </div>
+
+            <div class="stats" id="statsContainer" style="display: none;">
+                <div class="stat-card">
+                    <div class="stat-label">Total de Arquivos</div>
+                    <div class="stat-value" id="statTotal">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Processados</div>
+                    <div class="stat-value" id="statProcessados">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Identificados</div>
+                    <div class="stat-value" style="color: var(--accent-success);" id="statSucesso">0</div>
+                </div>
+                <div class="stat-card">
+                    <div class="stat-label">Não Identificados</div>
+                    <div class="stat-value" style="color: var(--accent-warning);" id="statNaoIdentificado">0</div>
+                </div>
+            </div>
+
+            <div class="file-list">
+                <div class="file-list-header">
+                    <h3>📁 Arquivos Disponíveis</h3>
+                    <span id="fileCount">Carregando...</span>
+                </div>
+                <div id="fileListContainer">
+                    <div class="loading">
+                        <div class="spinner"></div>
+                        <p>Carregando arquivos da pasta de extratos...</p>
+                    </div>
+                </div>
+            </div>
+
+            <div id="resultsSection" style="display: none;">
+                <div class="result-section">
+                    <h3 style="margin-bottom: 1.5rem; color: var(--accent-primary);">📋 Resultados da Simulação</h3>
+                    <div id="resultsContainer"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let arquivos = [];
+        let resultadosSimulacao = [];
+
+        async function carregarArquivos() {
+            try {
+                const response = await fetch('/extratos/mapear');
+                const data = await response.json();
+
+                arquivos = data.arquivos;
+                document.getElementById('fileCount').textContent = `${data.total} arquivo(s)`;
+                document.getElementById('btnSimularTodos').disabled = data.total === 0;
+
+                renderizarListaArquivos();
+            } catch (error) {
+                console.error('Erro ao carregar arquivos:', error);
+                document.getElementById('fileListContainer').innerHTML = `
+                    <div class="empty-state">
+                        <p style="color: var(--accent-error);">Erro ao carregar arquivos: ${error.message}</p>
+                    </div>
+                `;
+            }
+        }
+
+        function renderizarListaArquivos() {
+            const container = document.getElementById('fileListContainer');
+
+            if (arquivos.length === 0) {
+                container.innerHTML = `
+                    <div class="empty-state">
+                        <svg fill="currentColor" viewBox="0 0 20 20">
+                            <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path>
+                            <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"></path>
+                        </svg>
+                        <p>Nenhum arquivo PDF encontrado na pasta de extratos</p>
+                    </div>
+                `;
+                return;
+            }
+
+            container.innerHTML = arquivos.map(arquivo => `
+                <div class="file-item">
+                    <div class="file-info">
+                        <div class="file-name">${arquivo.nome}</div>
+                        <div class="file-meta">${arquivo.tamanho_mb} MB</div>
+                    </div>
+                    <div class="file-actions">
+                        <button class="btn primary" onclick="simularArquivo('${arquivo.nome}')">
+                            🔍 Simular
+                        </button>
+                    </div>
+                </div>
+            `).join('');
+        }
+
+        async function simularArquivo(filename) {
+            try {
+                const btn = event.target;
+                btn.disabled = true;
+                btn.textContent = '⏳ Processando...';
+
+                const response = await fetch('/extratos/simular-arquivo', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ filename })
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Erro ${response.status}: ${response.statusText}`);
+                }
+
+                const resultado = await response.json();
+
+                // Adiciona ou atualiza o resultado
+                const idx = resultadosSimulacao.findIndex(r => r.arquivo_original === filename);
+                if (idx >= 0) {
+                    resultadosSimulacao[idx] = resultado;
+                } else {
+                    resultadosSimulacao.push(resultado);
+                }
+
+                renderizarResultados();
+                btn.textContent = '✅ Concluído';
+                setTimeout(() => {
+                    btn.textContent = '🔍 Simular';
+                    btn.disabled = false;
+                }, 2000);
+
+            } catch (error) {
+                console.error('Erro ao simular:', error);
+                alert('Erro ao simular arquivo: ' + error.message);
+                event.target.disabled = false;
+                event.target.textContent = '🔍 Simular';
+            }
+        }
+
+        async function simularTodos() {
+            const btn = document.getElementById('btnSimularTodos');
+            btn.disabled = true;
+            btn.textContent = '⏳ Processando...';
+
+            try {
+                const response = await fetch('/extratos/simular-todos', {
+                    method: 'POST'
+                });
+
+                if (!response.ok) {
+                    throw new Error(`Erro ${response.status}: ${response.statusText}`);
+                }
+
+                const data = await response.json();
+                resultadosSimulacao = data.resultados;
+
+                // Atualiza estatísticas
+                document.getElementById('statsContainer').style.display = 'grid';
+                document.getElementById('statTotal').textContent = data.total_arquivos;
+                document.getElementById('statProcessados').textContent = data.processados;
+                document.getElementById('statSucesso').textContent = data.estatisticas.sucesso;
+                document.getElementById('statNaoIdentificado').textContent = data.estatisticas.nao_identificado;
+
+                renderizarResultados();
+                btn.textContent = '✅ Concluído';
+
+                setTimeout(() => {
+                    btn.textContent = '▶️ Simular Todos';
+                    btn.disabled = false;
+                }, 2000);
+
+            } catch (error) {
+                console.error('Erro ao simular todos:', error);
+                alert('Erro ao simular arquivos: ' + error.message);
+                btn.textContent = '▶️ Simular Todos';
+                btn.disabled = false;
+            }
+        }
+
+        function renderizarResultados() {
+            const resultsSection = document.getElementById('resultsSection');
+            const resultsContainer = document.getElementById('resultsContainer');
+
+            if (resultadosSimulacao.length === 0) {
+                resultsSection.style.display = 'none';
+                return;
+            }
+
+            resultsSection.style.display = 'block';
+
+            resultsContainer.innerHTML = resultadosSimulacao.map(resultado => {
+                const statusClass = resultado.status === 'SUCESSO' ? 'success' :
+                                  resultado.status === 'NAO_IDENTIFICADO' ? 'warning' : 'error';
+                const statusText = resultado.status === 'SUCESSO' ? '✅ Identificado' :
+                                 resultado.status === 'NAO_IDENTIFICADO' ? '⚠️ Não Identificado' : '❌ Erro';
+
+                return `
+                    <div class="result-item">
+                        <div class="result-header">
+                            <div class="result-filename">${resultado.arquivo_original}</div>
+                            <div class="status-badge ${statusClass}">${statusText}</div>
+                        </div>
+                        <div class="result-details">
+                            ${resultado.cliente.identificado ? `
+                                <div class="detail-row">
+                                    <span class="detail-label">Cliente:</span>
+                                    <span class="detail-value">${resultado.cliente.nome}</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Código:</span>
+                                    <span class="detail-value">${resultado.cliente.cod}</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Conta:</span>
+                                    <span class="detail-value">${resultado.cliente.conta || 'N/A'}</span>
+                                </div>
+                                <div class="detail-row">
+                                    <span class="detail-label">Método:</span>
+                                    <span class="detail-value">${resultado.cliente.metodo} (Score: ${resultado.cliente.score})</span>
+                                </div>
+                            ` : ''}
+                            <div class="detail-row">
+                                <span class="detail-label">Banco:</span>
+                                <span class="detail-value">${resultado.extrato_info.banco || 'N/A'}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Tipo Documento:</span>
+                                <span class="detail-value">${resultado.extrato_info.tipo_documento || 'N/A'}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Período:</span>
+                                <span class="detail-value">${resultado.periodo.mes}/${resultado.periodo.ano}</span>
+                            </div>
+                            <div class="detail-row">
+                                <span class="detail-label">Confiança IA:</span>
+                                <span class="detail-value">${resultado.extrato_info.confianca}%</span>
+                            </div>
+                        </div>
+                        <div class="path-display">
+                            <strong>📂 Caminho de Destino:</strong><br>
+                            <code>${resultado.caminho_destino}</code>
+                            ${!resultado.pasta_destino_existe ? '<br><span style="color: var(--accent-warning);">⚠️ Pasta de destino não existe</span>' : ''}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        }
+
+        // Carrega arquivos ao iniciar a página
+        carregarArquivos();
+    </script>
+    <script src="/static/js/tech-navbar.js"></script>
+</body>
+
+</html>

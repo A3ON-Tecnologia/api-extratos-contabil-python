@@ -1,0 +1,22 @@
+CREATE TABLE IF NOT EXISTS `extratos_log_teste` (
+  `id` INT NOT NULL AUTO_INCREMENT,
+  `processado_em` DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `arquivo_original` VARCHAR(500) NOT NULL,
+  `arquivo_salvo` VARCHAR(1000) NULL,
+  `hash_arquivo` VARCHAR(64) NULL,
+  `cliente_nome` VARCHAR(500) NULL,
+  `cliente_cod` VARCHAR(20) NULL,
+  `cliente_cnpj` VARCHAR(20) NULL,
+  `banco` VARCHAR(100) NULL,
+  `tipo_documento` VARCHAR(50) NULL,
+  `agencia` VARCHAR(20) NULL,
+  `conta` VARCHAR(30) NULL,
+  `ano` INT NULL,
+  `mes` INT NULL,
+  `status` VARCHAR(50) NOT NULL,
+  `metodo_identificacao` VARCHAR(50) NULL,
+  `confianca_ia` INT NULL,
+  `erro` TEXT NULL,
+  `modo_teste` TINYINT NOT NULL DEFAULT 1,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

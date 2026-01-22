@@ -83,6 +83,10 @@ static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
+# Incluir rotas de teste de extratos
+from app.routes.extratos_test import router as extratos_test_router
+app.include_router(extratos_test_router)
+
 # Cache de hashes processados para idempotencia
 _processed_hashes: set[str] = set()
 
@@ -94,6 +98,12 @@ _test_jobs: dict[str, dict] = {}
 
 # Executor para tarefas em background
 _executor = ThreadPoolExecutor(max_workers=4)
+
+# Watcher de pasta de entrada (controlado por endpoints)
+_watch_task: asyncio.Task | None = None
+_watch_running: bool = False
+_watch_seen: dict[str, int] = {}
+_watch_processed: dict[str, float] = {}
 
 
 # Instancias dos servicos (singleton pattern simples)
@@ -140,6 +150,7 @@ def get_matching_service() -> MatchingService:
     return _matching_service
 
 
+
 def get_storage_service() -> StorageService:
     global _storage_service
     if _storage_service is None:
@@ -164,13 +175,622 @@ async def monitor_dashboard():
 
 @app.get("/extratos", response_class=HTMLResponse)
 async def extratos_page():
-    """Pagina inicial de extratos (placeholder)."""
+    """Pagina inicial de extratos."""
     template_path = Path(__file__).parent / "templates" / "extratos.html"
-    
+
     if not template_path.exists():
         raise HTTPException(status_code=500, detail="Template de extratos nao encontrado")
-    
+
     return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
+
+
+@app.get("/extratos/teste", response_class=HTMLResponse)
+async def extratos_teste_page():
+    """Pagina de teste de processamento de extratos."""
+    template_path = Path(__file__).parent / "templates" / "extratos_teste.html"
+
+    if not template_path.exists():
+        raise HTTPException(status_code=500, detail="Template de teste de extratos nao encontrado")
+
+    return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
+
+
+async def _watch_folder_loop():
+    """Loop de observacao da pasta de entrada de extratos."""
+    global _watch_running, _watch_seen, _watch_processed
+    settings = get_settings()
+    watch_path = settings.watch_folder_path
+
+    logger.info(f"Iniciando loop do watcher para: {watch_path}")
+
+    if not watch_path.exists() or not watch_path.is_dir():
+        logger.error(f"Pasta de extratos nao encontrada: {watch_path}")
+        _watch_running = False
+        return
+
+    logger.info(f"Watcher ativo! Monitorando: {watch_path}")
+
+    try:
+        iteration = 0
+        while _watch_running:
+            iteration += 1
+            if iteration % 12 == 1:  # Log a cada 1 minuto (12 * 5seg)
+                logger.info(f"Watcher ativo - iteracao {iteration} - arquivos pendentes: {len(_watch_seen)}")
+            for file_path in watch_path.iterdir():
+                if not file_path.is_file():
+                    continue
+
+                if file_path.suffix.lower() not in {".pdf", ".zip"}:
+                    continue
+
+                file_key = str(file_path.resolve())
+                try:
+                    stat_info = file_path.stat()
+                except OSError:
+                    continue
+
+                size = stat_info.st_size
+                mtime = stat_info.st_mtime
+
+                if _watch_processed.get(file_key) == mtime:
+                    continue
+
+                last_size = _watch_seen.get(file_key)
+                if last_size is None or last_size != size:
+                    _watch_seen[file_key] = size
+                    continue
+
+                # Arquivo estavel, processar
+                _watch_seen.pop(file_key, None)
+
+                logger.info(f"Arquivo estavel detectado: {file_path.name} - Iniciando processamento")
+
+                try:
+                    content = file_path.read_bytes()
+                except OSError as e:
+                    logger.error(f"Erro ao ler arquivo {file_path}: {e}")
+                    continue
+
+                filename = file_path.name
+                is_zip = file_path.suffix.lower() == ".zip"
+                job_id = str(uuid.uuid4())[:8]
+
+                logger.info(f"Criando job {job_id} para {filename}")
+
+                _jobs[job_id] = {
+                    "job_id": job_id,
+                    "filename": filename,
+                    "status": "processing",
+                    "message": "Arquivo recebido via watcher, processamento iniciado",
+                    "created_at": datetime.now().isoformat(),
+                    "completed_at": None,
+                    "results": None,
+                }
+
+                _watch_processed[file_key] = mtime
+
+                asyncio.create_task(
+                    process_file_background(
+                        job_id=job_id,
+                        content=content,
+                        filename=filename,
+                        is_zip=is_zip,
+                    )
+                )
+
+                logger.info(f"Job {job_id} criado e processamento iniciado em background")
+
+            await asyncio.sleep(5)
+    except asyncio.CancelledError:
+        logger.info("Watcher de extratos interrompido")
+    finally:
+        _watch_running = False
+
+
+@app.get("/extratos/watch/status")
+async def extratos_watch_status():
+    """Status do watcher da pasta de extratos."""
+    settings = get_settings()
+    watch_path = settings.watch_folder_path
+
+    return {
+        "running": _watch_running,
+        "watch_path": str(watch_path),
+        "pending_files": len(_watch_seen),
+        "path_exists": watch_path.exists(),
+        "is_directory": watch_path.is_dir() if watch_path.exists() else False,
+    }
+
+
+@app.get("/extratos/watch/debug")
+async def extratos_watch_debug():
+    """Debug detalhado do watcher e configurações."""
+    settings = get_settings()
+    watch_path = settings.watch_folder_path
+
+    # Tenta listar arquivos se a pasta existir
+    files_in_folder = []
+    try:
+        if watch_path.exists() and watch_path.is_dir():
+            files_in_folder = [
+                {
+                    "name": f.name,
+                    "is_file": f.is_file(),
+                    "size": f.stat().st_size if f.is_file() else None,
+                    "extension": f.suffix.lower()
+                }
+                for f in watch_path.iterdir()
+            ]
+    except Exception as e:
+        files_in_folder = [{"error": str(e)}]
+
+    return {
+        "watcher": {
+            "running": _watch_running,
+            "task_exists": _watch_task is not None,
+            "pending_files": len(_watch_seen),
+            "processed_files": len(_watch_processed),
+        },
+        "path": {
+            "configured": str(watch_path),
+            "exists": watch_path.exists(),
+            "is_directory": watch_path.is_dir() if watch_path.exists() else False,
+            "absolute": str(watch_path.resolve()) if watch_path.exists() else None,
+        },
+        "files_in_folder": files_in_folder[:20],  # Máximo 20 arquivos
+        "total_files_in_folder": len(files_in_folder),
+        "config_source": {
+            "WATCH_FOLDER_PATH": str(settings.watch_folder_path),
+            "EXTRATOS_EXCEL_PATH": str(settings.extratos_excel_path),
+        }
+    }
+
+
+@app.get("/extratos/mapear")
+async def mapear_extratos():
+    """Lista todos os arquivos PDF disponíveis na pasta de extratos."""
+    settings = get_settings()
+    watch_path = settings.watch_folder_path
+
+    if not watch_path.exists():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Pasta não encontrada: {watch_path}"
+        )
+
+    if not watch_path.is_dir():
+        raise HTTPException(
+            status_code=400,
+            detail=f"Caminho não é um diretório: {watch_path}"
+        )
+
+    try:
+        # Testa permissão de leitura primeiro
+        try:
+            test_list = list(watch_path.iterdir())
+        except PermissionError:
+            raise HTTPException(
+                status_code=403,
+                detail=f"Sem permissão para acessar a pasta: {watch_path}"
+            )
+        except OSError as e:
+            logger.error(f"Erro de sistema ao acessar pasta: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erro ao acessar pasta: {str(e)}"
+            )
+
+        pdf_files = []
+        erros_leitura = []
+
+        for file_path in watch_path.iterdir():
+            try:
+                if file_path.is_file() and file_path.suffix.lower() == '.pdf':
+                    stat = file_path.stat()
+                    pdf_files.append({
+                        "nome": file_path.name,
+                        "tamanho": stat.st_size,
+                        "tamanho_mb": round(stat.st_size / (1024 * 1024), 2),
+                        "modificado_em": stat.st_mtime,
+                        "caminho_completo": str(file_path),
+                    })
+            except PermissionError:
+                erros_leitura.append(f"{file_path.name} (sem permissão)")
+                logger.warning(f"Sem permissão para ler: {file_path}")
+            except Exception as e:
+                erros_leitura.append(f"{file_path.name} ({str(e)})")
+                logger.warning(f"Erro ao ler arquivo {file_path}: {e}")
+
+        # Ordena por data de modificação (mais recente primeiro)
+        pdf_files.sort(key=lambda x: x["modificado_em"], reverse=True)
+
+        resultado = {
+            "total": len(pdf_files),
+            "pasta": str(watch_path),
+            "arquivos": pdf_files
+        }
+
+        if erros_leitura:
+            resultado["avisos"] = erros_leitura
+            logger.warning(f"Arquivos com erro de leitura: {len(erros_leitura)}")
+
+        return resultado
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro inesperado ao mapear arquivos: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro inesperado: {str(e)}")
+
+
+@app.get("/extratos/simular", response_class=HTMLResponse)
+async def extratos_simular_page():
+    """Página de simulação de processamento de extratos."""
+    template_path = Path(__file__).parent / "templates" / "extratos_simular.html"
+
+    if not template_path.exists():
+        raise HTTPException(status_code=500, detail="Template de simulação não encontrado")
+
+    return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
+
+
+@app.post("/extratos/simular-arquivo")
+async def simular_processamento_arquivo(request: dict):
+    """
+    Simula o processamento de um arquivo específico da pasta de extratos.
+
+    NÃO salva o arquivo, apenas retorna onde seria salvo e as informações extraídas.
+    """
+    filename = request.get("filename")
+    if not filename:
+        raise HTTPException(status_code=400, detail="Campo 'filename' é obrigatório")
+
+    settings = get_settings()
+    watch_path = settings.watch_folder_path
+    file_path = watch_path / filename
+
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail=f"Arquivo não encontrado: {filename}")
+
+    if not file_path.is_file():
+        raise HTTPException(status_code=400, detail=f"Caminho não é um arquivo: {filename}")
+
+    try:
+        # Lê o conteúdo do arquivo
+        pdf_data = file_path.read_bytes()
+        file_hash = compute_hash(pdf_data)
+
+        # 1. Extrai texto
+        pdf_service = get_pdf_service()
+        loop = asyncio.get_event_loop()
+        text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
+
+        # 2. Analisa com LLM (com fallback de visão para identificar banco)
+        llm_service = get_llm_service()
+        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+
+        # 3. Faz matching do cliente
+        matching_service = get_matching_service()
+        match_result = matching_service.match(extraction)
+
+        # 4. Calcula caminho de destino (SIMULADO - não salva)
+        storage_service = get_storage_service()
+        ano, mes = storage_service._get_previous_month()
+
+        if match_result.identificado:
+            client_base_path = storage_service._resolve_client_path(match_result.cliente)
+            if client_base_path:
+                # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
+                conta = extraction.conta or match_result.cliente.conta
+
+                # Verifica se a pasta do mês existe (obrigatória)
+                month_path = storage_service._build_path_structure(client_base_path, ano, mes)
+
+                if not month_path.exists():
+                    # Se a pasta do mês não existe, não pode salvar
+                    caminho_destino = str(storage_service.settings.unidentified_path / filename)
+                    pasta_destino_existe = storage_service.settings.unidentified_path.exists()
+                    status = "NAO_IDENTIFICADO"
+                    cliente_nome = None
+                else:
+                    # Pasta do mês existe, então a subpasta da conta SERÁ criada se necessário
+                    target_path = storage_service._build_path_structure(
+                        client_base_path,
+                        ano,
+                        mes,
+                        extraction.banco,
+                        conta
+                    )
+
+                    # Constrói o nome do arquivo usando a mesma lógica do storage_service
+                    file_name = storage_service._build_filename(
+                        extraction.banco,
+                        extraction.tipo_documento,
+                        pdf_data,
+                        target_path,
+                        filename
+                    )
+                    caminho_destino = str(target_path / file_name)
+
+                    # A pasta do mês existe, então considera OK (subpasta será criada)
+                    pasta_destino_existe = True
+                    status = "SUCESSO"
+                    cliente_nome = match_result.cliente.nome
+            else:
+                caminho_destino = str(storage_service.settings.unidentified_path / filename)
+                pasta_destino_existe = storage_service.settings.unidentified_path.exists()
+                status = "NAO_IDENTIFICADO"
+                cliente_nome = None
+        else:
+            caminho_destino = str(storage_service.settings.unidentified_path / filename)
+            pasta_destino_existe = storage_service.settings.unidentified_path.exists()
+            status = "NAO_IDENTIFICADO"
+            cliente_nome = None
+
+        logger.info(f"[SIMULAÇÃO] {filename} -> {status} -> {caminho_destino}")
+
+        return {
+            "sucesso": True,
+            "arquivo_original": filename,
+            "status": status,
+            "caminho_origem": str(file_path),
+            "caminho_destino": caminho_destino,
+            "pasta_destino_existe": pasta_destino_existe,
+            "cliente": {
+                "identificado": match_result.identificado,
+                "nome": cliente_nome,
+                "cod": match_result.cliente.cod if match_result.identificado else None,
+                "conta": match_result.cliente.conta if match_result.identificado else None,
+                "metodo": match_result.metodo.value,
+                "score": match_result.score,
+            },
+            "extrato_info": {
+                "banco": extraction.banco,
+                "tipo_documento": extraction.tipo_documento,
+                "cnpj": extraction.cnpj,
+                "agencia": extraction.agencia,
+                "conta": extraction.conta,
+                "confianca": extraction.confianca,
+            },
+            "periodo": {
+                "ano": ano,
+                "mes": mes,
+            },
+            "hash": file_hash,
+            "tamanho_mb": round(len(pdf_data) / (1024 * 1024), 2),
+        }
+
+    except Exception as e:
+        logger.exception(f"Erro ao simular processamento de {filename}")
+        raise HTTPException(status_code=500, detail=f"Erro ao processar: {str(e)}")
+
+
+@app.post("/extratos/simular-todos")
+async def simular_todos_extratos():
+    """
+    Simula o processamento de TODOS os arquivos PDF da pasta de extratos.
+
+    Retorna uma lista com a simulação de cada arquivo.
+    """
+    settings = get_settings()
+    watch_path = settings.watch_folder_path
+
+    if not watch_path.exists():
+        raise HTTPException(status_code=400, detail=f"Pasta não encontrada: {watch_path}")
+
+    resultados = []
+    erros = []
+
+    # Lista todos os PDFs
+    pdf_files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() == '.pdf']
+
+    logger.info(f"[SIMULAÇÃO EM LOTE] Processando {len(pdf_files)} arquivos")
+
+    for file_path in pdf_files:
+        try:
+            # Simula o processamento de cada arquivo
+            filename = file_path.name
+
+            # Lê o conteúdo do arquivo
+            pdf_data = file_path.read_bytes()
+            file_hash = compute_hash(pdf_data)
+
+            # 1. Extrai texto
+            pdf_service = get_pdf_service()
+            loop = asyncio.get_event_loop()
+            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
+
+            # 2. Analisa com LLM (com fallback de visão para identificar banco)
+            llm_service = get_llm_service()
+            extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+
+            # 3. Faz matching do cliente
+            matching_service = get_matching_service()
+            match_result = matching_service.match(extraction)
+
+            # 4. Calcula caminho de destino (SIMULADO - não salva)
+            storage_service = get_storage_service()
+            ano, mes = storage_service._get_previous_month()
+
+            if match_result.identificado:
+                client_base_path = storage_service._resolve_client_path(match_result.cliente)
+                if client_base_path:
+                    # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
+                    conta = extraction.conta or match_result.cliente.conta
+
+                    # Verifica se a pasta do mês existe (obrigatória)
+                    month_path = storage_service._build_path_structure(client_base_path, ano, mes)
+
+                    if not month_path.exists():
+                        # Se a pasta do mês não existe, não pode salvar
+                        caminho_destino = str(storage_service.settings.unidentified_path / filename)
+                        pasta_destino_existe = storage_service.settings.unidentified_path.exists()
+                        status = "NAO_IDENTIFICADO"
+                        cliente_nome = None
+                    else:
+                        # Pasta do mês existe, então a subpasta da conta SERÁ criada se necessário
+                        target_path = storage_service._build_path_structure(
+                            client_base_path,
+                            ano,
+                            mes,
+                            extraction.banco,
+                            conta
+                        )
+
+                        # Constrói o nome do arquivo usando a mesma lógica do storage_service
+                        file_name = storage_service._build_filename(
+                            extraction.banco,
+                            extraction.tipo_documento,
+                            pdf_data,
+                            target_path,
+                            filename
+                        )
+                        caminho_destino = str(target_path / file_name)
+
+                        # A pasta do mês existe, então considera OK (subpasta será criada)
+                        pasta_destino_existe = True
+                        status = "SUCESSO"
+                        cliente_nome = match_result.cliente.nome
+                else:
+                    caminho_destino = str(storage_service.settings.unidentified_path / filename)
+                    pasta_destino_existe = storage_service.settings.unidentified_path.exists()
+                    status = "NAO_IDENTIFICADO"
+                    cliente_nome = None
+            else:
+                caminho_destino = str(storage_service.settings.unidentified_path / filename)
+                pasta_destino_existe = storage_service.settings.unidentified_path.exists()
+                status = "NAO_IDENTIFICADO"
+                cliente_nome = None
+
+            resultado = {
+                "sucesso": True,
+                "arquivo_original": filename,
+                "status": status,
+                "caminho_origem": str(file_path),
+                "caminho_destino": caminho_destino,
+                "pasta_destino_existe": pasta_destino_existe,
+                "cliente": {
+                    "identificado": match_result.identificado,
+                    "nome": cliente_nome,
+                    "cod": match_result.cliente.cod if match_result.identificado else None,
+                    "conta": match_result.cliente.conta if match_result.identificado else None,
+                    "metodo": match_result.metodo.value,
+                    "score": match_result.score,
+                },
+                "extrato_info": {
+                    "banco": extraction.banco,
+                    "tipo_documento": extraction.tipo_documento,
+                    "cnpj": extraction.cnpj,
+                    "agencia": extraction.agencia,
+                    "conta": extraction.conta,
+                    "confianca": extraction.confianca,
+                },
+                "periodo": {
+                    "ano": ano,
+                    "mes": mes,
+                },
+                "hash": file_hash,
+                "tamanho_mb": round(len(pdf_data) / (1024 * 1024), 2),
+            }
+
+            resultados.append(resultado)
+            logger.info(f"[SIMULAÇÃO] {filename} -> {status}")
+
+        except Exception as e:
+            logger.error(f"[SIMULAÇÃO] Erro ao processar {file_path.name}: {e}")
+            erros.append({
+                "arquivo": file_path.name,
+                "erro": str(e)
+            })
+
+    # Estatísticas
+    total = len(resultados)
+    sucesso = sum(1 for r in resultados if r["status"] == "SUCESSO")
+    nao_identificado = sum(1 for r in resultados if r["status"] == "NAO_IDENTIFICADO")
+
+    return {
+        "total_arquivos": len(pdf_files),
+        "processados": total,
+        "erros": len(erros),
+        "estatisticas": {
+            "sucesso": sucesso,
+            "nao_identificado": nao_identificado,
+            "falha": len(erros),
+        },
+        "resultados": resultados,
+        "erros_detalhes": erros if erros else None,
+    }
+
+
+@app.post("/extratos/watch/start")
+async def extratos_watch_start():
+    """Inicia o watcher da pasta de extratos."""
+    global _watch_task, _watch_running
+    settings = get_settings()
+    watch_path = settings.watch_folder_path
+
+    if _watch_running:
+        return {"running": True, "message": "Watcher ja esta em execucao"}
+
+    # Validação detalhada do caminho
+    path_exists = watch_path.exists()
+    is_directory = watch_path.is_dir() if path_exists else False
+
+    logger.info(f"Tentando iniciar watcher para: {watch_path}")
+    logger.info(f"Path existe: {path_exists}, é diretório: {is_directory}")
+
+    if not path_exists:
+        error_msg = f"Pasta nao encontrada: {watch_path}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": error_msg,
+                "path": str(watch_path),
+                "exists": False,
+                "suggestion": "Verifique se o caminho WATCH_FOLDER_PATH no .env esta correto e se a pasta existe no sistema"
+            }
+        )
+
+    if not is_directory:
+        error_msg = f"Caminho existe mas nao e um diretorio: {watch_path}"
+        logger.error(error_msg)
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "error": error_msg,
+                "path": str(watch_path),
+                "exists": True,
+                "is_directory": False
+            }
+        )
+
+    _watch_running = True
+    _watch_task = asyncio.create_task(_watch_folder_loop())
+    logger.info(f"Watcher iniciado com sucesso em: {watch_path}")
+
+    return {
+        "running": True,
+        "message": "Watcher iniciado com sucesso",
+        "watch_path": str(watch_path),
+        "path_exists": True,
+        "is_directory": True
+    }
+
+
+@app.post("/extratos/watch/stop")
+async def extratos_watch_stop():
+    """Interrompe o watcher da pasta de extratos."""
+    global _watch_task, _watch_running
+    if not _watch_running:
+        return {"running": False, "message": "Watcher ja esta parado"}
+
+    _watch_running = False
+    if _watch_task:
+        _watch_task.cancel()
+        _watch_task = None
+
+    return {"running": False, "message": "Watcher interrompido"}
 
 
 @app.get("/monitor/stats")
@@ -222,11 +842,22 @@ async def websocket_test_endpoint(websocket: WebSocket):
 
 @app.get("/health")
 async def health_check():
-    """Endpoint de health check."""
+    """Endpoint de health check completo."""
+    settings = get_settings()
+
+    # Valida caminhos
+    paths_status = settings.validate_paths()
+    paths_ok = all(paths_status.values())
+
+    # Valida conexão com banco de dados
+    db_status = settings.validate_database_connection()
+
     return {
-        "status": "healthy",
+        "status": "healthy" if (paths_ok and db_status["connected"]) else "degraded",
         "timestamp": datetime.now().isoformat(),
         "jobs_pending": sum(1 for j in _jobs.values() if j["status"] == "processing"),
+        "database": db_status,
+        "paths": paths_status,
     }
 
 
@@ -240,6 +871,58 @@ async def root():
         "base_path": str(settings.base_path),
         "docs": "/docs",
         "monitor": "/monitor",
+        "extratos": "/extratos",
+    }
+
+
+@app.get("/config")
+async def get_config():
+    """
+    Retorna as configurações atuais do sistema (sem dados sensíveis).
+
+    Útil para debug e verificação de configurações.
+    """
+    settings = get_settings()
+    return settings.get_summary()
+
+
+@app.get("/config/validate")
+async def validate_config():
+    """
+    Valida todas as configurações do sistema.
+
+    Verifica:
+    - Existência de caminhos configurados
+    - Conexão com banco de dados
+    - Configurações essenciais
+    """
+    settings = get_settings()
+
+    # Valida caminhos
+    paths_status = settings.validate_paths()
+
+    # Valida banco de dados
+    db_status = settings.validate_database_connection()
+
+    # Verifica API key da OpenAI
+    has_openai_key = bool(settings.openai_api_key and len(settings.openai_api_key) > 20)
+
+    all_paths_ok = all(paths_status.values())
+    db_ok = db_status["connected"]
+
+    return {
+        "status": "ok" if (all_paths_ok and db_ok and has_openai_key) else "error",
+        "paths": {
+            "status": "ok" if all_paths_ok else "error",
+            "details": paths_status,
+        },
+        "database": db_status,
+        "openai": {
+            "status": "ok" if has_openai_key else "error",
+            "configured": has_openai_key,
+            "model": settings.llm_model,
+        },
+        "summary": settings.get_summary(),
     }
 
 
@@ -531,9 +1214,9 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         ))
         
         llm_service = get_llm_service()
-        # Executar LLM em thread separada
+        # Executar LLM em thread separada (com fallback de visão para identificar banco)
         loop = asyncio.get_event_loop()
-        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text)
+        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
         
         # Check Cancelamento
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
@@ -600,8 +1283,25 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
             if match_result.identificado:
                 client_base_path = storage_service._resolve_client_path(match_result.cliente)
                 if client_base_path:
-                    target_path = storage_service._build_path_structure(client_base_path, ano, mes)
-                    saved_path = str(target_path / f"{extraction.tipo_documento}_{extraction.banco}.pdf")
+                    # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
+                    conta = extraction.conta or match_result.cliente.conta
+                    target_path = storage_service._build_path_structure(
+                        client_base_path,
+                        ano,
+                        mes,
+                        extraction.banco,
+                        conta
+                    )
+
+                    # Constrói o nome do arquivo usando a mesma lógica do storage_service
+                    file_name = storage_service._build_filename(
+                        extraction.banco,
+                        extraction.tipo_documento,
+                        pdf_data,
+                        target_path,
+                        filename
+                    )
+                    saved_path = str(target_path / file_name)
                 else:
                     saved_path = str(storage_service.settings.unidentified_path / filename)
             else:
@@ -617,6 +1317,7 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                 original_filename=filename,
                 tipo_documento=extraction.tipo_documento,
                 banco=extraction.banco,
+                conta_extrato=extraction.conta,
             )
         
         await event_manager.emit(ProcessingEvent(
@@ -809,6 +1510,7 @@ async def reload_settings():
         "clients_excel_path": str(new_settings.clients_excel_path),
         "base_path": str(new_settings.base_path),
         "log_excel_path": str(new_settings.log_excel_path),
+        "watch_folder_path": str(new_settings.watch_folder_path),
     }
 
 
@@ -1116,7 +1818,7 @@ async def _process_single_test_pdf(
                 progress=40
             ))
         llm_service = get_llm_service()
-        extraction = llm_service.extract_info_with_fallback(text)
+        extraction = llm_service.extract_info_with_fallback(text, pdf_content)
         
         # 3. Matching de cliente
         if emit_events:
@@ -1132,12 +1834,29 @@ async def _process_single_test_pdf(
         # 4. Calcula caminho que SERIA usado (sem salvar)
         storage_service = get_storage_service()
         ano, mes = storage_service._get_previous_month()
-        
+
         if match_result.identificado:
             client_base_path = storage_service._resolve_client_path(match_result.cliente)
             if client_base_path:
-                target_path = storage_service._build_path_structure(client_base_path, ano, mes)
-                simulated_path = str(target_path / f"{extraction.tipo_documento}_{extraction.banco}.pdf")
+                # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
+                conta = extraction.conta or match_result.cliente.conta
+                target_path = storage_service._build_path_structure(
+                    client_base_path,
+                    ano,
+                    mes,
+                    extraction.banco,
+                    conta
+                )
+
+                # Constrói o nome do arquivo usando a mesma lógica do storage_service
+                file_name = storage_service._build_filename(
+                    extraction.banco,
+                    extraction.tipo_documento,
+                    pdf_content,
+                    target_path,
+                    filename
+                )
+                simulated_path = str(target_path / file_name)
             else:
                 simulated_path = str(storage_service.settings.unidentified_path / filename)
             proc_status = ProcessingStatus.SUCESSO
