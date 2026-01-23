@@ -108,6 +108,24 @@
     gap: 0.5rem;
 }
 
+.nav-section {
+    margin-top: 0.5rem;
+}
+
+.nav-section-title {
+    margin: 0.5rem 1.25rem 0.25rem;
+    font-size: 0.7rem;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: #64748b;
+    opacity: 0;
+    transition: opacity 0.2s ease;
+}
+
+.tech-navbar.expanded .nav-section-title {
+    opacity: 1;
+}
+
 .nav-item {
     position: relative;
     margin: 0 0.75rem;

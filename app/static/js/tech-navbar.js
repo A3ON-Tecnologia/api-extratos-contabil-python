@@ -1,6 +1,6 @@
 /**
  * Tech Navbar Component - JavaScript
- * Controla o toggle da navbar e salva preferência no localStorage
+ * Controla o toggle da navbar e salva preferencia no localStorage
  */
 
 class TechNavbar {
@@ -10,20 +10,24 @@ class TechNavbar {
         this.toggleBtn = document.getElementById('navbarToggle');
         this.storageKey = 'techNavbarCollapsed';
 
+        if (!this.navbar) {
+            return;
+        }
+
         this.init();
     }
 
     init() {
-        // Carrega preferência salva
+        // Carrega preferencia salva
         const isCollapsed = localStorage.getItem(this.storageKey) === 'true';
         this.setCollapsed(isCollapsed);
 
-        // Event listener do botão toggle
+        // Event listener do botao toggle
         if (this.toggleBtn) {
             this.toggleBtn.addEventListener('click', () => this.toggle());
         }
 
-        // Marca item ativo baseado na URL
+        // Marca item ativo baseado na URL se nenhum ativo existir
         this.setActiveItem();
     }
 
@@ -45,14 +49,18 @@ class TechNavbar {
             this.mainContent?.classList.add('navbar-expanded');
         }
 
-        // Salva preferência
+        // Salva preferencia
         localStorage.setItem(this.storageKey, collapsed.toString());
     }
 
     setActiveItem() {
-        const currentPath = window.location.pathname;
         const navItems = document.querySelectorAll('.nav-item');
+        const hasActive = Array.from(navItems).some(item => item.classList.contains('active'));
+        if (hasActive) {
+            return;
+        }
 
+        const currentPath = window.location.pathname;
         navItems.forEach(item => {
             const link = item.querySelector('.nav-link');
             if (link) {
@@ -65,65 +73,6 @@ class TechNavbar {
             }
         });
     }
-}
-
-// HTML Template da Navbar
-function getTechNavbarHTML(currentPage = '') {
-    return `
-    <nav class="tech-navbar collapsed" id="techNavbar">
-        <!-- Decorative Elements -->
-        <div class="circuit-lines">
-            <div class="circuit-dot"></div>
-            <div class="circuit-dot"></div>
-            <div class="circuit-dot"></div>
-        </div>
-        
-        <!-- Header -->
-        <div class="navbar-header">
-            <div class="navbar-logo">📊</div>
-            <span class="navbar-title">Extratos API</span>
-        </div>
-        
-        <!-- Navigation -->
-        <div class="navbar-nav">
-            <div class="nav-item ${currentPage === 'monitor' ? 'active' : ''}">
-                <a href="/monitor" class="nav-link">
-                    <span class="nav-icon">📺</span>
-                    <span class="nav-text">Monitor</span>
-                    <span class="nav-status"></span>
-                </a>
-                <span class="nav-tooltip">Monitor</span>
-            </div>
-            
-            <div class="nav-item ${currentPage === 'test' ? 'active' : ''}">
-                <a href="/test" class="nav-link">
-                    <span class="nav-icon">🧪</span>
-                    <span class="nav-text">Modo Teste</span>
-                </a>
-                <span class="nav-tooltip">Modo Teste</span>
-            </div>
-            
-            <div class="nav-item ${currentPage === 'reversao' ? 'active' : ''}">
-                <a href="/reversao" class="nav-link">
-                    <span class="nav-icon">🔄</span>
-                    <span class="nav-text">Reversão</span>
-                </a>
-                <span class="nav-tooltip">Reversão</span>
-            </div>
-        </div>
-        
-        <!-- Footer -->
-        <div class="navbar-footer">
-            <div class="footer-status"></div>
-            <span class="footer-text">Sistema Online</span>
-        </div>
-        
-        <!-- Toggle Button -->
-        <button class="navbar-toggle" id="navbarToggle">
-            <span class="arrow">❯</span>
-        </button>
-    </nav>
-    `;
 }
 
 // Inicializa quando o DOM estiver pronto

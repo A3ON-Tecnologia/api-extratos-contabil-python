@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Monitor | Extratos Contábeis</title>
+    <title>Monitor Extratos | Extratos Contábeis</title>
     <link rel="icon" type="image/svg+xml" href="/static/img/favicon-monitor.svg">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -710,7 +710,7 @@
         <div class="container">
             <!-- Header -->
             <header class="header">
-                <h1><span style="-webkit-text-fill-color: initial;">📺</span> Monitor</h1>
+                <h1><span style="-webkit-text-fill-color: initial;">📺</span> Monitor Extratos</h1>
                 <span class="badge">📊 PROCESSAMENTO DE EXTRATOS CONTÁBEIS</span>
                 <div class="connection-status" style="position: absolute; top: 1.5rem; right: 1.5rem;">
                     <div class="status-dot" id="statusDot"></div>
@@ -1126,7 +1126,7 @@
 
         function connect() {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-            const wsUrl = `${protocol}//${window.location.host}/ws`;
+            const wsUrl = `${protocol}//${window.location.host}/ws/extratos`;
 
             ws = new WebSocket(wsUrl);
 
@@ -1433,7 +1433,7 @@
                 loading.style.display = 'block';
 
                 // Set new src
-                iframe.src = `/logs/${logId}/view`;
+                iframe.src = `/extratos/logs/${logId}/view`;
 
                 // Show modal
                 modal.style.display = 'block';
@@ -1552,7 +1552,7 @@
             confirmBtn.disabled = true;
 
             try {
-                const response = await fetch(`/reversao/${logId}`, {
+                const response = await fetch(`/extratos/reversao/${logId}`, {
                     method: 'DELETE'
                 });
                 const data = await response.json();
@@ -1713,7 +1713,7 @@
 
             try {
                 // Usa o endpoint de reversão em lote
-                const response = await fetch('/reversao/lote', {
+                const response = await fetch('/extratos/reversao/lote', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(logIds)
@@ -1802,7 +1802,7 @@
         connect();
 
         // Carregar jobs existentes via API
-        fetch('/jobs')
+        fetch('/extratos/jobs')
             .then(r => r.json())
             .then(data => {
                 if (data.jobs) {
@@ -1836,7 +1836,7 @@
             }
 
             try {
-                const response = await fetch('/monitor/reset', { method: 'POST' });
+                const response = await fetch('/extratos/monitor/reset', { method: 'POST' });
                 const result = await response.json();
                 console.log(result.message);
 
@@ -1856,7 +1856,7 @@
             if (!confirm('ATENÇÃO: Isso apagará TODO o histórico de processamento do monitor de produção e tentará remover os arquivos físicos associados.\n\nEsta ação não pode ser desfeita. Tem certeza?')) return;
 
             try {
-                const response = await fetch('/logs', { method: 'DELETE' });
+                const response = await fetch('/extratos/logs', { method: 'DELETE' });
                 const data = await response.json();
 
                 if (data.success) {
@@ -1876,7 +1876,7 @@
 
         async function fetchFolderStats() {
             try {
-                const response = await fetch('/monitor/stats');
+                const response = await fetch('/extratos/monitor/stats');
                 const data = await response.json();
 
                 // Atualiza o valor
@@ -1900,7 +1900,7 @@
 
         async function loadHistory() {
             try {
-                const response = await fetch('/monitor/history');
+                const response = await fetch('/extratos/monitor/history');
                 const history = await response.json();
 
                 if (!Array.isArray(history)) return;

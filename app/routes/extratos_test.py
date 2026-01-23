@@ -18,7 +18,9 @@ from app.config import get_settings
 from app.services.extratos_service import ExtratosService
 from app.services.llm_service import LLMService
 from app.services.pdf_service import PDFService
-from app.services.db_log_teste_service import get_db_log_teste_service
+from app.services.db_extratos_baixados_log_teste_service import (
+    get_extratos_baixados_log_teste_service,
+)
 from app.utils.hash import compute_hash
 
 logger = logging.getLogger(__name__)
@@ -181,7 +183,7 @@ async def get_test_logs(limit: int = 100):
     Returns:
         Logs de processamento de teste
     """
-    db_teste_service = get_db_log_teste_service()
+    db_teste_service = get_extratos_baixados_log_teste_service()
     logs = db_teste_service.get_logs_teste(limit=limit)
 
     return {
@@ -201,7 +203,7 @@ async def clear_test_logs():
     Returns:
         Quantidade de registros removidos
     """
-    db_teste_service = get_db_log_teste_service()
+    db_teste_service = get_extratos_baixados_log_teste_service()
     count = db_teste_service.limpar_logs_teste()
 
     return {
@@ -222,7 +224,7 @@ async def reverter_test_log(log_id: int):
     Returns:
         Resultado da reversão
     """
-    db_teste_service = get_db_log_teste_service()
+    db_teste_service = get_extratos_baixados_log_teste_service()
 
     try:
         db_teste_service.delete_log_teste(log_id)
@@ -330,7 +332,7 @@ async def _process_test_extrato(content: bytes, filename: str, file_hash: str) -
         metodo = "NENHUM"
 
     # 5. Salva no banco de TESTES
-    db_teste_service = get_db_log_teste_service()
+    db_teste_service = get_extratos_baixados_log_teste_service()
     log_entry = db_teste_service.log_extrato_teste(
         arquivo_original=filename,
         status=status,

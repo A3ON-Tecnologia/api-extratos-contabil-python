@@ -69,6 +69,23 @@ class StorageService:
         else:
             return (now.year, now.month - 1)
     
+    def _is_cresol(self, banco: str | None) -> bool:
+        """Verifica se o banco e Cresol."""
+        if not banco:
+            return False
+        return "CRESOL" in str(banco).upper()
+
+    def _select_account(
+        self,
+        banco: str | None,
+        conta_extrato: str | None,
+        conta_cadastrada: str | None,
+    ) -> str | None:
+        """Seleciona a conta respeitando regras por banco."""
+        if self._is_cresol(banco) and conta_cadastrada:
+            return conta_cadastrada
+        return conta_extrato or conta_cadastrada
+
     def save_file(
         self,
         pdf_data: bytes,
@@ -82,8 +99,8 @@ class StorageService:
         Salva o arquivo PDF no caminho correto.
 
         Usa automaticamente o mês anterior ao processamento como período do documento.
-        Estrutura: ANO/MÊS/BANCO/CONTA/arquivo.pdf
-        CRIA as subpastas do banco e conta se não existirem.
+        Estrutura: ANO/MES/BANCO/CONTA/arquivo.pdf
+        Cria a hierarquia de pastas quando necessario.
 
         Args:
             conta_extrato: Número da conta extraído do extrato (prioritário sobre a conta da planilha)
@@ -102,31 +119,28 @@ class StorageService:
 
             if client_base_path:
                 # Usa a conta extraída do extrato (se disponível) ou a conta da planilha
-                conta = conta_extrato or match_result.cliente.conta
+                conta = self._select_account(banco, conta_extrato, match_result.cliente.conta)
                 banco_folder = banco or match_result.cliente.banco
                 target_path = self._build_path_structure(client_base_path, ano, mes, banco_folder, conta)
 
-                # Verifica se a pasta do mês existe
+                # Garante que a pasta do mes existe
                 month_path = self._build_path_structure(client_base_path, ano, mes)
                 if not month_path.exists():
-                    logger.warning(
-                        f"Pasta do mês não encontrada: {month_path}. "
-                        "Salvando em NAO_IDENTIFICADOS."
-                    )
-                    target_path = None
-                else:
-                    # Cria a subpasta da conta se não existir
-                    if (banco_folder or conta) and not target_path.exists():
-                        logger.info(f"Criando subpasta do banco/conta: {target_path}")
-                        target_path.mkdir(parents=True, exist_ok=True)
+                    logger.info(f"Criando pasta do mes: {month_path}")
+                    month_path.mkdir(parents=True, exist_ok=True)
 
-                    filename = self._build_filename(
-                        banco,
-                        tipo_documento,
-                        pdf_data,
-                        target_path,
-                        original_filename
-                    )
+                # Cria a subpasta da conta se nao existir
+                if (banco_folder or conta) and not target_path.exists():
+                    logger.info(f"Criando subpasta do banco/conta: {target_path}")
+                    target_path.mkdir(parents=True, exist_ok=True)
+
+                filename = self._build_filename(
+                    banco,
+                    tipo_documento,
+                    pdf_data,
+                    target_path,
+                    original_filename
+                )
             else:
                 logger.warning(
                     f"Estrutura de pastas não encontrada para cliente {match_result.cliente.cod}. "
@@ -139,8 +153,8 @@ class StorageService:
             
             # Verifica se a pasta de não identificados existe
             if not target_path.exists():
-                logger.error(f"Pasta NAO_IDENTIFICADOS não encontrada: {target_path}")
-                raise FileNotFoundError(f"Pasta não encontrada: {target_path}")
+                logger.warning(f"Pasta NAO_IDENTIFICADOS nao encontrada, criando: {target_path}")
+                target_path.mkdir(parents=True, exist_ok=True)
             
             filename = self._ensure_unique_filename(
                 original_filename,
@@ -148,7 +162,7 @@ class StorageService:
                 target_path
             )
         
-        # NÃO cria pastas - apenas salva o arquivo
+        # Salva o arquivo
         full_path = target_path / filename
         full_path.write_bytes(pdf_data)
         

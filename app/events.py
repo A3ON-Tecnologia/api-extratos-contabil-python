@@ -202,6 +202,12 @@ event_manager = EventManager()
 # Instância global do gerenciador de eventos (TESTE)
 test_event_manager = EventManager()
 
+# Instancia global do gerenciador de eventos (EXTRATOS BAIXADOS - PRODUCAO)
+extratos_event_manager = EventManager()
+
+# Instancia global do gerenciador de eventos (EXTRATOS BAIXADOS - TESTE)
+extratos_test_event_manager = EventManager()
+
 
 def get_event_manager() -> EventManager:
     """Retorna a instância global do gerenciador de eventos de PRODUÇÃO."""
@@ -212,3 +218,12 @@ def get_test_event_manager() -> EventManager:
     """Retorna a instância global do gerenciador de eventos de TESTE."""
     return test_event_manager
 
+
+
+def get_extratos_event_manager() -> EventManager:
+    """Retorna a instancia global do gerenciador de eventos de extratos baixados (PRODUCAO)."""
+    return extratos_event_manager
+
+def get_extratos_test_event_manager() -> EventManager:
+    """Retorna a instancia global do gerenciador de eventos de extratos baixados (TESTE)."""
+    return extratos_test_event_manager

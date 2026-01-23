@@ -19,7 +19,14 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
 
 from app.config import get_settings
-from app.events import EventType, ProcessingEvent, get_event_manager, get_test_event_manager
+from app.events import (
+    EventType,
+    ProcessingEvent,
+    get_event_manager,
+    get_test_event_manager,
+    get_extratos_event_manager,
+    get_extratos_test_event_manager,
+)
 from app.schemas.api import ProcessingResult, ProcessingStatus, UploadResponse
 from app.schemas.client import MatchMethod
 from app.services import (
@@ -32,8 +39,17 @@ from app.services import (
 )
 from app.services.db_log_service import get_db_log_service
 from app.services.db_log_teste_service import get_db_log_teste_service
+from app.services.db_extratos_baixados_log_service import get_extratos_baixados_log_service
+from app.services.db_extratos_baixados_log_teste_service import (
+    get_extratos_baixados_log_teste_service,
+)
 from app.services.reversao_service import get_reversao_service
+from app.services.extratos_baixados_reversao_service import get_extratos_baixados_reversao_service
+from app.services.extratos_baixados_simulacao_service import (
+    ExtratosBaixadosSimulacaoService,
+)
 from app.utils.hash import compute_hash
+from app.utils.template import render_tech_navbar
 
 # Configuracao de logging
 logging.basicConfig(
@@ -91,11 +107,20 @@ app.include_router(extratos_test_router)
 # Cache de hashes processados para idempotencia
 _processed_hashes: set[str] = set()
 
+# Cache de hashes processados para extratos baixados (idempotencia)
+_extratos_processed_hashes: set[str] = set()
+
 # Armazenamento de jobs para consulta de status
 _jobs: dict[str, dict] = {}
 
 # Armazenamento de jobs de TESTE
 _test_jobs: dict[str, dict] = {}
+
+# Armazenamento de jobs de EXTRATOS BAIXADOS (PRODUCAO)
+_extratos_jobs: dict[str, dict] = {}
+
+# Armazenamento de jobs de EXTRATOS BAIXADOS (TESTE)
+_extratos_test_jobs: dict[str, dict] = {}
 
 # Executor para tarefas em background
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -114,6 +139,7 @@ _llm_service: LLMService | None = None
 _client_service: ClientService | None = None
 _matching_service: MatchingService | None = None
 _storage_service: StorageService | None = None
+_extratos_sim_service: ExtratosBaixadosSimulacaoService | None = None
 
 
 def get_pdf_service() -> PDFService:
@@ -159,6 +185,33 @@ def get_storage_service() -> StorageService:
     return _storage_service
 
 
+def get_extratos_sim_service() -> ExtratosBaixadosSimulacaoService:
+    global _extratos_sim_service
+    if _extratos_sim_service is None:
+        _extratos_sim_service = ExtratosBaixadosSimulacaoService()
+    return _extratos_sim_service
+
+
+def _render_template_with_navbar(
+    template_path: Path,
+    *,
+    active_main: str | None = None,
+    active_extratos: str | None = None,
+    show_main: bool = True,
+    show_extratos: bool = False,
+    show_extratos_test: bool = False,
+) -> str:
+    html = template_path.read_text(encoding="utf-8")
+    navbar_html = render_tech_navbar(
+        active_main=active_main,
+        active_extratos=active_extratos,
+        show_main=show_main,
+        show_extratos=show_extratos,
+        show_extratos_test=show_extratos_test,
+    )
+    return html.replace("{{TECH_NAVBAR}}", navbar_html)
+
+
 # ============================================================
 # DASHBOARD DE MONITORAMENTO
 # ============================================================
@@ -171,7 +224,29 @@ async def monitor_dashboard():
     if not template_path.exists():
         raise HTTPException(status_code=500, detail="Template do monitor nao encontrado")
     
-    return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content=_render_template_with_navbar(template_path, active_main="monitor", show_main=True, show_extratos=False))
+
+
+@app.get("/extratos/monitor", response_class=HTMLResponse)
+async def extratos_monitor_dashboard():
+    """Dashboard de monitoramento de extratos baixados."""
+    template_path = Path(__file__).parent / "templates" / "extratos_monitor.html"
+
+    if not template_path.exists():
+        raise HTTPException(status_code=500, detail="Template do monitor de extratos nao encontrado")
+
+    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="monitor-extratos", show_main=True, show_extratos=True))
+
+
+@app.get("/extratos/monitor/test", response_class=HTMLResponse)
+async def extratos_monitor_test_dashboard():
+    """Dashboard de monitoramento de extratos baixados (teste)."""
+    template_path = Path(__file__).parent / "templates" / "extratos_test_monitor.html"
+
+    if not template_path.exists():
+        raise HTTPException(status_code=500, detail="Template do monitor de testes de extratos nao encontrado")
+
+    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="monitor-teste", show_main=True, show_extratos=True))
 
 
 @app.get("/extratos", response_class=HTMLResponse)
@@ -182,7 +257,7 @@ async def extratos_page():
     if not template_path.exists():
         raise HTTPException(status_code=500, detail="Template de extratos nao encontrado")
 
-    return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="extratos", show_main=False, show_extratos=True))
 
 
 @app.get("/extratos/teste", response_class=HTMLResponse)
@@ -193,7 +268,7 @@ async def extratos_teste_page():
     if not template_path.exists():
         raise HTTPException(status_code=500, detail="Template de teste de extratos nao encontrado")
 
-    return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="teste", show_main=True, show_extratos=True, show_extratos_test=True))
 
 
 async def _watch_folder_loop():
@@ -432,7 +507,7 @@ async def extratos_simular_page():
     if not template_path.exists():
         raise HTTPException(status_code=500, detail="Template de simulação não encontrado")
 
-    return HTMLResponse(content=template_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="simulacao", show_main=True, show_extratos=True))
 
 
 @app.post("/extratos/simular-arquivo")
@@ -457,109 +532,23 @@ async def simular_processamento_arquivo(request: dict):
         raise HTTPException(status_code=400, detail=f"Caminho não é um arquivo: {filename}")
 
     try:
-        # Lê o conteúdo do arquivo
         pdf_data = file_path.read_bytes()
-        file_hash = compute_hash(pdf_data)
+        sim_service = get_extratos_sim_service()
+        result = await sim_service.simular_arquivo(
+            pdf_data=pdf_data,
+            filename=filename,
+            executor=_executor,
+            caminho_origem=file_path,
+        )
 
-        # 1. Extrai texto
-        pdf_service = get_pdf_service()
-        loop = asyncio.get_event_loop()
-        text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
+        logger.info(
+            "[SIMULACAO] %s -> %s -> %s",
+            filename,
+            result.get("status"),
+            result.get("caminho_destino"),
+        )
 
-        # 2. Analisa com LLM (com fallback de visão para identificar banco)
-        llm_service = get_llm_service()
-        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
-
-        # 3. Faz matching do cliente
-        matching_service = get_matching_service()
-        match_result = matching_service.match(extraction)
-
-        # 4. Calcula caminho de destino (SIMULADO - não salva)
-        storage_service = get_storage_service()
-        ano, mes = storage_service._get_previous_month()
-
-        if match_result.identificado:
-            client_base_path = storage_service._resolve_client_path(match_result.cliente)
-            if client_base_path:
-                # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
-                conta = extraction.conta or match_result.cliente.conta
-
-                # Verifica se a pasta do mês existe (obrigatória)
-                month_path = storage_service._build_path_structure(client_base_path, ano, mes)
-
-                if not month_path.exists():
-                    # Se a pasta do mês não existe, não pode salvar
-                    caminho_destino = str(storage_service.settings.unidentified_path / filename)
-                    pasta_destino_existe = storage_service.settings.unidentified_path.exists()
-                    status = "NAO_IDENTIFICADO"
-                    cliente_nome = None
-                else:
-                    # Pasta do mês existe, então a subpasta da conta SERÁ criada se necessário
-                    target_path = storage_service._build_path_structure(
-                        client_base_path,
-                        ano,
-                        mes,
-                        extraction.banco,
-                        conta
-                    )
-
-                    # Constrói o nome do arquivo usando a mesma lógica do storage_service
-                    file_name = storage_service._build_filename(
-                        extraction.banco,
-                        extraction.tipo_documento,
-                        pdf_data,
-                        target_path,
-                        filename
-                    )
-                    caminho_destino = str(target_path / file_name)
-
-                    # A pasta do mês existe, então considera OK (subpasta será criada)
-                    pasta_destino_existe = True
-                    status = "SUCESSO"
-                    cliente_nome = match_result.cliente.nome
-            else:
-                caminho_destino = str(storage_service.settings.unidentified_path / filename)
-                pasta_destino_existe = storage_service.settings.unidentified_path.exists()
-                status = "NAO_IDENTIFICADO"
-                cliente_nome = None
-        else:
-            caminho_destino = str(storage_service.settings.unidentified_path / filename)
-            pasta_destino_existe = storage_service.settings.unidentified_path.exists()
-            status = "NAO_IDENTIFICADO"
-            cliente_nome = None
-
-        logger.info(f"[SIMULAÇÃO] {filename} -> {status} -> {caminho_destino}")
-
-        return {
-            "sucesso": True,
-            "arquivo_original": filename,
-            "status": status,
-            "caminho_origem": str(file_path),
-            "caminho_destino": caminho_destino,
-            "pasta_destino_existe": pasta_destino_existe,
-            "cliente": {
-                "identificado": match_result.identificado,
-                "nome": cliente_nome,
-                "cod": match_result.cliente.cod if match_result.identificado else None,
-                "conta": match_result.cliente.conta if match_result.identificado else None,
-                "metodo": match_result.metodo.value,
-                "score": match_result.score,
-            },
-            "extrato_info": {
-                "banco": extraction.banco,
-                "tipo_documento": extraction.tipo_documento,
-                "cnpj": extraction.cnpj,
-                "agencia": extraction.agencia,
-                "conta": extraction.conta,
-                "confianca": extraction.confianca,
-            },
-            "periodo": {
-                "ano": ano,
-                "mes": mes,
-            },
-            "hash": file_hash,
-            "tamanho_mb": round(len(pdf_data) / (1024 * 1024), 2),
-        }
+        return result
 
     except Exception as e:
         logger.exception(f"Erro ao simular processamento de {filename}")
@@ -585,120 +574,27 @@ async def simular_todos_extratos():
     # Lista todos os PDFs
     pdf_files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() == '.pdf']
 
-    logger.info(f"[SIMULAÇÃO EM LOTE] Processando {len(pdf_files)} arquivos")
+    logger.info(f"[SIMULACAO EM LOTE] Processando {len(pdf_files)} arquivos")
+
+    sim_service = get_extratos_sim_service()
 
     for file_path in pdf_files:
         try:
-            # Simula o processamento de cada arquivo
             filename = file_path.name
-
-            # Lê o conteúdo do arquivo
             pdf_data = file_path.read_bytes()
-            file_hash = compute_hash(pdf_data)
 
-            # 1. Extrai texto
-            pdf_service = get_pdf_service()
-            loop = asyncio.get_event_loop()
-            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
-
-            # 2. Analisa com LLM (com fallback de visão para identificar banco)
-            llm_service = get_llm_service()
-            extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
-
-            # 3. Faz matching do cliente
-            matching_service = get_matching_service()
-            match_result = matching_service.match(extraction)
-
-            # 4. Calcula caminho de destino (SIMULADO - não salva)
-            storage_service = get_storage_service()
-            ano, mes = storage_service._get_previous_month()
-
-            if match_result.identificado:
-                client_base_path = storage_service._resolve_client_path(match_result.cliente)
-                if client_base_path:
-                    # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
-                    conta = extraction.conta or match_result.cliente.conta
-
-                    # Verifica se a pasta do mês existe (obrigatória)
-                    month_path = storage_service._build_path_structure(client_base_path, ano, mes)
-
-                    if not month_path.exists():
-                        # Se a pasta do mês não existe, não pode salvar
-                        caminho_destino = str(storage_service.settings.unidentified_path / filename)
-                        pasta_destino_existe = storage_service.settings.unidentified_path.exists()
-                        status = "NAO_IDENTIFICADO"
-                        cliente_nome = None
-                    else:
-                        # Pasta do mês existe, então a subpasta da conta SERÁ criada se necessário
-                        target_path = storage_service._build_path_structure(
-                            client_base_path,
-                            ano,
-                            mes,
-                            extraction.banco,
-                            conta
-                        )
-
-                        # Constrói o nome do arquivo usando a mesma lógica do storage_service
-                        file_name = storage_service._build_filename(
-                            extraction.banco,
-                            extraction.tipo_documento,
-                            pdf_data,
-                            target_path,
-                            filename
-                        )
-                        caminho_destino = str(target_path / file_name)
-
-                        # A pasta do mês existe, então considera OK (subpasta será criada)
-                        pasta_destino_existe = True
-                        status = "SUCESSO"
-                        cliente_nome = match_result.cliente.nome
-                else:
-                    caminho_destino = str(storage_service.settings.unidentified_path / filename)
-                    pasta_destino_existe = storage_service.settings.unidentified_path.exists()
-                    status = "NAO_IDENTIFICADO"
-                    cliente_nome = None
-            else:
-                caminho_destino = str(storage_service.settings.unidentified_path / filename)
-                pasta_destino_existe = storage_service.settings.unidentified_path.exists()
-                status = "NAO_IDENTIFICADO"
-                cliente_nome = None
-
-            resultado = {
-                "sucesso": True,
-                "arquivo_original": filename,
-                "status": status,
-                "caminho_origem": str(file_path),
-                "caminho_destino": caminho_destino,
-                "pasta_destino_existe": pasta_destino_existe,
-                "cliente": {
-                    "identificado": match_result.identificado,
-                    "nome": cliente_nome,
-                    "cod": match_result.cliente.cod if match_result.identificado else None,
-                    "conta": match_result.cliente.conta if match_result.identificado else None,
-                    "metodo": match_result.metodo.value,
-                    "score": match_result.score,
-                },
-                "extrato_info": {
-                    "banco": extraction.banco,
-                    "tipo_documento": extraction.tipo_documento,
-                    "cnpj": extraction.cnpj,
-                    "agencia": extraction.agencia,
-                    "conta": extraction.conta,
-                    "confianca": extraction.confianca,
-                },
-                "periodo": {
-                    "ano": ano,
-                    "mes": mes,
-                },
-                "hash": file_hash,
-                "tamanho_mb": round(len(pdf_data) / (1024 * 1024), 2),
-            }
+            resultado = await sim_service.simular_arquivo(
+                pdf_data=pdf_data,
+                filename=filename,
+                executor=_executor,
+                caminho_origem=file_path,
+            )
 
             resultados.append(resultado)
-            logger.info(f"[SIMULAÇÃO] {filename} -> {status}")
+            logger.info("[SIMULACAO] %s -> %s", filename, resultado.get("status"))
 
         except Exception as e:
-            logger.error(f"[SIMULAÇÃO] Erro ao processar {file_path.name}: {e}")
+            logger.error(f"[SIMULACAO] Erro ao processar {file_path.name}: {e}")
             erros.append({
                 "arquivo": file_path.name,
                 "erro": str(e)
@@ -811,6 +707,22 @@ async def monitor_stats():
     }
 
 
+
+
+@app.get("/extratos/monitor/stats")
+async def extratos_monitor_stats():
+    """Retorna estatisticas do sistema de arquivos para extratos baixados."""
+    settings = get_settings()
+    unidentified_path = settings.unidentified_path
+
+    count_unidentified = 0
+    if unidentified_path.exists():
+        count_unidentified = sum(1 for _ in unidentified_path.rglob("*") if _.is_file())
+
+    return {
+        "unidentified_files_count": count_unidentified,
+        "unidentified_path": str(unidentified_path),
+    }
 @app.websocket("/ws")
 async def websocket_endpoint(websocket: WebSocket):
     """Endpoint WebSocket para atualizacoes em tempo real (PRODUÇÃO)."""
@@ -835,6 +747,32 @@ async def websocket_test_endpoint(websocket: WebSocket):
             await websocket.receive_text()
     except WebSocketDisconnect:
         test_event_manager.disconnect(websocket)
+
+
+@app.websocket("/ws/extratos")
+async def websocket_extratos_endpoint(websocket: WebSocket):
+    """Endpoint WebSocket para atualizacoes em tempo real (EXTRATOS BAIXADOS)."""
+    event_manager = get_extratos_event_manager()
+    await event_manager.connect(websocket)
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        event_manager.disconnect(websocket)
+
+
+@app.websocket("/ws/extratos/test")
+async def websocket_extratos_test_endpoint(websocket: WebSocket):
+    """Endpoint WebSocket para atualizacoes em tempo real (EXTRATOS BAIXADOS - TESTE)."""
+    event_manager = get_extratos_test_event_manager()
+    await event_manager.connect(websocket)
+
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        event_manager.disconnect(websocket)
 
 
 # ============================================================
@@ -987,6 +925,107 @@ async def upload_file(
     }
 
 
+@app.post("/extratos/webhook")
+async def extratos_webhook_prod(
+    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos")],
+    background_tasks: BackgroundTasks
+):
+    """
+    Webhook de producao para extratos.
+    Mesmo fluxo do /upload, mas com rota dedicada.
+    """
+    content = await file.read()
+    filename = file.filename or "webhook_extratos"
+
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Arquivo vazio")
+
+    is_zip = content.startswith(b"PK") or filename.lower().endswith(".zip")
+    job_id = str(uuid.uuid4())[:8]
+
+    _extratos_jobs[job_id] = {
+        "job_id": job_id,
+        "filename": filename,
+        "status": "processing",
+        "message": "Arquivo recebido via webhook de extratos",
+        "created_at": datetime.now().isoformat(),
+        "completed_at": None,
+        "results": None,
+    }
+
+    background_tasks.add_task(
+        process_extratos_file_background,
+        job_id=job_id,
+        content=content,
+        filename=filename,
+        is_zip=is_zip,
+    )
+
+    return {
+        "success": True,
+        "job_id": job_id,
+        "message": "Webhook recebido! Processamento iniciado em background.",
+        "status_url": f"/extratos/job/{job_id}",
+    }
+
+
+@app.post("/extratos/webhook/test")
+async def extratos_webhook_test(
+    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos para teste")],
+    background_tasks: BackgroundTasks
+):
+    """
+    Webhook de teste para extratos.
+    Mesmo fluxo do /test/upload, mas com rota dedicada.
+    """
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="Nome do arquivo nao fornecido")
+
+    content = await file.read()
+    filename = file.filename
+
+    if not content:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Arquivo vazio")
+
+    is_zip = content.startswith(b"PK") or filename.lower().endswith(".zip")
+    job_id = f"test_{uuid.uuid4().hex[:12]}"
+
+    _extratos_test_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "filename": filename,
+        "is_zip": is_zip,
+        "created_at": datetime.now().isoformat(),
+        "started_at": None,
+        "completed_at": None,
+        "progress": 0,
+        "total_files": 0,
+        "processed_files": 0,
+        "results": [],
+        "errors": [],
+        "stats": {}
+    }
+
+    background_tasks.add_task(
+        process_extratos_file_background,
+        job_id,
+        content,
+        filename,
+        is_zip,
+        test_mode=True
+    )
+
+    return {
+        "modo": "TESTE",
+        "job_id": job_id,
+        "status": "queued",
+        "filename": filename,
+        "is_zip": is_zip,
+        "message": "Webhook de teste recebido. Processamento iniciado em background.",
+        "check_status_url": f"/extratos/test/job/{job_id}"
+    }
+
+
 @app.get("/job/{job_id}")
 async def get_job_status(job_id: str):
     """
@@ -1012,6 +1051,40 @@ async def list_jobs():
     }
 
 
+
+@app.get("/extratos/job/{job_id}")
+async def get_extratos_job_status(job_id: str):
+    """Verifica status de job de extratos baixados."""
+    if job_id not in _extratos_jobs:
+        raise HTTPException(status_code=404, detail="Job nao encontrado")
+    return _extratos_jobs[job_id]
+
+@app.get("/extratos/jobs")
+async def list_extratos_jobs():
+    """Lista jobs recentes de extratos baixados."""
+    jobs_list = list(_extratos_jobs.values())
+    jobs_list.sort(key=lambda x: x["created_at"], reverse=True)
+    return {
+        "total": len(jobs_list),
+        "jobs": jobs_list[:50]
+    }
+
+@app.get("/extratos/test/job/{job_id}")
+async def get_extratos_test_job_status(job_id: str):
+    """Verifica status de job de extratos baixados (teste)."""
+    if job_id not in _extratos_test_jobs:
+        raise HTTPException(status_code=404, detail="Job nao encontrado")
+    return _extratos_test_jobs[job_id]
+
+@app.get("/extratos/test/jobs")
+async def list_extratos_test_jobs():
+    """Lista jobs recentes de extratos baixados (teste)."""
+    jobs_list = list(_extratos_test_jobs.values())
+    jobs_list.sort(key=lambda x: x["created_at"], reverse=True)
+    return {
+        "total": len(jobs_list),
+        "jobs": jobs_list[:50]
+    }
 # ============================================================
 # PROCESSAMENTO EM BACKGROUND
 # ============================================================
@@ -1338,7 +1411,7 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                 client_base_path = storage_service._resolve_client_path(match_result.cliente)
                 if client_base_path:
                     # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
-                    conta = extraction.conta or match_result.cliente.conta
+                    conta = storage_service._select_account(extraction.banco, extraction.conta, match_result.cliente.conta)
                     target_path = storage_service._build_path_structure(
                         client_base_path,
                         ano,
@@ -1535,6 +1608,492 @@ async def create_failure_result(filename: str, file_hash: str, error: str) -> Pr
 
 
 # ============================================================
+# PROCESSAMENTO EM BACKGROUND (EXTRATOS BAIXADOS)
+# ============================================================
+
+async def process_extratos_file_background(
+    job_id: str,
+    content: bytes,
+    filename: str,
+    is_zip: bool,
+    test_mode: bool = False,
+):
+    """Processa arquivo de extratos baixados em background."""
+    event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
+    jobs_dict = _extratos_test_jobs if test_mode else _extratos_jobs
+
+    try:
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.FILE_RECEIVED,
+            filename=filename,
+            message=f"Arquivo recebido: {filename}",
+            details={"size": len(content), "job_id": job_id, "test_mode": test_mode}
+        ))
+
+        if is_zip:
+            result = await process_extratos_zip_async(content, filename, job_id, test_mode)
+        else:
+            result = await process_extratos_pdf_async(content, filename, job_id, test_mode)
+            result = UploadResponse(
+                sucesso=result.status == ProcessingStatus.SUCESSO,
+                total_arquivos=1,
+                arquivos_sucesso=1 if result.status == ProcessingStatus.SUCESSO else 0,
+                arquivos_nao_identificados=1 if result.status == ProcessingStatus.NAO_IDENTIFICADO else 0,
+                arquivos_falha=1 if result.status == ProcessingStatus.FALHA else 0,
+                resultados=[result],
+            )
+
+        if is_zip:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.PROCESSING_COMPLETED,
+                filename=filename,
+                message=f"ZIP processado: {result.total_arquivos} arquivos.",
+                details={
+                    "status": "SUCESSO",
+                    "cliente": "LOTE ZIP COMPLETO",
+                    "path": "-",
+                    "banco": "-",
+                    "tipo": "ZIP",
+                    "ano": "-",
+                    "mes": "-",
+                    "metodo": "-",
+                    "log_id": None,
+                },
+                progress=100
+            ))
+
+        jobs_dict[job_id].update({
+            "status": "completed",
+            "message": (
+                "Processamento concluido: "
+                f"{result.arquivos_sucesso} sucesso, "
+                f"{result.arquivos_nao_identificados} nao identificados, "
+                f"{result.arquivos_falha} falhas"
+            ),
+            "completed_at": datetime.now().isoformat(),
+            "results": result.model_dump(),
+        })
+    except Exception as e:
+        logger.exception(f"Erro no processamento do job {job_id} (extratos baixados)")
+        jobs_dict[job_id].update({
+            "status": "error",
+            "message": f"Erro: {str(e)}",
+            "completed_at": datetime.now().isoformat(),
+            "results": None,
+        })
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PROCESSING_ERROR,
+            filename=filename,
+            message=str(e)
+        ))
+
+
+async def process_extratos_zip_async(
+    zip_data: bytes,
+    filename: str,
+    job_id: str | None = None,
+    test_mode: bool = False,
+) -> UploadResponse:
+    """Processa um arquivo ZIP contendo PDFs (extratos baixados)."""
+    event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
+    zip_service = get_zip_service()
+    jobs_dict = _extratos_test_jobs if test_mode else _extratos_jobs
+
+    if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+        raise asyncio.CancelledError("Cancelado pelo usuario")
+
+    await event_manager.emit(ProcessingEvent(
+        event_type=EventType.ZIP_EXTRACTING,
+        filename=filename,
+        message="Extraindo arquivos do ZIP..."
+    ))
+
+    try:
+        extracted_files = zip_service.extract_pdfs(zip_data)
+    except ValueError as e:
+        raise ValueError(f"Erro ao extrair ZIP: {e}")
+
+    await event_manager.emit(ProcessingEvent(
+        event_type=EventType.ZIP_EXTRACTED,
+        filename=filename,
+        message=f"{len(extracted_files)} PDFs extraidos",
+        details={"count": len(extracted_files)}
+    ))
+
+    results: list[ProcessingResult] = []
+
+    for extracted_file in extracted_files:
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            logger.warning(f"Processamento ZIP cancelado: {filename}")
+            break
+
+        result = await process_extratos_pdf_async(
+            extracted_file.data,
+            extracted_file.filename,
+            job_id,
+            test_mode,
+        )
+        results.append(result)
+
+    sucesso = sum(1 for r in results if r.status == ProcessingStatus.SUCESSO)
+    nao_identificado = sum(1 for r in results if r.status == ProcessingStatus.NAO_IDENTIFICADO)
+    falha = sum(1 for r in results if r.status == ProcessingStatus.FALHA)
+
+    return UploadResponse(
+        sucesso=sucesso > 0,
+        total_arquivos=len(results),
+        arquivos_sucesso=sucesso,
+        arquivos_nao_identificados=nao_identificado,
+        arquivos_falha=falha,
+        resultados=results,
+    )
+
+
+async def process_extratos_pdf_async(
+    pdf_data: bytes,
+    filename: str,
+    job_id: str | None = None,
+    test_mode: bool = False,
+) -> ProcessingResult:
+    """Processa um unico arquivo PDF (extratos baixados)."""
+    event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
+    file_hash = compute_hash(pdf_data)
+    jobs_dict = _extratos_test_jobs if test_mode else _extratos_jobs
+
+    if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+        logger.warning(f"Job {job_id} cancelado antes do inicio.")
+        return ProcessingResult(
+            nome_arquivo_original=filename,
+            status=ProcessingStatus.FALHA,
+            hash_arquivo=file_hash,
+            erro="Cancelado manualmente",
+            nome_arquivo_final=""
+        )
+
+    event_manager.start_processing()
+
+    await event_manager.emit(ProcessingEvent(
+        event_type=EventType.PDF_PROCESSING_START,
+        filename=filename,
+        message="Iniciando processamento do PDF",
+        progress=0
+    ))
+
+    if file_hash in _extratos_processed_hashes:
+        logger.info(f"Arquivo ja processado (hash: {file_hash[:8]}): {filename}")
+        event_manager.end_processing()
+        return ProcessingResult(
+            nome_arquivo_original=filename,
+            status=ProcessingStatus.SUCESSO,
+            hash_arquivo=file_hash,
+            erro="Arquivo ja processado anteriormente (duplicado)",
+        )
+
+    _extratos_processed_hashes.add(file_hash)
+
+    is_pdf = pdf_data.startswith(b"%PDF-") or filename.lower().endswith(".pdf")
+    if not is_pdf:
+        logger.info(f"Processando arquivo nao-PDF: {filename}")
+
+    try:
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            raise asyncio.CancelledError("Cancelado pelo usuario")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PDF_TEXT_EXTRACTING,
+            filename=filename,
+            message=f"Extraindo conteudo de {filename}...",
+            progress=10
+        ))
+
+        pdf_service = get_pdf_service()
+        try:
+            loop = asyncio.get_event_loop()
+            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
+        except ValueError as e:
+            return await create_extratos_failure_result(
+                filename,
+                file_hash,
+                f"Erro ao extrair conteudo: {e}",
+                test_mode=test_mode,
+            )
+
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            raise asyncio.CancelledError("Cancelado pelo usuario")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PDF_TEXT_EXTRACTED,
+            filename=filename,
+            message=f"Conteudo extraido: {len(text)} caracteres",
+            details={"chars": len(text)},
+            progress=25
+        ))
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.LLM_ANALYZING,
+            filename=filename,
+            message="Analisando documento com IA...",
+            progress=30
+        ))
+
+        llm_service = get_llm_service()
+        loop = asyncio.get_event_loop()
+        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            raise asyncio.CancelledError("Cancelado pelo usuario")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.LLM_COMPLETED,
+            filename=filename,
+            message=f"Analise concluida: {extraction.cliente_sugerido or 'N/A'}",
+            details={
+                "cliente": extraction.cliente_sugerido,
+                "banco": extraction.banco,
+                "tipo": extraction.tipo_documento,
+                "confianca": extraction.confianca,
+            },
+            progress=50
+        ))
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.MATCHING_START,
+            filename=filename,
+            message="Buscando cliente na base...",
+            progress=55
+        ))
+
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            raise asyncio.CancelledError("Cancelado pelo usuario")
+
+        matching_service = get_matching_service()
+        match_result = matching_service.match(extraction)
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.MATCHING_COMPLETED,
+            filename=filename,
+            message=f"Match: {match_result.cliente.nome if match_result.identificado else 'Nao encontrado'}",
+            details={
+                "found": match_result.identificado,
+                "cliente": match_result.cliente.nome if match_result.identificado else None,
+                "metodo": match_result.metodo.value,
+                "score": match_result.score,
+            },
+            progress=70
+        ))
+
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            raise asyncio.CancelledError("Cancelado pelo usuario")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.FILE_SAVING,
+            filename=filename,
+            message="Salvando arquivo...",
+            progress=75
+        ))
+
+        storage_service = get_storage_service()
+
+        if test_mode:
+            ano, mes = storage_service._get_previous_month()
+            if match_result.identificado:
+                client_base_path = storage_service._resolve_client_path(match_result.cliente)
+                if client_base_path:
+                    conta = storage_service._select_account(extraction.banco, extraction.conta, match_result.cliente.conta)
+                    target_path = storage_service._build_path_structure(
+                        client_base_path,
+                        ano,
+                        mes,
+                        extraction.banco,
+                        conta,
+                    )
+                    file_name = storage_service._build_filename(
+                        extraction.banco,
+                        extraction.tipo_documento,
+                        pdf_data,
+                        target_path,
+                        filename,
+                    )
+                    saved_path = str(target_path / file_name)
+                else:
+                    saved_path = str(storage_service.settings.unidentified_path / filename)
+            else:
+                saved_path = str(storage_service.settings.unidentified_path / filename)
+            logger.info(f"[TESTE EXTRATOS] Arquivo seria salvo em: {saved_path}")
+        else:
+            saved_path, ano, mes = storage_service.save_file(
+                pdf_data=pdf_data,
+                match_result=match_result,
+                original_filename=filename,
+                tipo_documento=extraction.tipo_documento,
+                banco=extraction.banco,
+                conta_extrato=extraction.conta,
+            )
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.FILE_SAVED,
+            filename=filename,
+            message="Arquivo salvo (Simulado)" if test_mode else "Arquivo salvo",
+            details={"path": saved_path},
+            progress=85
+        ))
+
+        if match_result.identificado:
+            proc_status = ProcessingStatus.SUCESSO
+            cliente_nome = match_result.cliente.nome
+        else:
+            proc_status = ProcessingStatus.NAO_IDENTIFICADO
+            cliente_nome = None
+
+        log_id = None
+        if not test_mode:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.LOG_WRITING,
+                filename=filename,
+                message="Registrando no banco de dados...",
+                progress=90
+            ))
+            try:
+                db_log_service = get_extratos_baixados_log_service()
+                log_entry = db_log_service.log_extrato(
+                    arquivo_original=filename,
+                    status=proc_status.value,
+                    arquivo_salvo=saved_path,
+                    hash_arquivo=file_hash,
+                    cliente_nome=cliente_nome,
+                    cliente_cod=match_result.cliente.cod if match_result.identificado else None,
+                    cliente_cnpj=extraction.cnpj,
+                    banco=extraction.banco,
+                    tipo_documento=extraction.tipo_documento,
+                    agencia=extraction.agencia,
+                    conta=extraction.conta,
+                    ano=ano,
+                    mes=mes,
+                    metodo_identificacao=match_result.metodo.value,
+                    confianca_ia=extraction.confianca,
+                    erro=match_result.motivo_fallback if not match_result.identificado else None,
+                )
+                log_id = log_entry.id
+            except Exception as e:
+                logger.error(f"Erro ao salvar log de extratos baixados: {e}")
+
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.LOG_WRITTEN,
+                filename=filename,
+                message="Log registrado",
+                progress=95
+            ))
+        else:
+            try:
+                db_teste_service = get_extratos_baixados_log_teste_service()
+                db_teste_service.log_extrato_teste(
+                    arquivo_original=filename,
+                    status=proc_status.value,
+                    arquivo_salvo=saved_path,
+                    hash_arquivo=file_hash,
+                    cliente_nome=cliente_nome,
+                    cliente_cod=match_result.cliente.cod if match_result.identificado else None,
+                    cliente_cnpj=extraction.cnpj,
+                    banco=extraction.banco,
+                    tipo_documento=extraction.tipo_documento,
+                    agencia=extraction.agencia,
+                    conta=extraction.conta,
+                    ano=ano,
+                    mes=mes,
+                    metodo_identificacao=match_result.metodo.value,
+                    confianca_ia=extraction.confianca,
+                    erro=match_result.motivo_fallback if not match_result.identificado else None,
+                )
+            except Exception as e:
+                logger.error(f"Erro ao salvar log de teste extratos baixados: {e}")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PROCESSING_COMPLETED,
+            filename=filename,
+            message=f"Processamento concluido: {proc_status.value}",
+            details={
+                "status": proc_status.value,
+                "cliente": cliente_nome,
+                "path": saved_path,
+                "banco": extraction.banco,
+                "tipo": extraction.tipo_documento,
+                "ano": ano,
+                "mes": mes,
+                "metodo": match_result.metodo.value,
+                "log_id": log_id,
+            },
+            progress=100
+        ))
+
+        event_manager.update_stats(
+            sucesso=(proc_status == ProcessingStatus.SUCESSO),
+            nao_identificado=(proc_status == ProcessingStatus.NAO_IDENTIFICADO),
+            falha=(proc_status == ProcessingStatus.FALHA),
+        )
+        event_manager.end_processing()
+        await event_manager.emit_stats()
+
+        logger.info(
+            "Processamento concluido (extratos baixados): %s -> %s",
+            filename,
+            proc_status.value,
+        )
+
+        return ProcessingResult(
+            nome_arquivo_original=filename,
+            nome_arquivo_final=saved_path,
+            status=proc_status,
+            cliente_identificado=cliente_nome,
+            metodo_identificacao=match_result.metodo,
+            tipo_documento=extraction.tipo_documento,
+            ano=ano,
+            mes=mes,
+            hash_arquivo=file_hash,
+            erro=match_result.motivo_fallback if not match_result.identificado else None,
+        )
+    except asyncio.CancelledError:
+        logger.warning(f"Processamento cancelado explicitamente (extratos baixados): {filename}")
+        event_manager.end_processing()
+        return ProcessingResult(
+            nome_arquivo_original=filename,
+            status=ProcessingStatus.FALHA,
+            hash_arquivo=file_hash,
+            erro="Cancelado manualmente pelo usuario",
+            nome_arquivo_final=""
+        )
+    except Exception as e:
+        logger.exception(f"Erro inesperado ao processar extratos baixados: {filename}")
+        return await create_extratos_failure_result(filename, file_hash, str(e), test_mode=test_mode)
+
+
+async def create_extratos_failure_result(
+    filename: str,
+    file_hash: str,
+    error: str,
+    test_mode: bool = False,
+) -> ProcessingResult:
+    """Cria um resultado de falha para extratos baixados."""
+    event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
+
+    await event_manager.emit(ProcessingEvent(
+        event_type=EventType.PROCESSING_ERROR,
+        filename=filename,
+        message=error
+    ))
+
+    event_manager.update_stats(falha=True)
+    event_manager.end_processing()
+    await event_manager.emit_stats()
+
+    return ProcessingResult(
+        nome_arquivo_original=filename,
+        status=ProcessingStatus.FALHA,
+        hash_arquivo=file_hash,
+        erro=error,
+    )
+
+
+# ============================================================
 # ENDPOINTS AUXILIARES
 # ============================================================
 
@@ -1597,6 +2156,33 @@ async def get_history():
         return []
 
 
+
+@app.get("/extratos/monitor/history")
+async def get_extratos_history():
+    """Retorna o historico de extratos baixados do banco."""
+    try:
+        db_log_service = get_extratos_baixados_log_service()
+        logs = db_log_service.get_logs(limit=100)
+
+        result = []
+        for log in logs:
+            result.append({
+                "timestamp": log.processado_em.isoformat() if log.processado_em else None,
+                "data_hora_formatada": log.processado_em.strftime("%d/%m/%Y, %H:%M:%S") if log.processado_em else "-",
+                "cliente": log.cliente_nome or "NAO IDENTIFICADO",
+                "tipo": log.tipo_documento or "-",
+                "banco": log.banco or "-",
+                "status": log.status,
+                "filename": log.arquivo_original or "-",
+                "full_path": log.arquivo_salvo or "-",
+                "periodo": f"{log.mes}/{log.ano}" if log.ano and log.mes else "-",
+                "log_id": log.id,
+            })
+
+        return result
+    except Exception as e:
+        logger.error(f"Erro ao buscar historico de extratos baixados: {e}")
+        return []
 @app.get("/debug/clients")
 async def debug_clients():
     """Endpoint de diagnóstico para verificar leitura da planilha de clientes."""
@@ -1728,6 +2314,31 @@ async def reset_processing():
     return {"message": f"{count} processamentos encerrados manualmente.", "count": count}
 
 
+
+@app.post("/extratos/monitor/reset")
+async def reset_extratos_processing():
+    """Forca o encerramento dos processamentos de extratos baixados."""
+    count = 0
+    event_manager = get_extratos_event_manager()
+
+    for job_id, job in _extratos_jobs.items():
+        if job["status"] == "processing":
+            job["status"] = "cancelled"
+            job["message"] = "Processamento cancelado manualmente pelo usuario"
+            job["completed_at"] = datetime.now().isoformat()
+
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.PROCESSING_ERROR,
+                filename=job["filename"],
+                message="Cancelado manualmente"
+            ))
+            count += 1
+
+    if count > 0:
+        event_manager.end_processing()
+        await event_manager.emit_stats()
+
+    return {"message": f"{count} processamentos encerrados manualmente.", "count": count}
 # ====== ENDPOINTS DE LOGS DO BANCO DE DADOS ======
 
 @app.get("/logs")
@@ -1866,13 +2477,173 @@ async def view_log_file(log_id: int):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+
+@app.get("/extratos/logs")
+async def get_extratos_logs(
+    limit: int = 100,
+    offset: int = 0,
+    status: str = None,
+    cliente: str = None,
+    ano: int = None,
+    mes: int = None,
+):
+    """Consulta logs de extratos baixados."""
+    try:
+        db_service = get_extratos_baixados_log_service()
+        logs = db_service.get_logs(
+            limit=limit,
+            offset=offset,
+            status=status,
+            cliente_nome=cliente,
+            ano=ano,
+            mes=mes,
+        )
+        return {
+            "total": len(logs),
+            "offset": offset,
+            "limit": limit,
+            "logs": [log.to_dict() for log in logs],
+        }
+    except Exception as e:
+        logger.error(f"Erro ao consultar logs de extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/extratos/logs/stats")
+async def get_extratos_logs_stats():
+    """Retorna estatisticas gerais dos logs de extratos baixados."""
+    try:
+        db_service = get_extratos_baixados_log_service()
+        return db_service.get_stats()
+    except Exception as e:
+        logger.error(f"Erro ao obter estatisticas de extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/extratos/logs/{log_id}")
+async def get_extratos_log_detail(log_id: int):
+    """Busca detalhes de um log de extratos baixados."""
+    try:
+        db_service = get_extratos_baixados_log_service()
+        log = db_service.get_log_by_id(log_id)
+        if not log:
+            raise HTTPException(status_code=404, detail="Log nao encontrado")
+        return log.to_dict()
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao buscar log de extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/extratos/logs/{log_id}/view")
+async def view_extratos_log_file(log_id: int):
+    """Retorna o arquivo associado ao log de extratos baixados."""
+    try:
+        from fastapi.responses import FileResponse
+        import os
+
+        db_service = get_extratos_baixados_log_service()
+        log = db_service.get_log_by_id(log_id)
+
+        if not log:
+            raise HTTPException(status_code=404, detail="Log nao encontrado")
+
+        file_path = log.arquivo_salvo
+        filename = log.arquivo_original
+
+        if (not file_path or file_path == '-') and filename:
+            settings = get_settings()
+            potential_path = settings.unidentified_path / filename
+            if potential_path.exists():
+                file_path = str(potential_path)
+
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Arquivo fisico nao encontrado")
+
+        return FileResponse(
+            path=file_path,
+            filename=filename or "documento.pdf",
+            media_type="application/pdf",
+            content_disposition_type="inline",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao visualizar arquivo de extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.delete("/extratos/logs")
+async def clear_extratos_logs():
+    """Limpa logs de extratos baixados e remove arquivos quando possivel."""
+    try:
+        from app.database import SessionLocal
+        from app.models.extratos_baixados_log import ExtratosBaixadosLog
+
+        qtde_memory = len(_extratos_jobs)
+        _extratos_jobs.clear()
+        _extratos_processed_hashes.clear()
+
+        db = SessionLocal()
+        try:
+            logs = db.query(ExtratosBaixadosLog).all()
+            count_db = len(logs)
+
+            for log in logs:
+                if log.arquivo_salvo:
+                    try:
+                        path = Path(log.arquivo_salvo)
+                        if path.exists():
+                            path.unlink()
+                    except Exception:
+                        pass
+
+            db.query(ExtratosBaixadosLog).delete()
+            db.commit()
+        finally:
+            db.close()
+
+        await get_extratos_event_manager().emit_stats()
+
+        return {
+            "success": True,
+            "message": f"Limpeza completa realizada. Banco: {count_db} registros, Memoria: {qtde_memory} jobs.",
+        }
+    except Exception as e:
+        logger.error(f"Erro ao limpar logs de extratos baixados: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "message": f"Erro interno ao limpar logs: {str(e)}"}
+        )
+
+@app.get("/extratos/monitor/test/logs")
+async def get_extratos_test_logs(limit: int = 30, offset: int = 0):
+    """Consulta logs de teste de extratos baixados."""
+    db_teste_service = get_extratos_baixados_log_teste_service()
+    logs = db_teste_service.get_logs_teste(limit=limit, offset=offset)
+    return {
+        "modo": "TESTE",
+        "total": len(logs),
+        "logs": [log.to_dict() for log in logs],
+    }
+
+@app.get("/extratos/monitor/test/stats")
+async def get_extratos_test_stats():
+    """Estatisticas dos logs de teste de extratos baixados."""
+    db_teste_service = get_extratos_baixados_log_teste_service()
+    return db_teste_service.get_stats_teste()
+
+@app.delete("/extratos/monitor/test/logs")
+async def clear_extratos_test_logs():
+    """Limpa logs de teste de extratos baixados."""
+    db_teste_service = get_extratos_baixados_log_teste_service()
+    count = db_teste_service.limpar_logs_teste()
+    return {"message": f"{count} logs de teste removidos", "count": count}
 @app.get("/test", response_class=HTMLResponse)
 async def test_monitor_page():
     """Página de monitoramento de TESTES."""
     from pathlib import Path
     
     html_path = Path(__file__).parent / "templates" / "test_monitor.html"
-    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content=_render_template_with_navbar(html_path, active_main="test", show_main=True, show_extratos=False))
 
 @app.post("/test/upload")
 async def test_upload_file(
@@ -2016,7 +2787,7 @@ async def _process_single_test_pdf(
             client_base_path = storage_service._resolve_client_path(match_result.cliente)
             if client_base_path:
                 # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
-                conta = extraction.conta or match_result.cliente.conta
+                conta = storage_service._select_account(extraction.banco, extraction.conta, match_result.cliente.conta)
                 target_path = storage_service._build_path_structure(
                     client_base_path,
                     ano,
@@ -2201,14 +2972,130 @@ async def update_batch_logs(payload: UpdateBatchRequest):
 
 # ====== ENDPOINTS DE REVERSÃO ======
 
+
+@app.get("/extratos/reversao", response_class=HTMLResponse)
+async def extratos_reversao_page():
+    """Pagina de gestao de reversoes de extratos baixados."""
+    from pathlib import Path
+
+    html_path = Path(__file__).parent / "templates" / "extratos_reversao.html"
+    return HTMLResponse(content=_render_template_with_navbar(html_path, active_extratos="reversao-extratos", show_main=True, show_extratos=True))
 @app.get("/reversao", response_class=HTMLResponse)
 async def reversao_page():
     """Página de gestão de reversões."""
     from pathlib import Path
     
     html_path = Path(__file__).parent / "templates" / "reversao.html"
-    return HTMLResponse(content=html_path.read_text(encoding="utf-8"))
+    return HTMLResponse(content=_render_template_with_navbar(html_path, active_main="reversao", show_main=True, show_extratos=False))
 
+
+
+@app.get("/extratos/reversao/listar")
+async def listar_extratos_para_reversao(
+    limit: int = 100,
+    offset: int = 0,
+    status: str = None,
+    cliente: str = None,
+    apenas_existentes: bool = False,
+):
+    """Lista processamentos de extratos baixados que podem ser revertidos."""
+    try:
+        reversao_service = get_extratos_baixados_reversao_service()
+        logs = reversao_service.listar_processamentos(
+            limit=limit,
+            offset=offset,
+            status=status,
+            cliente=cliente,
+            apenas_existentes=apenas_existentes,
+        )
+        return {
+            "total": len(logs),
+            "logs": logs
+        }
+    except Exception as e:
+        logger.error(f"Erro ao listar reversoes de extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/extratos/reversao/stats")
+async def stats_extratos_reversao():
+    """Estatisticas para pagina de reversao de extratos baixados."""
+    try:
+        reversao_service = get_extratos_baixados_reversao_service()
+        return reversao_service.get_estatisticas()
+    except Exception as e:
+        logger.error(f"Erro ao obter estatisticas de reversao extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/extratos/reversao/historico")
+async def historico_extratos_reversoes(
+    limit: int = 100,
+    offset: int = 0,
+    cliente: str = None,
+    banco: str = None,
+    tipo: str = None,
+    arquivo_deletado: str = None,
+):
+    """Lista historico de reversoes de extratos baixados."""
+    try:
+        from app.database import SessionLocal
+        from app.models.extratos_baixados_reversao_log import ExtratosBaixadosReversaoLog
+
+        db = SessionLocal()
+        try:
+            query = db.query(ExtratosBaixadosReversaoLog)
+            if cliente:
+                query = query.filter(ExtratosBaixadosReversaoLog.cliente_nome.ilike(f"%{cliente}%"))
+            if banco:
+                query = query.filter(ExtratosBaixadosReversaoLog.banco.ilike(f"%{banco}%"))
+            if tipo:
+                query = query.filter(ExtratosBaixadosReversaoLog.tipo_reversao.ilike(f"%{tipo}%"))
+            if arquivo_deletado in {"true", "false"}:
+                query = query.filter(
+                    ExtratosBaixadosReversaoLog.arquivo_deletado == (arquivo_deletado == "true")
+                )
+
+            query = query.order_by(ExtratosBaixadosReversaoLog.id.desc())
+            query = query.limit(limit).offset(offset)
+            reversoes = query.all()
+        finally:
+            db.close()
+
+        return {
+            "total": len(reversoes),
+            "offset": offset,
+            "limit": limit,
+            "reversoes": [r.to_dict() for r in reversoes],
+        }
+    except Exception as e:
+        logger.error(f"Erro ao listar historico de reversoes extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/extratos/reversao/historico/stats")
+async def stats_extratos_historico_reversoes():
+    """Estatisticas do historico de reversoes de extratos baixados."""
+    try:
+        from app.database import SessionLocal
+        from app.models.extratos_baixados_reversao_log import ExtratosBaixadosReversaoLog
+
+        db = SessionLocal()
+        try:
+            total = db.query(ExtratosBaixadosReversaoLog).count()
+            arquivos_deletados = db.query(ExtratosBaixadosReversaoLog).filter(
+                ExtratosBaixadosReversaoLog.arquivo_deletado == True
+            ).count()
+            ultima = db.query(ExtratosBaixadosReversaoLog).order_by(ExtratosBaixadosReversaoLog.id.desc()).first()
+        finally:
+            db.close()
+
+        return {
+            "total": total,
+            "arquivos_deletados": arquivos_deletados,
+            "arquivos_nao_deletados": max(0, total - arquivos_deletados),
+            "ultima_reversao": ultima.revertido_em.isoformat() if ultima and ultima.revertido_em else None,
+        }
+    except Exception as e:
+        logger.error(f"Erro ao obter estatisticas de historico extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/reversao/listar")
 async def listar_para_reversao(
@@ -2278,6 +3165,42 @@ def _remove_logs_from_memory(logs):
             job["results"]["total_arquivos"] = len(res_list)
 
 
+def _remove_extratos_logs_from_memory(logs):
+    """Reflete a remocao no cache de extratos baixados para evitar inconsistencia."""
+    if not logs:
+        return
+
+    hashes_to_remove = {log.hash_arquivo for log in logs if log.hash_arquivo}
+    names_to_remove = {log.arquivo_original for log in logs if log.arquivo_original}
+
+    for job_key in list(_extratos_jobs.keys()):
+        job = _extratos_jobs[job_key]
+        if not job.get("results") or "resultados" not in job["results"]:
+            continue
+
+        original_results = job["results"]["resultados"]
+        new_results = []
+        changed = False
+
+        for res in original_results:
+            h = res.get("hash_arquivo")
+            n = res.get("nome_arquivo_original")
+            if (h and h in hashes_to_remove) or (n and n in names_to_remove):
+                changed = True
+                continue
+            new_results.append(res)
+
+        if changed:
+            job["results"]["resultados"] = new_results
+            res_list = job["results"].get("resultados", [])
+            job["results"]["arquivos_sucesso"] = sum(1 for r in res_list if r.get("status") == "SUCESSO")
+            job["results"]["arquivos_falha"] = sum(1 for r in res_list if r.get("status") == "FALHA")
+            job["results"]["arquivos_nao_identificados"] = sum(
+                1 for r in res_list if r.get("status") == "NAO_IDENTIFICADO"
+            )
+            job["results"]["total_arquivos"] = len(res_list)
+
+
 @app.delete("/reversao/{log_id}")
 async def reverter_por_id(log_id: int, deletar_arquivo: bool = True):
     """Reverte um único processamento pelo ID."""
@@ -2331,6 +3254,102 @@ async def reverter_por_id(log_id: int, deletar_arquivo: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+
+@app.delete("/extratos/reversao/{log_id}")
+async def reverter_extrato_baixado(log_id: int, deletar_arquivo: bool = True):
+    """Reverte um extrato baixado pelo ID."""
+    try:
+        from app.database import SessionLocal
+        from app.models.extratos_baixados_log import ExtratosBaixadosLog
+        from types import SimpleNamespace
+
+        db = SessionLocal()
+        status_original = None
+        log_obj = None
+
+        try:
+            log = db.query(ExtratosBaixadosLog).filter(ExtratosBaixadosLog.id == log_id).first()
+            if log:
+                status_original = log.status
+                log_obj = SimpleNamespace(
+                    hash_arquivo=log.hash_arquivo,
+                    arquivo_original=log.arquivo_original,
+                )
+        finally:
+            db.close()
+
+        reversao_service = get_extratos_baixados_reversao_service()
+        resultado = reversao_service.reverter_por_id(log_id, deletar_arquivo)
+        if not resultado.get("success"):
+            raise HTTPException(status_code=400, detail=resultado.get("message"))
+
+        if log_obj:
+            _remove_extratos_logs_from_memory([log_obj])
+
+        if status_original:
+            event_manager = get_extratos_event_manager()
+            event_manager.decrement_stats(
+                sucesso=1 if status_original == "SUCESSO" else 0,
+                nao_identificado=1 if status_original == "NAO_IDENTIFICADO" else 0,
+                falha=1 if status_original == "FALHA" else 0,
+            )
+            await event_manager.emit_stats()
+
+        return resultado
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao reverter extrato baixado: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/extratos/reversao/lote")
+async def reverter_extrato_baixado_lote(ids: List[int], deletar_arquivos: bool = True):
+    """Reverte multiplos extratos baixados."""
+    try:
+        from app.database import SessionLocal
+        from app.models.extratos_baixados_log import ExtratosBaixadosLog
+        from types import SimpleNamespace
+
+        db = SessionLocal()
+        stats_diff = {"SUCESSO": 0, "NAO_IDENTIFICADO": 0, "FALHA": 0}
+        logs_to_clean = []
+
+        try:
+            logs = db.query(ExtratosBaixadosLog).filter(ExtratosBaixadosLog.id.in_(ids)).all()
+            for log in logs:
+                stats_diff[log.status] = stats_diff.get(log.status, 0) + 1
+                logs_to_clean.append(SimpleNamespace(hash_arquivo=log.hash_arquivo, arquivo_original=log.arquivo_original))
+        finally:
+            db.close()
+
+        reversao_service = get_extratos_baixados_reversao_service()
+        resultado = reversao_service.reverter_lote(ids, deletar_arquivos)
+
+        if logs_to_clean:
+            _remove_extratos_logs_from_memory(logs_to_clean)
+
+        event_manager = get_extratos_event_manager()
+        event_manager.decrement_stats(
+            sucesso=stats_diff.get("SUCESSO", 0),
+            nao_identificado=stats_diff.get("NAO_IDENTIFICADO", 0),
+            falha=stats_diff.get("FALHA", 0),
+        )
+        await event_manager.emit_stats()
+
+        return resultado
+    except Exception as e:
+        logger.error(f"Erro ao reverter extratos baixados em lote: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/extratos/reversao/ultimos/{quantidade}")
+async def reverter_extratos_ultimos(quantidade: int, deletar_arquivos: bool = True):
+    """Reverte os ultimos N extratos baixados."""
+    try:
+        reversao_service = get_extratos_baixados_reversao_service()
+        return reversao_service.reverter_ultimos(quantidade, deletar_arquivos)
+    except Exception as e:
+        logger.error(f"Erro ao reverter ultimos extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
 @app.post("/reversao/lote")
 async def reverter_lote(ids: List[int], deletar_arquivos: bool = True):
     """Reverte múltiplos processamentos."""

@@ -4,7 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Modo Teste | Extratos Contábeis</title>
+    <title>Monitor Teste Extratos | Extratos Contábeis</title>
     <link rel="icon" type="image/svg+xml" href="/static/img/favicon-test.svg">
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     <style>
@@ -544,7 +544,7 @@
     <div class="page-wrapper navbar-collapsed" id="mainContent">
         <div class="container">
             <header class="header">
-                <h1><span style="-webkit-text-fill-color: initial;">🧪</span> Modo Teste</h1>
+                <h1><span style="-webkit-text-fill-color: initial;">🧪</span> Monitor Teste</h1>
                 <span class="badge">⚡ MONITORAMENTO EM TEMPO REAL</span>
             </header>
 
@@ -589,7 +589,7 @@
             <div class="actions">
                 <button class="btn btn-primary" onclick="loadData()">🔄 Atualizar</button>
                 <button class="btn btn-danger" onclick="clearLogs()">🗑️ Limpar Logs</button>
-                <a href="/monitor" class="btn btn-outline">📺 Ver Produção</a>
+                <a href="/extratos/monitor" class="btn btn-outline">📺 Ver Produção</a>
             </div>
 
             <!-- Live Log -->
@@ -633,8 +633,8 @@
 
             function connectWebSocket() {
                 const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-                // Usa /ws/test para eventos separados da producao
-                ws = new WebSocket(`${protocol}//${window.location.host}/ws/test`);
+                // Usa /ws/extratos/test para eventos separados da producao
+                ws = new WebSocket(`${protocol}//${window.location.host}/ws/extratos/test`);
 
                 ws.onopen = () => {
                     document.getElementById('liveIndicator').classList.add('connected');
@@ -781,7 +781,7 @@
 
             async function loadStats() {
                 try {
-                    const res = await fetch('/test/stats');
+                    const res = await fetch('/extratos/monitor/test/stats');
                     const data = await res.json();
 
                     // Atualiza com dados do banco
@@ -802,7 +802,7 @@
 
             async function loadLogs() {
                 try {
-                    const res = await fetch('/test/logs?limit=30');
+                    const res = await fetch('/extratos/monitor/test/logs?limit=30');
                     const data = await res.json();
 
                     document.getElementById('logCount').textContent = data.total || 0;
@@ -860,7 +860,7 @@
                 if (!confirm('Limpar todos os logs de teste?')) return;
 
                 try {
-                    await fetch('/test/logs', { method: 'DELETE' });
+                    await fetch('/extratos/monitor/test/logs', { method: 'DELETE' });
                     sessionStats = { total: 0, success: 0, warning: 0, error: 0 };
                     updateSessionStats();
                     loadLogs();
@@ -890,7 +890,7 @@
                 loading.style.display = 'block';
 
                 // Set new src
-                iframe.src = `/logs/${logId}/view`;
+                iframe.src = `/extratos/logs/${logId}/view`;
 
                 // Show modal
                 modal.style.display = 'block';

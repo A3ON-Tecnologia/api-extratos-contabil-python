@@ -52,7 +52,12 @@ class MatchingService:
         
         # 1. Tentar match por CNPJ
         if extraction.cnpj:
-            result = self._match_by_cnpj(extraction.cnpj, clients)
+            result = self._match_by_cnpj(
+                extraction.cnpj,
+                clients,
+                banco=extraction.banco,
+                conta=extraction.conta,
+            )
             if result.identificado:
                 logger.info(f"Match por CNPJ: {result.cliente.nome}")
                 return result
@@ -71,7 +76,12 @@ class MatchingService:
         
         # 3. Tentar match por nome com similaridade
         if extraction.cliente_sugerido:
-            result = self._match_by_name(extraction.cliente_sugerido, clients)
+            result = self._match_by_name(
+                extraction.cliente_sugerido,
+                clients,
+                banco=extraction.banco,
+                conta=extraction.conta,
+            )
             if result.identificado:
                 logger.info(
                     f"Match por nome ({result.score:.1f}%): {result.cliente.nome}"
@@ -90,9 +100,11 @@ class MatchingService:
         )
     
     def _match_by_cnpj(
-        self, 
-        cnpj: str, 
-        clients: list[ClientInfo]
+        self,
+        cnpj: str,
+        clients: list[ClientInfo],
+        banco: str | None = None,
+        conta: str | None = None,
     ) -> MatchResult:
         """
         Tenta encontrar cliente pelo CNPJ.
@@ -106,12 +118,26 @@ class MatchingService:
                 motivo_fallback=f"CNPJ inválido: {cnpj}"
             )
         
+        banco_cresol = self._is_cresol(banco)
+        conta_numbers = extract_numbers(conta) if conta else None
+
         for client in clients:
             if not client.cnpj:
                 continue
             
             client_cnpj = extract_numbers(client.cnpj)
             if client_cnpj == cnpj_numbers:
+                if banco_cresol:
+                    if not client.banco:
+                        continue
+                    client_banco = normalize_text(client.banco)
+                    if "CRESOL" not in client_banco:
+                        continue
+                    if conta_numbers and client.conta:
+                        if extract_numbers(client.conta) != conta_numbers:
+                            continue
+                    elif conta_numbers and not client.conta:
+                        continue
                 return MatchResult(
                     cliente=client,
                     metodo=MatchMethod.CNPJ,
@@ -138,12 +164,18 @@ class MatchingService:
         agencia_numbers = extract_numbers(agencia)
         conta_numbers = extract_numbers(conta)
         banco_normalized = normalize_text(banco) if banco else None
+        banco_cresol = self._is_cresol(banco)
         
         candidates: list[tuple[ClientInfo, float]] = []
         
         for client in clients:
             if not client.agencia or not client.conta:
                 continue
+            if banco_cresol:
+                if not client.banco:
+                    continue
+                if "CRESOL" not in normalize_text(client.banco):
+                    continue
             
             client_agencia = extract_numbers(client.agencia)
             client_conta = extract_numbers(client.conta)
@@ -158,6 +190,8 @@ class MatchingService:
             # Bonus se o banco também bater
             if banco_normalized and client.banco:
                 client_banco = normalize_text(client.banco)
+                if banco_cresol and "CRESOL" not in client_banco:
+                    continue
                 if banco_normalized in client_banco or client_banco in banco_normalized:
                     score = 95.0
             
@@ -219,7 +253,9 @@ class MatchingService:
     def _match_by_name(
         self,
         nome_sugerido: str,
-        clients: list[ClientInfo]
+        clients: list[ClientInfo],
+        banco: str | None = None,
+        conta: str | None = None,
     ) -> MatchResult:
         """
         Tenta encontrar cliente por similaridade de nome.
@@ -234,29 +270,50 @@ class MatchingService:
         threshold = self.settings.similarity_threshold
         
         best_match: tuple[ClientInfo, float] | None = None
-        
-        for client in clients:
-            client_nome = normalize_text(client.nome)
-            
-            # Calcula scores para nome normal e nome abreviado
-            def get_max_score(target_name: str, candidate_name: str) -> float:
-                return max([
-                    fuzz.ratio(target_name, candidate_name),
-                    fuzz.partial_ratio(target_name, candidate_name),
-                    fuzz.token_sort_ratio(target_name, candidate_name),
-                    fuzz.token_set_ratio(target_name, candidate_name),
-                    fuzz.WRatio(target_name, candidate_name),
-                ])
-            
-            score_normal = get_max_score(nome_normalized, client_nome)
-            score_abbr = get_max_score(nome_abbr, client_nome)
-            
-            score = max(score_normal, score_abbr)
-            
-            if score >= threshold:
-                if best_match is None or score > best_match[1]:
-                    best_match = (client, score)
-        
+        banco_cresol = self._is_cresol(banco)
+        conta_numbers = extract_numbers(conta) if conta else None
+
+        def get_max_score(target_name: str, candidate_name: str) -> float:
+            return max([
+                fuzz.ratio(target_name, candidate_name),
+                fuzz.partial_ratio(target_name, candidate_name),
+                fuzz.token_sort_ratio(target_name, candidate_name),
+                fuzz.token_set_ratio(target_name, candidate_name),
+                fuzz.WRatio(target_name, candidate_name),
+            ])
+
+        def find_best_match(require_conta_match: bool) -> tuple[ClientInfo, float] | None:
+            best: tuple[ClientInfo, float] | None = None
+            for client in clients:
+                if banco_cresol:
+                    if not client.banco:
+                        continue
+                    client_banco = normalize_text(client.banco)
+                    if "CRESOL" not in client_banco:
+                        continue
+                    if require_conta_match and conta_numbers:
+                        if not client.conta:
+                            continue
+                        if extract_numbers(client.conta) != conta_numbers:
+                            continue
+
+                client_nome = normalize_text(client.nome)
+                score_normal = get_max_score(nome_normalized, client_nome)
+                score_abbr = get_max_score(nome_abbr, client_nome)
+                score = max(score_normal, score_abbr)
+
+                if score >= threshold:
+                    if best is None or score > best[1]:
+                        best = (client, score)
+            return best
+
+        # Primeiro tenta nome com banco+conta (quando aplicavel) para evitar falso positivo
+        best_match = find_best_match(require_conta_match=True)
+
+        # Se nao encontrou e e Cresol, tenta apenas nome+banco (conta pode estar ausente na planilha)
+        if best_match is None and banco_cresol and conta_numbers:
+            best_match = find_best_match(require_conta_match=False)
+
         if best_match:
             return MatchResult(
                 cliente=best_match[0],
@@ -271,6 +328,12 @@ class MatchingService:
             )
         )
     
+    def _is_cresol(self, banco: str | None) -> bool:
+        """Verifica se o banco e Cresol."""
+        if not banco:
+            return False
+        return "CRESOL" in normalize_text(banco)
+
     def _build_fallback_reason(self, extraction: LLMExtractionResult) -> str:
         """Constrói uma mensagem explicando por que não foi possível identificar."""
         reasons = []

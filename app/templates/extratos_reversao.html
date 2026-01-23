@@ -516,9 +516,9 @@
                     <input type="text" class="filter-input" id="searchBanco" placeholder="🏦 Banco...">
                     <select class="filter-input" id="filterTipo">
                         <option value="">Todos os tipos</option>
-                        <option value="individual">Individual</option>
-                        <option value="lote">Em Lote</option>
-                        <option value="ultimos_n">Últimos N</option>
+                        <option value="INDIVIDUAL">Individual</option>
+                        <option value="LOTE">Em Lote</option>
+                        <option value="ULTIMOS">Últimos N</option>
                     </select>
                     <select class="filter-input" id="filterArquivoDeletado">
                         <option value="">Arquivo deletado?</option>
@@ -529,7 +529,7 @@
                 <div class="filter-group">
                     <button class="btn btn-primary" onclick="loadHistorico()">🔍 Buscar</button>
                     <button class="btn btn-outline" onclick="clearFilters()">🧹 Limpar</button>
-                    <a href="/monitor" class="btn btn-outline">📺 Monitor</a>
+                    <a href="/extratos/monitor" class="btn btn-outline">📺 Monitor</a>
                 </div>
             </div>
 
@@ -671,7 +671,7 @@
 
             async function loadStats() {
                 try {
-                    const res = await fetch('/reversao/historico/stats');
+                    const res = await fetch('/extratos/reversao/historico/stats');
                     const data = await res.json();
                     document.getElementById('statTotalReversoes').textContent = data.total || 0;
                     document.getElementById('statArquivosDeletados').textContent = data.arquivos_deletados || 0;
@@ -702,7 +702,7 @@
                 if (arquivoDeletado) params.append('arquivo_deletado', arquivoDeletado);
 
                 try {
-                    const res = await fetch(`/reversao/historico?${params.toString()}`);
+                    const res = await fetch(`/extratos/reversao/historico?${params.toString()}`);
                     const data = await res.json();
 
                     allReversoes = data.reversoes || [];

@@ -26,6 +26,9 @@ REGRAS IMPORTANTES:
 3. O campo "confianca" deve refletir sua certeza geral sobre a extração (0.0 a 1.0)
 4. Para CNPJ, mantenha o formato encontrado ou extraia apenas números
 5. NÃO extraia datas - o sistema usará automaticamente o mês anterior
+6. Foque no cabeçalho do documento: geralmente ele traz NOME, AGÊNCIA e CONTA
+7. "Agência" e "Conta" podem aparecer na MESMA linha (ex: "Agência 5684 Conta 001074-0")
+8. Preserve o formato original de agência/conta (com hífens) quando houver
 
 CLASSIFICAÇÃO DE TIPO DE DOCUMENTO (Campo: tipo_documento):
 Você DEVE classificar o documento em EXATAMENTE UMA das categorias abaixo. Use APENAS estes textos:
@@ -55,8 +58,18 @@ IDENTIFICAÇÃO DE BANCOS:
 - "SICOOB" ou "COOPERATIVA" -> Banco: SICOOB (NÃO confunda com CRESOL)
 - "CRESOL" -> Banco: CRESOL (cooperativa de crédito CRESOL, diferente de SICOOB)
 - "CAIXA ECONOMICA" -> Banco: CAIXA
+- "BANCO DO BRASIL" ou "BB" -> Banco: BANCO DO BRASIL
 - Sempre retorne o nome SIMPLIFICADO do banco em UPPERCASE (ex: "SICREDI", "SICOOB", "CRESOL", "BRADESCO", "ITAU", "CAIXA", "BANCO DO BRASIL", "SANTANDER")
 - Se não conseguir identificar com certeza, retorne null
+
+EXTRAÇÃO DE NOME/AGÊNCIA/CONTA:
+- cliente_sugerido: use o nome da empresa/pessoa do cabeçalho (perto de "Agência/Conta")
+- NÃO use nome do banco como cliente_sugerido
+- agencia: valor numérico após "Agência" (ou "Agencia")
+- conta: valor numérico após "Conta"
+- Banco do Brasil: no bloco "Cliente - Conta atual", a linha "Conta corrente" traz "numero - NOME". Use o numero como conta e o texto após o hífen como cliente_sugerido.
+- Banco do Brasil (exemplo): "Conta corrente 20000-X SUPERMERCADO MARTELLI LTD" -> conta="20000-X", cliente_sugerido="SUPERMERCADO MARTELLI LTD"
+- Banco do Brasil (sem espaco apos a conta): "Conta corrente 20100-6IRMAOS ROSSATO E CIA LTDA" -> conta="20100-6", cliente_sugerido="IRMAOS ROSSATO E CIA LTDA"
 
 FORMATO DE RESPOSTA:
 Retorne APENAS um JSON válido, sem explicações adicionais:
