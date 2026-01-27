@@ -134,7 +134,6 @@ async def _inject_navbar_middleware(request, call_next):
     active_extratos: str | None = None
     show_main = True
     show_extratos = True
-    show_extratos_test = False
 
     if path == "/monitor":
         active_main = "monitor"
@@ -144,9 +143,6 @@ async def _inject_navbar_middleware(request, call_next):
         active_main = "reversao"
     elif path == "/extratos":
         active_extratos = "extratos"
-    elif path == "/extratos/teste":
-        active_extratos = "teste"
-        show_extratos_test = True
     elif path == "/extratos/simular":
         active_extratos = "simulacao"
     elif path == "/extratos/reversao":
@@ -157,7 +153,6 @@ async def _inject_navbar_middleware(request, call_next):
         active_extratos=active_extratos,
         show_main=show_main,
         show_extratos=show_extratos,
-        show_extratos_test=show_extratos_test,
     )
     navbar_placeholder_re = re.compile(r"\{\{\s*TECH_NAVBAR\s*\}\}|\{\s*TECH_NAVBAR\s*\}")
     body_text = body_bytes.decode("utf-8", errors="replace")
@@ -273,7 +268,6 @@ def _render_template_with_navbar(
     active_extratos: str | None = None,
     show_main: bool = True,
     show_extratos: bool = False,
-    show_extratos_test: bool = False,
 ) -> str:
     html = template_path.read_text(encoding="utf-8")
     navbar_html = render_tech_navbar(
@@ -281,7 +275,6 @@ def _render_template_with_navbar(
         active_extratos=active_extratos,
         show_main=show_main,
         show_extratos=show_extratos,
-        show_extratos_test=show_extratos_test,
     )
     # Aceita tanto "{{TECH_NAVBAR}}" quanto "{TECH_NAVBAR}" (pode acontecer se algum passo aplicar str.format).
     navbar_placeholder_re = re.compile(r"\{\{\s*TECH_NAVBAR\s*\}\}|\{\s*TECH_NAVBAR\s*\}")
@@ -314,15 +307,6 @@ async def extratos_page():
     return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="extratos", show_main=True, show_extratos=True))
 
 
-@app.get("/extratos/teste", response_class=HTMLResponse)
-async def extratos_teste_page():
-    """Pagina de teste de processamento de extratos."""
-    template_path = Path(__file__).parent / "templates" / "extratos_teste.html"
-
-    if not template_path.exists():
-        raise HTTPException(status_code=500, detail="Template de teste de extratos nao encontrado")
-
-    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="teste", show_main=True, show_extratos=True, show_extratos_test=True))
 
 
 async def _watch_folder_loop():

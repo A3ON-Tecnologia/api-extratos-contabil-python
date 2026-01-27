@@ -11,14 +11,12 @@ def render_tech_navbar(
     active_extratos: str | None = None,
     show_main: bool = True,
     show_extratos: bool = True,
-    show_extratos_test: bool = False,
 ) -> str:
     """Gera o HTML da navbar lateral."""
     active_main = active_main or ""
     active_extratos = active_extratos or ""
     main_style = "" if show_main else ' style="display:none;"'
     extratos_style = "" if show_extratos else ' style="display:none;"'
-    extratos_test_style = "" if show_extratos_test else ' style="display:none;"'
 
     def active_class(value: str, target: str) -> str:
         return " active" if value == target else ""
@@ -84,13 +82,6 @@ def render_tech_navbar(
                         <span class="nav-text">Reversao Extratos</span>
                     </a>
                     <span class="nav-tooltip">Reversao Extratos</span>
-                </div>
-                <div class="nav-item nav-item-teste-extratos{active_class(active_extratos, 'teste')}"{extratos_test_style}>
-                    <a href="/extratos/teste" class="nav-link">
-                        <span class="nav-icon">&#129514;</span>
-                        <span class="nav-text">Teste Extratos</span>
-                    </a>
-                    <span class="nav-tooltip">Teste Extratos</span>
                 </div>
             </div>
         </div>
