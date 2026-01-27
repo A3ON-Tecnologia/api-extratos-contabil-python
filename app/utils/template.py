@@ -10,7 +10,7 @@ def render_tech_navbar(
     active_main: str | None = None,
     active_extratos: str | None = None,
     show_main: bool = True,
-    show_extratos: bool = False,
+    show_extratos: bool = True,
     show_extratos_test: bool = False,
 ) -> str:
     """Gera o HTML da navbar lateral."""
@@ -32,12 +32,12 @@ def render_tech_navbar(
         </div>
 
         <div class="navbar-header">
-            <div class="navbar-logo">&#128202;</div>
             <span class="navbar-title">Extratos API</span>
         </div>
 
         <div class="navbar-nav">
-            <div class="nav-main"{main_style}>
+            <div class="nav-section nav-main"{main_style}>
+                <div class="nav-section-title">Módulo MAKE</div>
                 <div class="nav-item{active_class(active_main, 'monitor')}">
                     <a href="/monitor" class="nav-link">
                         <span class="nav-icon">&#128250;</span>
@@ -49,9 +49,9 @@ def render_tech_navbar(
                 <div class="nav-item{active_class(active_main, 'test')}">
                     <a href="/test" class="nav-link">
                         <span class="nav-icon">&#129514;</span>
-                        <span class="nav-text">Modo Teste</span>
+                        <span class="nav-text">Test Monitor</span>
                     </a>
-                    <span class="nav-tooltip">Modo Teste</span>
+                    <span class="nav-tooltip">Test Monitor</span>
                 </div>
                 <div class="nav-item{active_class(active_main, 'reversao')}">
                     <a href="/reversao" class="nav-link">
@@ -63,7 +63,7 @@ def render_tech_navbar(
             </div>
 
             <div class="nav-section"{extratos_style}>
-                <div class="nav-section-title">Extratos Baixados</div>
+                <div class="nav-section-title">Módulo Extratos Baixados</div>
                 <div class="nav-item{active_class(active_extratos, 'extratos')}">
                     <a href="/extratos" class="nav-link">
                         <span class="nav-icon">&#128196;</span>
@@ -77,20 +77,6 @@ def render_tech_navbar(
                         <span class="nav-text">Simulacao</span>
                     </a>
                     <span class="nav-tooltip">Simulacao</span>
-                </div>
-                <div class="nav-item{active_class(active_extratos, 'monitor-extratos')}">
-                    <a href="/extratos/monitor" class="nav-link">
-                        <span class="nav-icon">&#128250;</span>
-                        <span class="nav-text">Monitor Extratos</span>
-                    </a>
-                    <span class="nav-tooltip">Monitor Extratos</span>
-                </div>
-                <div class="nav-item{active_class(active_extratos, 'monitor-teste')}">
-                    <a href="/extratos/monitor/test" class="nav-link">
-                        <span class="nav-icon">&#129514;</span>
-                        <span class="nav-text">Monitor Teste</span>
-                    </a>
-                    <span class="nav-tooltip">Monitor Teste</span>
                 </div>
                 <div class="nav-item{active_class(active_extratos, 'reversao-extratos')}">
                     <a href="/extratos/reversao" class="nav-link">

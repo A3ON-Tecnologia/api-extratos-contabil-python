@@ -7,6 +7,7 @@ O Make recebe resposta imediata e o arquivo e processado em background.
 
 import asyncio
 import logging
+import re
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -17,6 +18,7 @@ from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSock
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
+from starlette.responses import Response
 
 from app.config import get_settings
 from app.events import (
@@ -99,6 +101,78 @@ from fastapi.staticfiles import StaticFiles
 static_dir = Path(__file__).parent / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Injeta a navbar em respostas HTML que contenham o placeholder.
+@app.middleware("http")
+async def _inject_navbar_middleware(request, call_next):
+    response = await call_next(request)
+    content_type = (response.headers.get("content-type") or "").lower()
+    if "text/html" not in content_type:
+        return response
+
+    if getattr(response, "body", None) is not None:
+        body_bytes = response.body  # type: ignore[attr-defined]
+    else:
+        chunks = []
+        async for chunk in response.body_iterator:  # type: ignore[attr-defined]
+            chunks.append(chunk)
+        body_bytes = b"".join(chunks)
+
+    if b"TECH_NAVBAR" not in body_bytes:
+        headers = dict(response.headers)
+        headers.pop("content-length", None)
+        return Response(
+            content=body_bytes,
+            status_code=response.status_code,
+            headers=headers,
+            media_type=response.media_type,
+            background=response.background,
+        )
+
+    path = request.url.path or ""
+    active_main: str | None = None
+    active_extratos: str | None = None
+    show_main = True
+    show_extratos = True
+    show_extratos_test = False
+
+    if path == "/monitor":
+        active_main = "monitor"
+    elif path == "/test":
+        active_main = "test"
+    elif path == "/reversao":
+        active_main = "reversao"
+    elif path == "/extratos":
+        active_extratos = "extratos"
+    elif path == "/extratos/teste":
+        active_extratos = "teste"
+        show_extratos_test = True
+    elif path == "/extratos/simular":
+        active_extratos = "simulacao"
+    elif path == "/extratos/reversao":
+        active_extratos = "reversao-extratos"
+
+    navbar_html = render_tech_navbar(
+        active_main=active_main,
+        active_extratos=active_extratos,
+        show_main=show_main,
+        show_extratos=show_extratos,
+        show_extratos_test=show_extratos_test,
+    )
+    navbar_placeholder_re = re.compile(r"\{\{\s*TECH_NAVBAR\s*\}\}|\{\s*TECH_NAVBAR\s*\}")
+    body_text = body_bytes.decode("utf-8", errors="replace")
+    rendered = navbar_placeholder_re.sub(lambda _m: navbar_html, body_text)
+    rendered_bytes = rendered.encode("utf-8")
+
+    headers = dict(response.headers)
+    headers.pop("content-length", None)
+    return Response(
+        content=rendered_bytes,
+        status_code=response.status_code,
+        headers=headers,
+        media_type=response.media_type,
+        background=response.background,
+    )
 
 # Incluir rotas de teste de extratos
 from app.routes.extratos_test import router as extratos_test_router
@@ -209,7 +283,9 @@ def _render_template_with_navbar(
         show_extratos=show_extratos,
         show_extratos_test=show_extratos_test,
     )
-    return html.replace("{{TECH_NAVBAR}}", navbar_html)
+    # Aceita tanto "{{TECH_NAVBAR}}" quanto "{TECH_NAVBAR}" (pode acontecer se algum passo aplicar str.format).
+    navbar_placeholder_re = re.compile(r"\{\{\s*TECH_NAVBAR\s*\}\}|\{\s*TECH_NAVBAR\s*\}")
+    return navbar_placeholder_re.sub(lambda _m: navbar_html, html)
 
 
 # ============================================================
@@ -224,29 +300,7 @@ async def monitor_dashboard():
     if not template_path.exists():
         raise HTTPException(status_code=500, detail="Template do monitor nao encontrado")
     
-    return HTMLResponse(content=_render_template_with_navbar(template_path, active_main="monitor", show_main=True, show_extratos=False))
-
-
-@app.get("/extratos/monitor", response_class=HTMLResponse)
-async def extratos_monitor_dashboard():
-    """Dashboard de monitoramento de extratos baixados."""
-    template_path = Path(__file__).parent / "templates" / "extratos_monitor.html"
-
-    if not template_path.exists():
-        raise HTTPException(status_code=500, detail="Template do monitor de extratos nao encontrado")
-
-    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="monitor-extratos", show_main=True, show_extratos=True))
-
-
-@app.get("/extratos/monitor/test", response_class=HTMLResponse)
-async def extratos_monitor_test_dashboard():
-    """Dashboard de monitoramento de extratos baixados (teste)."""
-    template_path = Path(__file__).parent / "templates" / "extratos_test_monitor.html"
-
-    if not template_path.exists():
-        raise HTTPException(status_code=500, detail="Template do monitor de testes de extratos nao encontrado")
-
-    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="monitor-teste", show_main=True, show_extratos=True))
+    return HTMLResponse(content=_render_template_with_navbar(template_path, active_main="monitor", show_main=True, show_extratos=True))
 
 
 @app.get("/extratos", response_class=HTMLResponse)
@@ -257,7 +311,7 @@ async def extratos_page():
     if not template_path.exists():
         raise HTTPException(status_code=500, detail="Template de extratos nao encontrado")
 
-    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="extratos", show_main=False, show_extratos=True))
+    return HTMLResponse(content=_render_template_with_navbar(template_path, active_extratos="extratos", show_main=True, show_extratos=True))
 
 
 @app.get("/extratos/teste", response_class=HTMLResponse)
@@ -333,24 +387,26 @@ async def _watch_folder_loop():
 
                 logger.info(f"Criando job {job_id} para {filename}")
 
-                _jobs[job_id] = {
+                _extratos_jobs[job_id] = {
                     "job_id": job_id,
                     "filename": filename,
                     "status": "processing",
-                    "message": "Arquivo recebido via watcher, processamento iniciado",
+                    "message": "Arquivo recebido via watcher de extratos, processamento iniciado",
                     "created_at": datetime.now().isoformat(),
                     "completed_at": None,
                     "results": None,
+                    "source": "extratos",
                 }
 
                 _watch_processed[file_key] = mtime
 
                 asyncio.create_task(
-                    process_file_background(
+                    process_extratos_file_background(
                         job_id=job_id,
                         content=content,
                         filename=filename,
                         is_zip=is_zip,
+                        test_mode=False,
                     )
                 )
 
@@ -617,6 +673,23 @@ async def simular_todos_extratos():
         "resultados": resultados,
         "erros_detalhes": erros if erros else None,
     }
+
+class ExtratosSimulacaoWebhook(BaseModel):
+    filename: str | None = None
+    todos: bool = False
+
+@app.post("/extratos/webhook/simulacao")
+async def extratos_webhook_simulacao(payload: ExtratosSimulacaoWebhook):
+    """
+    Webhook específico da view Simulação de Extratos.
+    - Se `todos=true`, simula todos os arquivos.
+    - Se `filename` for informado, simula apenas esse arquivo.
+    """
+    if payload.todos:
+        return await simular_todos_extratos()
+    if payload.filename:
+        return await simular_processamento_arquivo({"filename": payload.filename})
+    raise HTTPException(status_code=400, detail="Informe 'filename' ou 'todos=true'")
 
 
 @app.post("/extratos/watch/start")
@@ -924,16 +997,25 @@ async def upload_file(
         "monitor_url": "/monitor",
     }
 
-
-@app.post("/extratos/webhook")
-async def extratos_webhook_prod(
-    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos")],
-    background_tasks: BackgroundTasks
+@app.post("/make/webhook/monitor")
+async def make_webhook_monitor(
+    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP para processar (MAKE Monitor)")],
+    background_tasks: BackgroundTasks,
 ):
     """
-    Webhook de producao para extratos.
+    Webhook específico do Módulo MAKE para a view Monitor.
     Mesmo fluxo do /upload, mas com rota dedicada.
     """
+    return await upload_file(file=file, background_tasks=background_tasks)
+
+
+async def _handle_extratos_webhook(
+    *,
+    file: UploadFile,
+    background_tasks: BackgroundTasks,
+    source: str,
+    test_mode: bool = False,
+):
     content = await file.read()
     filename = file.filename or "webhook_extratos"
 
@@ -941,32 +1023,75 @@ async def extratos_webhook_prod(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Arquivo vazio")
 
     is_zip = content.startswith(b"PK") or filename.lower().endswith(".zip")
-    job_id = str(uuid.uuid4())[:8]
 
-    _extratos_jobs[job_id] = {
-        "job_id": job_id,
-        "filename": filename,
-        "status": "processing",
-        "message": "Arquivo recebido via webhook de extratos",
-        "created_at": datetime.now().isoformat(),
-        "completed_at": None,
-        "results": None,
-    }
+    if test_mode:
+        job_id = f"test_{uuid.uuid4().hex[:12]}"
+        jobs_dict = _extratos_test_jobs
+        jobs_dict[job_id] = {
+            "job_id": job_id,
+            "status": "queued",
+            "filename": filename,
+            "is_zip": is_zip,
+            "created_at": datetime.now().isoformat(),
+            "started_at": None,
+            "completed_at": None,
+            "progress": 0,
+            "total_files": 0,
+            "processed_files": 0,
+            "results": [],
+            "errors": [],
+            "stats": {},
+            "source": source,
+        }
+    else:
+        job_id = str(uuid.uuid4())[:8]
+        jobs_dict = _extratos_jobs
+        jobs_dict[job_id] = {
+            "job_id": job_id,
+            "filename": filename,
+            "status": "processing",
+            "message": "Arquivo recebido via webhook de extratos",
+            "created_at": datetime.now().isoformat(),
+            "completed_at": None,
+            "results": None,
+            "source": source,
+        }
 
     background_tasks.add_task(
         process_extratos_file_background,
-        job_id=job_id,
-        content=content,
-        filename=filename,
-        is_zip=is_zip,
+        job_id,
+        content,
+        filename,
+        is_zip,
+        test_mode=test_mode,
     )
 
     return {
         "success": True,
         "job_id": job_id,
         "message": "Webhook recebido! Processamento iniciado em background.",
-        "status_url": f"/extratos/job/{job_id}",
+        "status_url": f"/extratos/job/{job_id}" if not test_mode else None,
+        "check_status_url": f"/extratos/test/job/{job_id}" if test_mode else None,
+        "source": source,
+        "test_mode": test_mode,
     }
+
+
+@app.post("/extratos/webhook")
+async def extratos_webhook_prod(
+    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos")],
+    background_tasks: BackgroundTasks,
+):
+    """
+    Webhook de produção para extratos.
+    Mesmo fluxo do /upload, mas com rota dedicada.
+    """
+    return await _handle_extratos_webhook(
+        file=file,
+        background_tasks=background_tasks,
+        source="monitor",
+        test_mode=False,
+    )
 
 
 @app.post("/extratos/webhook/test")
@@ -981,49 +1106,51 @@ async def extratos_webhook_test(
     if not file.filename:
         raise HTTPException(status_code=400, detail="Nome do arquivo nao fornecido")
 
-    content = await file.read()
-    filename = file.filename
-
-    if not content:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Arquivo vazio")
-
-    is_zip = content.startswith(b"PK") or filename.lower().endswith(".zip")
-    job_id = f"test_{uuid.uuid4().hex[:12]}"
-
-    _extratos_test_jobs[job_id] = {
-        "job_id": job_id,
-        "status": "queued",
-        "filename": filename,
-        "is_zip": is_zip,
-        "created_at": datetime.now().isoformat(),
-        "started_at": None,
-        "completed_at": None,
-        "progress": 0,
-        "total_files": 0,
-        "processed_files": 0,
-        "results": [],
-        "errors": [],
-        "stats": {}
-    }
-
-    background_tasks.add_task(
-        process_extratos_file_background,
-        job_id,
-        content,
-        filename,
-        is_zip,
-        test_mode=True
+    return await _handle_extratos_webhook(
+        file=file,
+        background_tasks=background_tasks,
+        source="monitor-test",
+        test_mode=True,
     )
 
-    return {
-        "modo": "TESTE",
-        "job_id": job_id,
-        "status": "queued",
-        "filename": filename,
-        "is_zip": is_zip,
-        "message": "Webhook de teste recebido. Processamento iniciado em background.",
-        "check_status_url": f"/extratos/test/job/{job_id}"
-    }
+@app.post("/extratos/webhook/monitor")
+async def extratos_webhook_monitor(
+    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos (Monitor Extratos)")],
+    background_tasks: BackgroundTasks,
+):
+    """Webhook específico da view Monitor Extratos (produção)."""
+    return await _handle_extratos_webhook(
+        file=file,
+        background_tasks=background_tasks,
+        source="monitor",
+        test_mode=False,
+    )
+
+@app.post("/extratos/webhook/extratos")
+async def extratos_webhook_extratos(
+    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos (Extratos)")],
+    background_tasks: BackgroundTasks,
+):
+    """Webhook específico da view Extratos (produção)."""
+    return await _handle_extratos_webhook(
+        file=file,
+        background_tasks=background_tasks,
+        source="extratos",
+        test_mode=False,
+    )
+
+@app.post("/extratos/webhook/monitor/test")
+async def extratos_webhook_monitor_test(
+    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos (Monitor Teste)")],
+    background_tasks: BackgroundTasks,
+):
+    """Webhook específico da view Monitor Teste (extratos baixados)."""
+    return await _handle_extratos_webhook(
+        file=file,
+        background_tasks=background_tasks,
+        source="monitor-test",
+        test_mode=True,
+    )
 
 
 @app.get("/job/{job_id}")
@@ -1060,9 +1187,11 @@ async def get_extratos_job_status(job_id: str):
     return _extratos_jobs[job_id]
 
 @app.get("/extratos/jobs")
-async def list_extratos_jobs():
+async def list_extratos_jobs(source: str | None = None):
     """Lista jobs recentes de extratos baixados."""
     jobs_list = list(_extratos_jobs.values())
+    if source:
+        jobs_list = [job for job in jobs_list if job.get("source") == source]
     jobs_list.sort(key=lambda x: x["created_at"], reverse=True)
     return {
         "total": len(jobs_list),
@@ -1077,9 +1206,11 @@ async def get_extratos_test_job_status(job_id: str):
     return _extratos_test_jobs[job_id]
 
 @app.get("/extratos/test/jobs")
-async def list_extratos_test_jobs():
+async def list_extratos_test_jobs(source: str | None = None):
     """Lista jobs recentes de extratos baixados (teste)."""
     jobs_list = list(_extratos_test_jobs.values())
+    if source:
+        jobs_list = [job for job in jobs_list if job.get("source") == source]
     jobs_list.sort(key=lambda x: x["created_at"], reverse=True)
     return {
         "total": len(jobs_list),
@@ -2643,7 +2774,7 @@ async def test_monitor_page():
     from pathlib import Path
     
     html_path = Path(__file__).parent / "templates" / "test_monitor.html"
-    return HTMLResponse(content=_render_template_with_navbar(html_path, active_main="test", show_main=True, show_extratos=False))
+    return HTMLResponse(content=_render_template_with_navbar(html_path, active_main="test", show_main=True, show_extratos=True))
 
 @app.post("/test/upload")
 async def test_upload_file(
@@ -2712,6 +2843,17 @@ async def test_upload_file(
         "message": "Arquivo recebido. Processamento iniciado em background.",
         "check_status_url": f"/test/job/{job_id}"
     }
+
+@app.post("/make/webhook/test")
+async def make_webhook_test(
+    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP para teste (MAKE Test)")],
+    background_tasks: BackgroundTasks,
+):
+    """
+    Webhook específico do Módulo MAKE para a view Test.
+    Mesmo fluxo do /test/upload, mas com rota dedicada.
+    """
+    return await test_upload_file(file=file, background_tasks=background_tasks)
 
 
 # Funções antigas de teste background removidas - Agora usa o fluxo unificado
@@ -2948,6 +3090,13 @@ class UpdateBatchRequest(BaseModel):
     ids: list[int]
     updates: dict
 
+class MakeReversaoWebhook(BaseModel):
+    ids: list[int]
+    deletar_arquivos: bool = True
+class ExtratosReversaoWebhook(BaseModel):
+    ids: list[int]
+    deletar_arquivos: bool = True
+
 @app.patch("/logs/update-batch")
 async def update_batch_logs(payload: UpdateBatchRequest):
     """
@@ -2986,7 +3135,7 @@ async def reversao_page():
     from pathlib import Path
     
     html_path = Path(__file__).parent / "templates" / "reversao.html"
-    return HTMLResponse(content=_render_template_with_navbar(html_path, active_main="reversao", show_main=True, show_extratos=False))
+    return HTMLResponse(content=_render_template_with_navbar(html_path, active_main="reversao", show_main=True, show_extratos=True))
 
 
 
@@ -3096,6 +3245,7 @@ async def stats_extratos_historico_reversoes():
     except Exception as e:
         logger.error(f"Erro ao obter estatisticas de historico extratos baixados: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
 
 @app.get("/reversao/listar")
 async def listar_para_reversao(
@@ -3341,6 +3491,17 @@ async def reverter_extrato_baixado_lote(ids: List[int], deletar_arquivos: bool =
         logger.error(f"Erro ao reverter extratos baixados em lote: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
+@app.post("/extratos/webhook/reversao")
+async def extratos_webhook_reversao(payload: ExtratosReversaoWebhook):
+    """
+    Webhook específico da view Reversão de Extratos.
+    Mesmo fluxo do /extratos/reversao/lote, mas com rota dedicada.
+    """
+    return await reverter_extrato_baixado_lote(
+        ids=payload.ids,
+        deletar_arquivos=payload.deletar_arquivos,
+    )
+
 @app.post("/extratos/reversao/ultimos/{quantidade}")
 async def reverter_extratos_ultimos(quantidade: int, deletar_arquivos: bool = True):
     """Reverte os ultimos N extratos baixados."""
@@ -3396,6 +3557,14 @@ async def reverter_lote(ids: List[int], deletar_arquivos: bool = True):
     except Exception as e:
         logger.error(f"Erro ao reverter lote: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/make/webhook/reversao")
+async def make_webhook_reversao(payload: MakeReversaoWebhook):
+    """
+    Webhook específico do Módulo MAKE para a view Reversão.
+    Mesmo fluxo do /reversao/lote, mas com rota dedicada.
+    """
+    return await reverter_lote(ids=payload.ids, deletar_arquivos=payload.deletar_arquivos)
 
 
 @app.post("/reversao/ultimos/{quantidade}")
