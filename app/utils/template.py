@@ -38,7 +38,7 @@ def render_tech_navbar(
         <div class="navbar-nav">
             <div class="nav-section nav-main"{main_style}>
                 <div class="nav-section-title">Módulo MAKE</div>
-                <div class="nav-item{active_class(active_main, 'monitor')}">
+                <div class="nav-item nav-item-monitor{active_class(active_main, 'monitor')}">
                     <a href="/monitor" class="nav-link">
                         <span class="nav-icon">&#128250;</span>
                         <span class="nav-text">Monitor</span>
@@ -46,14 +46,14 @@ def render_tech_navbar(
                     </a>
                     <span class="nav-tooltip">Monitor</span>
                 </div>
-                <div class="nav-item{active_class(active_main, 'test')}">
+                <div class="nav-item nav-item-test{active_class(active_main, 'test')}">
                     <a href="/test" class="nav-link">
                         <span class="nav-icon">&#129514;</span>
                         <span class="nav-text">Test Monitor</span>
                     </a>
                     <span class="nav-tooltip">Test Monitor</span>
                 </div>
-                <div class="nav-item{active_class(active_main, 'reversao')}">
+                <div class="nav-item nav-item-reversao{active_class(active_main, 'reversao')}">
                     <a href="/reversao" class="nav-link">
                         <span class="nav-icon">&#128260;</span>
                         <span class="nav-text">Reversao</span>
@@ -64,28 +64,28 @@ def render_tech_navbar(
 
             <div class="nav-section"{extratos_style}>
                 <div class="nav-section-title">Módulo Extratos Baixados</div>
-                <div class="nav-item{active_class(active_extratos, 'extratos')}">
+                <div class="nav-item nav-item-extratos{active_class(active_extratos, 'extratos')}">
                     <a href="/extratos" class="nav-link">
                         <span class="nav-icon">&#128196;</span>
                         <span class="nav-text">Extratos</span>
                     </a>
                     <span class="nav-tooltip">Extratos</span>
                 </div>
-                <div class="nav-item{active_class(active_extratos, 'simulacao')}">
+                <div class="nav-item nav-item-simulacao{active_class(active_extratos, 'simulacao')}">
                     <a href="/extratos/simular" class="nav-link">
                         <span class="nav-icon">&#128269;</span>
                         <span class="nav-text">Simulacao</span>
                     </a>
                     <span class="nav-tooltip">Simulacao</span>
                 </div>
-                <div class="nav-item{active_class(active_extratos, 'reversao-extratos')}">
+                <div class="nav-item nav-item-reversao-extratos{active_class(active_extratos, 'reversao-extratos')}">
                     <a href="/extratos/reversao" class="nav-link">
                         <span class="nav-icon">&#128260;</span>
                         <span class="nav-text">Reversao Extratos</span>
                     </a>
                     <span class="nav-tooltip">Reversao Extratos</span>
                 </div>
-                <div class="nav-item{active_class(active_extratos, 'teste')}"{extratos_test_style}>
+                <div class="nav-item nav-item-teste-extratos{active_class(active_extratos, 'teste')}"{extratos_test_style}>
                     <a href="/extratos/teste" class="nav-link">
                         <span class="nav-icon">&#129514;</span>
                         <span class="nav-text">Teste Extratos</span>

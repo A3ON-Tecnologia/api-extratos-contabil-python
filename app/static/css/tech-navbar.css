@@ -159,6 +159,88 @@
     background: rgba(99, 102, 241, 0.15);
 }
 
+/* Remover detalhes em volta dos ícones na navbar retraída */
+.tech-navbar.collapsed .nav-item,
+.tech-navbar.collapsed .nav-item:hover,
+.tech-navbar.collapsed .nav-item.active {
+    background: transparent !important;
+    margin: 0.5rem auto !important;
+    overflow: visible !important;
+}
+
+.tech-navbar.collapsed .nav-item::before {
+    display: none !important;
+}
+
+/* Centralizar ícones na navbar retraída */
+.tech-navbar.collapsed .nav-link {
+    justify-content: center;
+    padding-left: 0.75rem;
+    padding-right: 0.75rem;
+}
+
+.tech-navbar.collapsed .nav-icon {
+    margin: 0 auto;
+}
+
+/* Efeito de brilho no hover dos ícones com cores específicas */
+.nav-item-monitor:hover .nav-icon {
+    filter: drop-shadow(0 0 10px #06b6d4);
+}
+
+.nav-item-test:hover .nav-icon {
+    filter: drop-shadow(0 0 10px #10b981);
+}
+
+.nav-item-reversao:hover .nav-icon {
+    filter: drop-shadow(0 0 10px #f97316);
+}
+
+.nav-item-extratos:hover .nav-icon {
+    filter: drop-shadow(0 0 10px #6366f1);
+}
+
+.nav-item-simulacao:hover .nav-icon {
+    filter: drop-shadow(0 0 10px #f43f5e);
+}
+
+.nav-item-reversao-extratos:hover .nav-icon {
+    filter: drop-shadow(0 0 10px #f97316);
+}
+
+.nav-item-teste-extratos:hover .nav-icon {
+    filter: drop-shadow(0 0 10px #10b981);
+}
+
+.tech-navbar.collapsed .nav-item-monitor:hover .nav-icon {
+    filter: drop-shadow(0 0 12px #06b6d4);
+}
+
+.tech-navbar.collapsed .nav-item-test:hover .nav-icon {
+    filter: drop-shadow(0 0 12px #10b981);
+}
+
+.tech-navbar.collapsed .nav-item-reversao:hover .nav-icon {
+    filter: drop-shadow(0 0 12px #f97316);
+}
+
+.tech-navbar.collapsed .nav-item-extratos:hover .nav-icon {
+    filter: drop-shadow(0 0 12px #6366f1);
+}
+
+.tech-navbar.collapsed .nav-item-simulacao:hover .nav-icon {
+    filter: drop-shadow(0 0 12px #f43f5e);
+}
+
+.tech-navbar.collapsed .nav-item-reversao-extratos:hover .nav-icon {
+    filter: drop-shadow(0 0 12px #f97316);
+}
+
+.tech-navbar.collapsed .nav-item-teste-extratos:hover .nav-icon {
+    filter: drop-shadow(0 0 12px #10b981);
+}
+
+
 .nav-link {
     display: flex;
     align-items: center;
@@ -170,6 +252,7 @@
     font-weight: 500;
     transition: color 0.2s ease;
     white-space: nowrap;
+    position: relative;
 }
 
 .nav-item:hover .nav-link,
@@ -185,6 +268,9 @@
     justify-content: center;
     font-size: 1.25rem;
     flex-shrink: 0;
+    position: absolute;
+    left: 50%;
+    transform: translateX(-50%);
 }
 
 .nav-text {
@@ -194,6 +280,16 @@
 
 .tech-navbar.expanded .nav-text {
     opacity: 1;
+}
+
+.tech-navbar.expanded .nav-link {
+    justify-content: flex-start;
+    padding-left: 1rem;
+}
+
+.tech-navbar.expanded .nav-icon {
+    position: static;
+    transform: none;
 }
 
 /* Status Indicator */
