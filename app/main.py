@@ -1400,8 +1400,14 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
             # Passa o filename para ajudar na detecção do tipo
             text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
         except ValueError as e:
-            # Se falhar extração, tenta salvar como imagem ou corrompido? Não, falha mesmo.
-            return await create_failure_result(filename, file_hash, f"Erro ao extrair conteúdo: {e}")
+            # Se falhar extração, salva em NAO_IDENTIFICADOS para análise posterior
+            return await create_failure_result(
+                filename,
+                file_hash,
+                f"Erro ao extrair conteúdo: {e}",
+                pdf_data=pdf_data,
+                test_mode=test_mode,
+            )
         
         # Check Cancelamento
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
@@ -1445,37 +1451,7 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
             progress=40
         ))
 
-        # --- FALLBACK VISUAL: Se não achou banco, tenta olhar o logo ---
-        if not extraction.banco and pdf_service.is_valid_pdf(pdf_data):
-            try:
-                await event_manager.emit(ProcessingEvent(
-                    event_type=EventType.LLM_ANALYZING,
-                    filename=filename,
-                    message="Banco não identificado no texto. Analisando logos (Visão IA)...",
-                    progress=45
-                ))
-                
-                # Extrai imagens da primeira página
-                images = await loop.run_in_executor(_executor, pdf_service.extract_first_page_images, pdf_data)
-                
-                if images:
-                    # Pergunta pra LLM via visão
-                    banco_visual = await loop.run_in_executor(_executor, llm_service.identify_bank_from_images, images)
-                    
-                    if banco_visual:
-                        extraction.banco = banco_visual
-                        logger.info(f"Banco identificado visualmente: {banco_visual}")
-                        
-                        await event_manager.emit(ProcessingEvent(
-                            event_type=EventType.LLM_COMPLETED,
-                            filename=filename,
-                            message=f"Banco identificado visualmente: {banco_visual}",
-                            details={"banco": banco_visual},
-                            progress=50
-                        ))
-            except Exception as e:
-                logger.warning(f"Erro no fallback visual: {e}")
-        # ----------------------------------------------------------------
+        # Fallbacks visuais e por planilha de clientes são tratados dentro do LLMService
         
         # 3. Faz matching do cliente
         await event_manager.emit(ProcessingEvent(
@@ -1697,25 +1673,58 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
 
     except Exception as e:
         logger.exception(f"Erro inesperado ao processar {filename}")
-        return await create_failure_result(filename, file_hash, str(e))
+        return await create_failure_result(
+            filename,
+            file_hash,
+            str(e),
+            pdf_data=pdf_data,
+            test_mode=test_mode,
+        )
 
 
-async def create_failure_result(filename: str, file_hash: str, error: str) -> ProcessingResult:
+async def create_failure_result(
+    filename: str,
+    file_hash: str,
+    error: str,
+    pdf_data: bytes | None = None,
+    test_mode: bool = False,
+) -> ProcessingResult:
     """Cria um resultado de falha e registra no log."""
-    event_manager = get_event_manager()
-    
+    event_manager = get_test_event_manager() if test_mode else get_event_manager()
+
+    saved_path = ""
+    if pdf_data:
+        try:
+            storage_service = get_storage_service()
+            target_path = storage_service.settings.unidentified_path
+            if not target_path.exists():
+                target_path.mkdir(parents=True, exist_ok=True)
+            filename_final = storage_service._ensure_unique_filename(
+                filename,
+                pdf_data,
+                target_path,
+            )
+            full_path = target_path / filename_final
+            full_path.write_bytes(pdf_data)
+            saved_path = str(full_path)
+            logger.info(f"Arquivo com erro salvo em NAO_IDENTIFICADOS: {saved_path}")
+        except Exception as e:
+            logger.warning(f"Falha ao salvar arquivo com erro em NAO_IDENTIFICADOS: {e}")
+
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.PROCESSING_ERROR,
         filename=filename,
-        message=error
+        message=error,
+        details={"path": saved_path} if saved_path else None,
     ))
-    
+
     event_manager.update_stats(falha=True)
     event_manager.end_processing()
     await event_manager.emit_stats()
-    
+
     return ProcessingResult(
         nome_arquivo_original=filename,
+        nome_arquivo_final=saved_path,
         status=ProcessingStatus.FALHA,
         hash_arquivo=file_hash,
         erro=error,
@@ -1930,6 +1939,7 @@ async def process_extratos_pdf_async(
                 filename,
                 file_hash,
                 f"Erro ao extrair conteudo: {e}",
+                pdf_data=pdf_data,
                 test_mode=test_mode,
             )
 
@@ -2178,22 +2188,49 @@ async def process_extratos_pdf_async(
         )
     except Exception as e:
         logger.exception(f"Erro inesperado ao processar extratos baixados: {filename}")
-        return await create_extratos_failure_result(filename, file_hash, str(e), test_mode=test_mode)
+        return await create_extratos_failure_result(
+            filename,
+            file_hash,
+            str(e),
+            pdf_data=pdf_data,
+            test_mode=test_mode,
+        )
 
 
 async def create_extratos_failure_result(
     filename: str,
     file_hash: str,
     error: str,
+    pdf_data: bytes | None = None,
     test_mode: bool = False,
 ) -> ProcessingResult:
     """Cria um resultado de falha para extratos baixados."""
     event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
 
+    saved_path = ""
+    if pdf_data:
+        try:
+            storage_service = get_storage_service()
+            target_path = storage_service.settings.unidentified_path
+            if not target_path.exists():
+                target_path.mkdir(parents=True, exist_ok=True)
+            filename_final = storage_service._ensure_unique_filename(
+                filename,
+                pdf_data,
+                target_path,
+            )
+            full_path = target_path / filename_final
+            full_path.write_bytes(pdf_data)
+            saved_path = str(full_path)
+            logger.info(f"Arquivo com erro salvo em NAO_IDENTIFICADOS: {saved_path}")
+        except Exception as e:
+            logger.warning(f"Falha ao salvar arquivo com erro em NAO_IDENTIFICADOS: {e}")
+
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.PROCESSING_ERROR,
         filename=filename,
-        message=error
+        message=error,
+        details={"path": saved_path} if saved_path else None,
     ))
 
     event_manager.update_stats(falha=True)
@@ -2202,6 +2239,7 @@ async def create_extratos_failure_result(
 
     return ProcessingResult(
         nome_arquivo_original=filename,
+        nome_arquivo_final=saved_path,
         status=ProcessingStatus.FALHA,
         hash_arquivo=file_hash,
         erro=error,

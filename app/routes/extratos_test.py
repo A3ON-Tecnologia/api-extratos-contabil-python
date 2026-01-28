@@ -15,9 +15,11 @@ from fastapi import APIRouter, HTTPException, UploadFile, File, BackgroundTasks
 from fastapi.responses import JSONResponse
 
 from app.config import get_settings
-from app.services.extratos_service import ExtratosService
 from app.services.llm_service import LLMService
 from app.services.pdf_service import PDFService
+from app.services.matching_service import MatchingService
+from app.services.storage_service import StorageService
+from app.services.client_service import ClientService
 from app.services.db_extratos_baixados_log_teste_service import (
     get_extratos_baixados_log_teste_service,
 )
@@ -291,45 +293,48 @@ async def _process_test_extrato(content: bytes, filename: str, file_hash: str) -
     # 2. Analisa com LLM
     logger.info(f"[TESTE] Analisando com LLM...")
     llm_service = LLMService()
-    extraction = llm_service.extract_info_with_fallback(text)
+    extraction = llm_service.extract_info_with_fallback(text, content)
 
-    # 3. Busca na planilha RELAÇÃO EXTRATOS
-    logger.info(f"[TESTE] Buscando na planilha RELAÇÃO EXTRATOS...")
-    extratos_service = ExtratosService()
+    # 3. Matching pela mesma lógica do sistema
+    logger.info("[TESTE] Fazendo matching na planilha RELAÇÃO CLIENTES...")
+    matching_service = MatchingService(ClientService())
+    match_result = matching_service.match(extraction)
 
-    cliente_info = extratos_service.find_cliente_by_info(
-        cnpj=extraction.cnpj,
-        nome=extraction.cliente_sugerido,
-        banco=extraction.banco,
-        conta=extraction.conta,
-        agencia=extraction.agencia
-    )
+    # 4. Determina caminho simulado (mesma lógica do modo teste)
+    storage_service = StorageService()
+    ano, mes = storage_service._get_previous_month()
 
-    # 4. Determina caminho simulado
-    if cliente_info:
-        # Cliente encontrado - simula onde salvaria
-        pasta_cliente = cliente_info.get('pasta', 'DESCONHECIDA')
-        base_path = settings.base_path
-
-        # Simula estrutura: BASE_PATH / PASTA_CLIENTE / ANO / MES
-        from datetime import datetime
-        hoje = datetime.now()
-        ano = hoje.year
-        mes = hoje.month
-
-        # Caminho simulado
-        caminho_simulado = str(base_path / pasta_cliente / str(ano) / f"{mes:02d}" / f"{extraction.tipo_documento}_{extraction.banco}.pdf")
-
-        status = "SUCESSO"
-        cliente_nome = cliente_info.get('nome')
-        metodo = cliente_info.get('metodo', 'DESCONHECIDO')
-
+    if match_result.identificado:
+        client_base_path = storage_service._resolve_client_path(match_result.cliente)
+        if client_base_path:
+            conta = storage_service._select_account(
+                extraction.banco,
+                extraction.conta,
+                match_result.cliente.conta,
+            )
+            target_path = storage_service._build_path_structure(
+                client_base_path,
+                ano,
+                mes,
+                extraction.banco,
+                conta,
+            )
+            file_name = storage_service._build_filename(
+                extraction.banco,
+                extraction.tipo_documento,
+                content,
+                target_path,
+                filename,
+            )
+            caminho_simulado = str(target_path / file_name)
+        else:
+            caminho_simulado = str(storage_service.settings.unidentified_path / filename)
     else:
-        # Cliente não encontrado
-        caminho_simulado = str(settings.unidentified_path / filename)
-        status = "NAO_IDENTIFICADO"
-        cliente_nome = None
-        metodo = "NENHUM"
+        caminho_simulado = str(storage_service.settings.unidentified_path / filename)
+
+    status = "SUCESSO" if match_result.identificado else "NAO_IDENTIFICADO"
+    cliente_nome = match_result.cliente.nome if match_result.identificado else None
+    metodo = match_result.metodo.value if match_result.identificado else "NAO_IDENTIFICADO"
 
     # 5. Salva no banco de TESTES
     db_teste_service = get_extratos_baixados_log_teste_service()
@@ -339,7 +344,7 @@ async def _process_test_extrato(content: bytes, filename: str, file_hash: str) -
         arquivo_salvo=caminho_simulado,
         hash_arquivo=file_hash,
         cliente_nome=cliente_nome,
-        cliente_cod=cliente_info.get('cod') if cliente_info else None,
+        cliente_cod=match_result.cliente.cod if match_result.identificado else None,
         cliente_cnpj=extraction.cnpj,
         banco=extraction.banco,
         tipo_documento=extraction.tipo_documento,
@@ -349,7 +354,7 @@ async def _process_test_extrato(content: bytes, filename: str, file_hash: str) -
         mes=mes,
         metodo_identificacao=metodo,
         confianca_ia=extraction.confianca,
-        erro=None if cliente_info else "Cliente não encontrado na planilha"
+        erro=None if match_result.identificado else "Cliente não encontrado na planilha"
     )
 
     logger.info(f"[TESTE] Processamento concluído: {filename} -> {status}")

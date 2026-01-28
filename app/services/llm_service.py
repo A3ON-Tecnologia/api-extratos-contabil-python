@@ -6,12 +6,16 @@ Utiliza OpenAI para extrair informações estruturadas de documentos.
 
 import json
 import logging
+import re
+import unicodedata
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
 
 from app.config import get_settings
+from app.services.client_service import ClientService
+from app.utils.text import extract_numbers
 from app.schemas.llm_response import LLMExtractionResult
 
 logger = logging.getLogger(__name__)
@@ -183,22 +187,60 @@ class LLMService:
         try:
             result = self.extract_info(text)
 
-            # Se o banco não foi identificado e temos os dados do PDF, tenta visão
+            # Heurística textual: confirma banco por pistas fortes no texto
+            banco_hint = self._infer_bank_from_text_hints(text)
+            if banco_hint:
+                if not result.banco or result.banco == "null" or result.banco != banco_hint:
+                    logger.info(f"Banco ajustado por pista textual: {banco_hint}")
+                result.banco = banco_hint
+                if result.confianca < 0.85:
+                    result.confianca = 0.85
+
+            # Heurística textual: RENDE FACIL indica extrato de investimento
+            if self._has_rende_facil_hint(text):
+                result.tipo_documento = "EXTRATO APLICACAO"
+                if result.confianca < 0.8:
+                    result.confianca = 0.8
+
+            # Se o banco não foi identificado, tenta OCR (visão) no PDF
             if (not result.banco or result.banco == "null") and pdf_data:
-                logger.info("Banco não identificado no texto, tentando visão...")
+                logger.info("Banco não identificado no texto, tentando OCR...")
                 try:
                     from app.services.vision_service import VisionService
                     vision_service = VisionService()
-                    banco_visual = vision_service.identify_from_first_page(pdf_data)
-
+                    banco_visual = vision_service.identify_bank_from_ocr(pdf_data)
                     if banco_visual:
-                        logger.info(f"Banco identificado por visão: {banco_visual}")
+                        logger.info(f"Banco identificado por OCR: {banco_visual}")
                         result.banco = banco_visual
-                        # Aumenta a confiança se a visão conseguiu identificar
                         if result.confianca < 0.9:
                             result.confianca = 0.9
                 except Exception as e:
-                    logger.warning(f"Erro ao tentar identificar banco por visão: {e}")
+                    logger.warning(f"Erro ao tentar identificar banco por OCR: {e}")
+
+            # Se ainda não identificou banco, tenta visão por logo/imagens
+            if (not result.banco or result.banco == "null") and pdf_data:
+                try:
+                    from app.services.pdf_service import PDFService
+                    pdf_service = PDFService()
+                    images = pdf_service.extract_first_page_images(pdf_data)
+                    if images:
+                        banco_visual = self.identify_bank_from_images(images)
+                        if banco_visual:
+                            logger.info(f"Banco identificado por visao (logos): {banco_visual}")
+                            result.banco = banco_visual
+                            if result.confianca < 0.9:
+                                result.confianca = 0.9
+                except Exception as e:
+                    logger.warning(f"Erro ao tentar identificar banco por logos: {e}")
+
+            # Se ainda não identificou banco, tenta inferir pela planilha de clientes (agência/conta)
+            if (not result.banco or result.banco == "null") and result.agencia and result.conta:
+                banco_planilha = self._infer_bank_from_clients(result.agencia, result.conta)
+                if banco_planilha:
+                    logger.info(f"Banco inferido pela planilha de clientes: {banco_planilha}")
+                    result.banco = banco_planilha
+                    if result.confianca < 0.8:
+                        result.confianca = 0.8
 
             return result
 
@@ -214,6 +256,74 @@ class LLMService:
                 tipo_documento="OUTROS",
                 confianca=0.0,
             )
+
+    def _infer_bank_from_clients(self, agencia: str, conta: str) -> str | None:
+        """Infere o banco usando a planilha de clientes (agência + conta)."""
+        def _normalize_number(value: str) -> str:
+            numbers = extract_numbers(value)
+            # Remove zeros à esquerda para evitar mismatch por formatação
+            return numbers.lstrip("0") or "0"
+
+        agencia_numbers = _normalize_number(agencia)
+        conta_numbers = _normalize_number(conta)
+        if not agencia_numbers or not conta_numbers:
+            return None
+
+        try:
+            client_service = ClientService()
+            clients = client_service.load_clients()
+        except Exception as e:
+            logger.warning(f"Erro ao carregar clientes para inferir banco: {e}")
+            return None
+
+        bancos: set[str] = set()
+        for client in clients:
+            if not client.agencia or not client.conta or not client.banco:
+                continue
+            if _normalize_number(client.agencia) != agencia_numbers:
+                continue
+            if _normalize_number(client.conta) != conta_numbers:
+                continue
+            bancos.add(client.banco.strip().upper())
+
+        if len(bancos) == 1:
+            return next(iter(bancos))
+        if len(bancos) > 1:
+            logger.warning(
+                "Banco não inferido: múltiplos bancos para agência/conta %s/%s: %s",
+                agencia,
+                conta,
+                ", ".join(sorted(bancos)),
+            )
+        return None
+
+    def _normalize_text_for_hint(self, text: str) -> str:
+        """Normaliza texto para checagem de pistas."""
+        if not text:
+            return ""
+        normalized = unicodedata.normalize("NFKD", text)
+        normalized = normalized.encode("ascii", "ignore").decode("ascii")
+        normalized = re.sub(r"[^A-Z0-9]+", " ", normalized.upper())
+        return " ".join(normalized.split())
+
+    def _infer_bank_from_text_hints(self, text: str) -> str | None:
+        """Infere banco com base em pistas fortes no texto."""
+        normalized = self._normalize_text_for_hint(text)
+
+        # Banco do Brasil - pistas fortes
+        if "OUVIDORIA BB 0800 729 5678" in normalized:
+            return "BANCO DO BRASIL"
+        if "SAC 0800 729 0722" in normalized:
+            return "BANCO DO BRASIL"
+        if "BANCO DO BRASIL" in normalized or "BANCO DO BRASIL SA" in normalized:
+            return "BANCO DO BRASIL"
+
+        return None
+
+    def _has_rende_facil_hint(self, text: str) -> bool:
+        """Detecta indicio de investimento pelo termo RENDE FACIL."""
+        normalized = self._normalize_text_for_hint(text)
+        return "RENDE FACIL" in normalized
 
 
     def identify_bank_from_images(self, images_base64: list[str]) -> str | None:

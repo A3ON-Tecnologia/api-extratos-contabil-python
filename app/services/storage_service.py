@@ -118,10 +118,8 @@ class StorageService:
             client_base_path = self._resolve_client_path(match_result.cliente)
 
             if client_base_path:
-                # Usa a conta extraída do extrato (se disponível) ou a conta da planilha
-                conta = self._select_account(banco, conta_extrato, match_result.cliente.conta)
-                banco_folder = banco or match_result.cliente.banco
-                target_path = self._build_path_structure(client_base_path, ano, mes, banco_folder, conta)
+                # Pasta padrão: cliente/Departamento Contabil/ANO/MES
+                target_path = self._build_path_structure(client_base_path, ano, mes)
 
                 # Garante que a pasta do mes existe
                 month_path = self._build_path_structure(client_base_path, ano, mes)
@@ -129,9 +127,9 @@ class StorageService:
                     logger.info(f"Criando pasta do mes: {month_path}")
                     month_path.mkdir(parents=True, exist_ok=True)
 
-                # Cria a subpasta da conta se nao existir
-                if (banco_folder or conta) and not target_path.exists():
-                    logger.info(f"Criando subpasta do banco/conta: {target_path}")
+                # Garante que a pasta do mes existe
+                if not target_path.exists():
+                    logger.info(f"Criando pasta do mes: {target_path}")
                     target_path.mkdir(parents=True, exist_ok=True)
 
                 filename = self._build_filename(
@@ -205,10 +203,8 @@ class StorageService:
         """
         Constrói a estrutura de pastas dentro da pasta do cliente.
 
-        Estrutura: cliente/Departamento Contábil/ANO/MÊS/CONTA
-        Ex: cliente/Departamento Contábil/2025/12/45.841-4
-
-        Se conta for None, retorna apenas até o mês.
+        Estrutura padrão: cliente/Departamento Contabil/ANO/MES
+        NUNCA cria subpastas por banco ou conta.
 
         Aceita tanto "Departamento Contábil" quanto "Departamento Contabil" (sem acento)
         """
@@ -228,14 +224,7 @@ class StorageService:
                 # Retorna o padrão com acento (mesmo que não exista, será tratado depois)
                 base_path = client_base_path / "Departamento Contábil" / str(ano) / mes_str
 
-        if banco:
-            base_path = base_path / banco
-
-        # Adiciona a subpasta da conta se fornecida
-        if conta:
-            return base_path / conta
-        else:
-            return base_path
+        return base_path
     
     def _build_unidentified_path(self, ano: int, mes: int) -> Path:
         """

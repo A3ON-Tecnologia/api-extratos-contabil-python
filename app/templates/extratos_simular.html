@@ -178,6 +178,27 @@
             color: var(--text-primary);
         }
 
+        .file-list-controls {
+            display: flex;
+            gap: 0.75rem;
+            align-items: center;
+            flex-wrap: wrap;
+        }
+
+        .search-input {
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            padding: 0.45rem 0.75rem;
+            color: var(--text-primary);
+            font-size: 0.85rem;
+            min-width: 220px;
+        }
+
+        .search-input::placeholder {
+            color: var(--text-secondary);
+        }
+
         .file-item {
             padding: 1rem 1.5rem;
             border-bottom: 1px solid var(--border-color);
@@ -338,6 +359,27 @@
             margin-bottom: 1rem;
             opacity: 0.5;
         }
+
+        .pagination {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 0.75rem 1.5rem 1rem;
+            border-top: 1px solid var(--border-color);
+            background: var(--bg-secondary);
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+
+        .pagination-info {
+            color: var(--text-secondary);
+            font-size: 0.85rem;
+        }
+
+        .pagination-controls {
+            display: flex;
+            gap: 0.5rem;
+        }
     </style>
 </head>
 
@@ -399,12 +441,22 @@
             <div class="file-list">
                 <div class="file-list-header">
                     <h3>📁 Arquivos Disponíveis</h3>
-                    <span id="fileCount">Carregando...</span>
+                    <div class="file-list-controls">
+                        <input class="search-input" id="fileSearch" type="search" placeholder="Buscar arquivo..." />
+                        <span id="fileCount">Carregando...</span>
+                    </div>
                 </div>
                 <div id="fileListContainer">
                     <div class="loading">
                         <div class="spinner"></div>
                         <p>Carregando arquivos da pasta de extratos...</p>
+                    </div>
+                </div>
+                <div class="pagination" id="paginationContainer" style="display: none;">
+                    <div class="pagination-info" id="paginationInfo">Mostrando 0 de 0</div>
+                    <div class="pagination-controls">
+                        <button class="btn" id="btnPrevPage">< Anterior</button>
+                        <button class="btn" id="btnNextPage">Proximo ></button>
                     </div>
                 </div>
             </div>
@@ -421,14 +473,17 @@
     <script>
         let arquivos = [];
         let resultadosSimulacao = [];
+        let paginaAtual = 1;
+        const itensPorPagina = 10;
+        let termoBusca = '';
 
         async function carregarArquivos() {
             try {
                 const response = await fetch('/extratos/mapear');
                 const data = await response.json();
-
                 arquivos = data.arquivos;
-                document.getElementById('fileCount').textContent = `${data.total} arquivo(s)`;
+                paginaAtual = 1;
+                atualizarContadorArquivos();
                 document.getElementById('btnSimularTodos').disabled = data.total === 0;
 
                 renderizarListaArquivos();
@@ -442,23 +497,53 @@
             }
         }
 
+        function atualizarContadorArquivos() {
+            const total = arquivos.length;
+            const filtrados = obterArquivosFiltrados().length;
+            const texto = termoBusca ? `${filtrados} de ${total} arquivo(s)` : `${total} arquivo(s)`;
+            document.getElementById('fileCount').textContent = texto;
+        }
+
+        function obterArquivosFiltrados() {
+            if (!termoBusca) {
+                return arquivos;
+            }
+            const termo = termoBusca.toLowerCase();
+            return arquivos.filter(arquivo => arquivo.nome.toLowerCase().includes(termo));
+        }
+
+        function obterArquivosPaginados(lista) {
+            const inicio = (paginaAtual - 1) * itensPorPagina;
+            return lista.slice(inicio, inicio + itensPorPagina);
+        }
         function renderizarListaArquivos() {
             const container = document.getElementById('fileListContainer');
+            const paginationContainer = document.getElementById('paginationContainer');
+            const paginationInfo = document.getElementById('paginationInfo');
 
-            if (arquivos.length === 0) {
+            const filtrados = obterArquivosFiltrados();
+            const totalPaginas = Math.max(1, Math.ceil(filtrados.length / itensPorPagina));
+            if (paginaAtual > totalPaginas) {
+                paginaAtual = totalPaginas;
+            }
+
+            if (filtrados.length === 0) {
                 container.innerHTML = `
                     <div class="empty-state">
                         <svg fill="currentColor" viewBox="0 0 20 20">
                             <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path>
                             <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"></path>
                         </svg>
-                        <p>Nenhum arquivo PDF encontrado na pasta de extratos</p>
+                        <p>${arquivos.length === 0 ? 'Nenhum arquivo PDF encontrado na pasta de extratos' : 'Nenhum arquivo encontrado para o filtro aplicado'}</p>
                     </div>
                 `;
+                paginationContainer.style.display = 'none';
                 return;
             }
 
-            container.innerHTML = arquivos.map(arquivo => `
+            const pagina = obterArquivosPaginados(filtrados);
+
+            container.innerHTML = pagina.map(arquivo => `
                 <div class="file-item">
                     <div class="file-info">
                         <div class="file-name">${arquivo.nome}</div>
@@ -466,11 +551,18 @@
                     </div>
                     <div class="file-actions">
                         <button class="btn primary" onclick="simularArquivo('${arquivo.nome}')">
-                            🔍 Simular
+                            Simular
                         </button>
                     </div>
                 </div>
             `).join('');
+
+            const inicio = (paginaAtual - 1) * itensPorPagina + 1;
+            const fim = Math.min(paginaAtual * itensPorPagina, filtrados.length);
+            paginationInfo.textContent = `Mostrando ${inicio}-${fim} de ${filtrados.length}`;
+            paginationContainer.style.display = totalPaginas > 1 ? 'flex' : 'none';
+            document.getElementById('btnPrevPage').disabled = paginaAtual === 1;
+            document.getElementById('btnNextPage').disabled = paginaAtual === totalPaginas;
         }
 
         async function simularArquivo(filename) {
@@ -627,6 +719,28 @@
 
         // Carrega arquivos ao iniciar a página
         carregarArquivos();
+
+        document.getElementById('fileSearch').addEventListener('input', (event) => {
+            termoBusca = event.target.value.trim();
+            paginaAtual = 1;
+            atualizarContadorArquivos();
+            renderizarListaArquivos();
+        });
+
+        document.getElementById('btnPrevPage').addEventListener('click', () => {
+            if (paginaAtual > 1) {
+                paginaAtual -= 1;
+                renderizarListaArquivos();
+            }
+        });
+
+        document.getElementById('btnNextPage').addEventListener('click', () => {
+            const totalPaginas = Math.max(1, Math.ceil(obterArquivosFiltrados().length / itensPorPagina));
+            if (paginaAtual < totalPaginas) {
+                paginaAtual += 1;
+                renderizarListaArquivos();
+            }
+        });
     </script>
     <script src="/static/js/tech-navbar.js"></script>
 </body>

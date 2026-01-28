@@ -56,6 +56,7 @@ class MatchingService:
                 extraction.cnpj,
                 clients,
                 banco=extraction.banco,
+                agencia=extraction.agencia,
                 conta=extraction.conta,
             )
             if result.identificado:
@@ -80,6 +81,7 @@ class MatchingService:
                 extraction.cliente_sugerido,
                 clients,
                 banco=extraction.banco,
+                agencia=extraction.agencia,
                 conta=extraction.conta,
             )
             if result.identificado:
@@ -229,6 +231,44 @@ class MatchingService:
         
         return cleaned.strip()
 
+    def _strip_generic_suffix(self, name: str) -> str:
+        """
+        Remove sufixos genéricos que causam falso positivo no matching.
+        Ex: 'EMPRESA X MATERIAIS PARA CONSTRUCAO LTDA' -> 'EMPRESA X'
+        """
+        import re
+
+        if not name:
+            return name
+
+        normalized = name.upper().strip()
+
+        # Remove sufixos legais comuns no fim
+        normalized = re.sub(r'\b(LTDA|LTDA\.|ME|EPP|EIRELI|S\/A|SA)\b\s*$', '', normalized).strip()
+
+        # Remove frase genérica "MATERIAIS PARA CONSTRUCAO" no fim
+        normalized = re.sub(r'\bMATERIAIS?\s+PARA\s+CONSTRUCAO\b\s*$', '', normalized).strip()
+
+        return normalized.strip()
+
+    def _requires_conta_agencia_confirmation(self, name: str) -> bool:
+        """
+        Detecta nomes gen??ricos ligados a materiais/constru????o que
+        exigem confirma????o por conta+ag??ncia para evitar falso positivo.
+        """
+        import re
+
+        if not name:
+            return False
+
+        normalized = normalize_text(name)
+        patterns = [
+            r"\bMATERIAIS\b",
+            r"\bMATERIAL\s+DE\s+CONSTRUCAO\b",
+            r"\bCONSTRUCAO\b",
+        ]
+        return any(re.search(pattern, normalized) for pattern in patterns)
+
     def _apply_abbreviations(self, text: str) -> str:
         """Aplica abreviações comuns para melhorar o matching."""
         replacements = {
@@ -255,6 +295,7 @@ class MatchingService:
         nome_sugerido: str,
         clients: list[ClientInfo],
         banco: str | None = None,
+        agencia: str | None = None,
         conta: str | None = None,
     ) -> MatchResult:
         """
@@ -262,10 +303,31 @@ class MatchingService:
         
         Utiliza rapidfuzz com threshold configurável.
         """
+        # Para nomes gen??ricos (materiais/constru????o), exige confirma????o por conta+ag??ncia
+        if self._requires_conta_agencia_confirmation(nome_sugerido):
+            if not agencia or not conta:
+                return MatchResult(
+                    motivo_fallback=(
+                        "Nome gen??rico (materiais/constru????o) sem ag??ncia/conta para confirmar"
+                    )
+                )
+            conta_match = self._match_by_conta(banco, agencia, conta, clients)
+            if conta_match.identificado:
+                return conta_match
+            return MatchResult(
+                motivo_fallback=(
+                    "Nome gen??rico (materiais/constru????o) exige conta+ag??ncia compat??veis"
+                )
+            )
+
         # Limpa o nome sugerido antes de normalizar
         nome_limpo = self._clean_company_name(nome_sugerido)
-        nome_normalized = normalize_text(nome_limpo)
-        nome_abbr = normalize_text(self._apply_abbreviations(nome_limpo))
+        nome_base = self._strip_generic_suffix(nome_limpo)
+        if len(nome_base) < 3:
+            nome_base = nome_limpo
+
+        nome_normalized = normalize_text(nome_base)
+        nome_abbr = normalize_text(self._apply_abbreviations(nome_base))
         
         threshold = self.settings.similarity_threshold
         
@@ -297,7 +359,12 @@ class MatchingService:
                         if extract_numbers(client.conta) != conta_numbers:
                             continue
 
-                client_nome = normalize_text(client.nome)
+                client_nome_raw = client.nome or ""
+                client_base = self._strip_generic_suffix(client_nome_raw)
+                if len(client_base) < 3:
+                    client_base = client_nome_raw
+                client_nome = normalize_text(client_base)
+
                 score_normal = get_max_score(nome_normalized, client_nome)
                 score_abbr = get_max_score(nome_abbr, client_nome)
                 score = max(score_normal, score_abbr)
