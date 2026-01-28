@@ -15,13 +15,19 @@
             --bg-primary: #0a0a0f;
             --bg-secondary: #0d1520;
             --bg-card: #111827;
-            --text-primary: #f1f5f9;
-            --text-secondary: #94a3b8;
-            --border-color: #1e3a5f;
+            --bg-card-hover: #1a2332;
             --accent-primary: #0ea5e9;
+            --accent-secondary: #38bdf8;
+            --accent-monitor: #06b6d4;
             --accent-success: #10b981;
             --accent-warning: #f59e0b;
             --accent-error: #ef4444;
+            --accent-info: #3b82f6;
+            --text-primary: #f1f5f9;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border-color: #1e3a5f;
+            --glow-monitor: rgba(6, 182, 212, 0.3);
         }
 
         * {
@@ -37,11 +43,25 @@
             min-height: 100vh;
         }
 
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            background: radial-gradient(circle at 30% 20%, var(--glow-monitor) 0%, transparent 50%),
+                radial-gradient(circle at 70% 80%, rgba(14, 165, 233, 0.15) 0%, transparent 50%);
+        }
+
         .page-wrapper {
             min-height: 100vh;
         }
 
         .container {
+            position: relative;
+            z-index: 1;
             max-width: 1400px;
             margin: 0 auto;
             padding: 2rem;
@@ -58,6 +78,10 @@
         .header h1 {
             font-size: 2rem;
             font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-monitor), var(--accent-secondary));
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
         .controls {
@@ -196,9 +220,11 @@
             color: var(--text-secondary);
         }
     </style>
+    <link rel="stylesheet" href="/static/css/control-center-theme.css">
 </head>
 
 <body>
+    <div class="bg-animation"></div>
     <!-- Tech Navbar -->
     {{TECH_NAVBAR}}
 

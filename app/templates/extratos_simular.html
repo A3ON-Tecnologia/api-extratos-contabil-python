@@ -13,15 +13,20 @@
     <style>
         :root {
             --bg-primary: #0a0a0f;
-            --bg-secondary: #0d1520;
-            --bg-card: #111827;
+            --bg-secondary: #12121a;
+            --bg-card: #1a1a24;
+            --bg-card-hover: #22222e;
+            --accent-primary: #6366f1;
+            --accent-secondary: #818cf8;
+            --accent-test: #a855f7;
+            --accent-success: #10b981;
+            --accent-warning: #a855f7;
+            --accent-error: #ef4444;
             --text-primary: #f1f5f9;
             --text-secondary: #94a3b8;
-            --border-color: #1e3a5f;
-            --accent-primary: #0ea5e9;
-            --accent-success: #10b981;
-            --accent-warning: #f59e0b;
-            --accent-error: #ef4444;
+            --text-muted: #64748b;
+            --border-color: #2a2a3a;
+            --glow-test: rgba(168, 85, 247, 0.3);
         }
 
         * {
@@ -35,6 +40,23 @@
             background: var(--bg-primary);
             color: var(--text-primary);
             min-height: 100vh;
+        }
+
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            background: radial-gradient(circle at 30% 20%, var(--glow-test) 0%, transparent 50%),
+                radial-gradient(circle at 70% 80%, rgba(99, 102, 241, 0.2) 0%, transparent 50%);
+        }
+
+        .container {
+            position: relative;
+            z-index: 1;
         }
 
         .page-wrapper {
@@ -59,16 +81,21 @@
         .header h1 {
             font-size: 2rem;
             font-weight: 700;
+            background: linear-gradient(135deg, var(--accent-test), var(--accent-secondary));
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
         }
 
         .badge {
-            background: var(--accent-warning);
-            color: #000;
+            background: rgba(168, 85, 247, 0.2);
+            color: var(--accent-test);
             padding: 0.25rem 0.75rem;
             border-radius: 0.5rem;
             font-size: 0.75rem;
             font-weight: 700;
             text-transform: uppercase;
+            border: 1px solid var(--accent-test);
         }
 
         .controls {
@@ -361,9 +388,11 @@
             gap: 0.5rem;
         }
     </style>
+    <link rel="stylesheet" href="/static/css/control-center-theme.css">
 </head>
 
 <body>
+    <div class="bg-animation"></div>
     <!-- Tech Navbar -->
     {{TECH_NAVBAR}}
 

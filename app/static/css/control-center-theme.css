@@ -1,0 +1,93 @@
+@import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap");
+
+:root {
+    --cc-bg-ink: #0b0f14;
+    --cc-bg-panel: #121922;
+    --cc-bg-panel-strong: #171f2a;
+    --cc-grid-line: rgba(52, 73, 94, 0.35);
+    --cc-accent-cyan: #2dd4bf;
+    --cc-accent-amber: #f6b04e;
+    --cc-accent-red: #ff6b6b;
+    --cc-text-main: #e6edf3;
+    --cc-text-muted: #9aa7b4;
+    --cc-text-quiet: #6b7a8c;
+    --cc-stroke: #233142;
+}
+
+body {
+    font-family: "IBM Plex Sans", sans-serif;
+    background: var(--cc-bg-ink);
+    color: var(--cc-text-main);
+}
+
+body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background:
+        radial-gradient(circle at 15% 20%, rgba(45, 212, 191, 0.16), transparent 45%),
+        radial-gradient(circle at 75% 15%, rgba(246, 176, 78, 0.12), transparent 50%),
+        linear-gradient(120deg, rgba(255, 255, 255, 0.02), transparent 40%),
+        repeating-linear-gradient(0deg, transparent 0 48px, var(--cc-grid-line) 48px 49px),
+        repeating-linear-gradient(90deg, transparent 0 48px, var(--cc-grid-line) 48px 49px);
+    pointer-events: none;
+    z-index: 0;
+}
+
+body::after {
+    content: "";
+    position: fixed;
+    inset: 0;
+    background: radial-gradient(circle at 80% 20%, rgba(45, 212, 191, 0.12), transparent 45%);
+    pointer-events: none;
+    z-index: 0;
+}
+
+.page-wrapper,
+main,
+.container {
+    position: relative;
+    z-index: 1;
+}
+
+h1,
+h2,
+h3,
+.panel-title,
+.header h1 {
+    font-family: "Space Grotesk", sans-serif;
+    letter-spacing: 0.02em;
+}
+
+a {
+    color: inherit;
+}
+
+.card,
+.panel,
+.info-card,
+.stat-card,
+.result-section,
+.file-list,
+.module-panel,
+.hero-panel {
+    background: var(--cc-bg-panel);
+    border-color: var(--cc-stroke);
+}
+
+.btn,
+button,
+input,
+select,
+textarea {
+    font-family: "IBM Plex Sans", sans-serif;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    * {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

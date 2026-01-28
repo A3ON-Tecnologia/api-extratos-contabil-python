@@ -23,12 +23,6 @@ def render_tech_navbar(
 
     return f"""
     <nav class="tech-navbar collapsed" id="techNavbar">
-        <div class="circuit-lines">
-            <div class="circuit-dot"></div>
-            <div class="circuit-dot"></div>
-            <div class="circuit-dot"></div>
-        </div>
-
         <div class="navbar-header">
             <span class="navbar-title">Extratos API</span>
         </div>
