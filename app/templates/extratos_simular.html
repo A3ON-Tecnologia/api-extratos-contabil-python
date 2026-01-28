@@ -110,26 +110,6 @@
             cursor: not-allowed;
         }
 
-        .info-card {
-            background: var(--bg-card);
-            border: 1px solid var(--border-color);
-            border-radius: 0.75rem;
-            padding: 1.5rem;
-            margin-bottom: 1.5rem;
-        }
-
-        .info-card h2 {
-            font-size: 1.25rem;
-            margin-bottom: 0.75rem;
-            color: var(--accent-primary);
-        }
-
-        .info-card p {
-            color: var(--text-secondary);
-            font-size: 0.9rem;
-            line-height: 1.6;
-        }
-
         .stats {
             display: grid;
             grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
@@ -402,21 +382,6 @@
                         ▶️ Simular Todos
                     </button>
                 </div>
-            </div>
-
-            <div class="info-card">
-                <h2>ℹ️ Como Funciona</h2>
-                <p>
-                    Esta ferramenta <strong>SIMULA</strong> o processamento dos arquivos PDF da pasta de extratos.
-                    Nenhum arquivo será salvo ou movido. O sistema irá:
-                </p>
-                <ul style="margin-top: 0.75rem; margin-left: 1.5rem; line-height: 1.8;">
-                    <li>Extrair o texto do PDF</li>
-                    <li>Analisar com IA (LLM) para identificar cliente, banco, tipo de documento, etc.</li>
-                    <li>Fazer matching com a planilha de clientes</li>
-                    <li>Calcular o caminho de destino onde o arquivo seria salvo</li>
-                    <li>Mostrar os resultados sem salvar nada</li>
-                </ul>
             </div>
 
             <div class="stats" id="statsContainer" style="display: none;">

@@ -282,6 +282,21 @@ def _render_template_with_navbar(
 
 
 # ============================================================
+# HOME
+# ============================================================
+
+@app.get("/", response_class=HTMLResponse)
+async def home_page():
+    """Pagina inicial do projeto."""
+    template_path = Path(__file__).parent / "templates" / "home.html"
+
+    if not template_path.exists():
+        raise HTTPException(status_code=500, detail="Template da home nao encontrado")
+
+    return HTMLResponse(content=_render_template_with_navbar(template_path, show_main=True, show_extratos=True))
+
+
+# ============================================================
 # DASHBOARD DE MONITORAMENTO
 # ============================================================
 
