@@ -9,7 +9,6 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/tech-navbar.css">
     <style>
         :root {
             --bg-ink: #0b0f14;
@@ -38,6 +37,7 @@
             color: var(--text-main);
             min-height: 100vh;
             overflow-x: hidden;
+            font-size: 0.94rem;
         }
 
         .bg-grid {
@@ -59,9 +59,92 @@
         }
 
         .home-shell {
-            max-width: 1200px;
-            margin: 0 auto;
-            padding: 2.5rem 1.5rem 4rem;
+            width: 100%;
+            max-width: none;
+            margin: 0;
+            padding: 2.2rem 3.2vw 2.2rem;
+        }
+
+        .module-shelf {
+            display: grid;
+            grid-template-columns: repeat(2, minmax(0, 1fr));
+            gap: 1.5rem;
+            margin: 1.6rem 0 1.8rem;
+        }
+
+        @media (max-width: 900px) {
+            .module-shelf {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .module-panel {
+            background: var(--bg-panel);
+            border: 1px solid var(--stroke);
+            border-radius: 18px;
+            padding: 1.5rem;
+            display: grid;
+            gap: 1rem;
+        }
+
+        .module-title {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 0.75rem;
+            letter-spacing: 0.24em;
+            text-transform: uppercase;
+            color: var(--text-quiet);
+        }
+
+        .module-list {
+            display: grid;
+            gap: 0.6rem;
+        }
+
+        .module-link {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 0.75rem;
+            padding: 0.75rem 0.9rem;
+            border-radius: 12px;
+            border: 1px solid transparent;
+            background: var(--bg-panel-strong);
+            color: var(--text-main);
+            text-decoration: none;
+            font-size: 0.85rem;
+            transition: border-color 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+        }
+
+        .module-link span {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.65rem;
+            font-weight: 500;
+        }
+
+        .module-link small {
+            font-size: 0.7rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--text-quiet);
+        }
+
+        .module-link:hover {
+            border-color: rgba(45, 212, 191, 0.5);
+            transform: translateY(-2px);
+            box-shadow: 0 12px 30px rgba(6, 16, 25, 0.4);
+        }
+
+        .module-icon {
+            width: 28px;
+            height: 28px;
+            border-radius: 9px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: rgba(45, 212, 191, 0.12);
+            color: var(--accent-cyan);
+            font-size: 1rem;
         }
 
         .hero {
@@ -69,7 +152,7 @@
             grid-template-columns: minmax(280px, 1.15fr) minmax(260px, 0.85fr);
             gap: 2.5rem;
             align-items: center;
-            margin-bottom: 2.5rem;
+            margin-bottom: 1.8rem;
         }
 
         @media (max-width: 960px) {
@@ -80,7 +163,7 @@
 
         .hero-title {
             font-family: "Space Grotesk", sans-serif;
-            font-size: clamp(2.4rem, 3.2vw, 3.6rem);
+            font-size: clamp(2.1rem, 2.8vw, 3.2rem);
             line-height: 1.05;
             text-transform: uppercase;
             letter-spacing: 0.04em;
@@ -93,7 +176,7 @@
 
         .hero-subtitle {
             margin-top: 1rem;
-            font-size: 1.05rem;
+            font-size: 0.98rem;
             color: var(--text-muted);
             max-width: 38rem;
         }
@@ -144,7 +227,7 @@
             background: var(--bg-panel);
             border: 1px solid var(--stroke);
             border-radius: 18px;
-            padding: 1.75rem;
+            padding: 1.4rem;
             position: relative;
             overflow: hidden;
         }
@@ -176,7 +259,7 @@
         }
 
         .panel-metric span {
-            font-size: 2.8rem;
+            font-size: 2.4rem;
             font-weight: 600;
             color: var(--accent-amber);
         }
@@ -190,7 +273,7 @@
             margin-top: 1.5rem;
             display: grid;
             gap: 0.75rem;
-            font-size: 0.9rem;
+            font-size: 0.85rem;
             color: var(--text-muted);
         }
 
@@ -274,12 +357,12 @@
             background: rgba(18, 25, 34, 0.85);
             border: 1px solid var(--stroke);
             border-radius: 999px;
-            padding: 0.65rem 1.5rem;
+            padding: 0.55rem 1.2rem;
             display: flex;
             flex-wrap: wrap;
             gap: 1.5rem;
             align-items: center;
-            font-size: 0.85rem;
+            font-size: 0.8rem;
             color: var(--text-muted);
             justify-content: center;
         }
@@ -288,8 +371,111 @@
             color: var(--text-main);
         }
 
+        .insights {
+            margin: 1.8rem 0 1.4rem;
+        }
+
+        .insights-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 1rem;
+            margin-bottom: 0.9rem;
+            flex-wrap: wrap;
+        }
+
+        .insights-title {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 1.2rem;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--text-quiet);
+        }
+
+        .insights-note {
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .insights-grid {
+            display: grid;
+            grid-template-columns: repeat(4, minmax(0, 1fr));
+            gap: 1.2rem;
+        }
+
+        @media (max-width: 1100px) {
+            .insights-grid {
+                grid-template-columns: repeat(2, minmax(0, 1fr));
+            }
+        }
+
+        @media (max-width: 700px) {
+            .insights-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+
+        .insight-card {
+            background: linear-gradient(180deg, rgba(18, 25, 34, 0.9), rgba(10, 14, 20, 0.95));
+            border: 1px solid var(--stroke);
+            border-radius: 18px;
+            padding: 1.15rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .insight-card::after {
+            content: "";
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(circle at 80% 20%, rgba(45, 212, 191, 0.12), transparent 55%);
+            opacity: 0;
+            transition: opacity 0.2s ease;
+        }
+
+        .insight-card:hover::after {
+            opacity: 1;
+        }
+
+        .insight-label {
+            font-size: 0.75rem;
+            letter-spacing: 0.18em;
+            text-transform: uppercase;
+            color: var(--text-quiet);
+        }
+
+        .insight-value {
+            font-family: "Space Grotesk", sans-serif;
+            font-size: 1.95rem;
+            margin-top: 0.6rem;
+            color: var(--text-main);
+        }
+
+        .insight-value span {
+            color: var(--accent-cyan);
+        }
+
+        .insight-sub {
+            margin-top: 0.4rem;
+            font-size: 0.85rem;
+            color: var(--text-muted);
+        }
+
+        .insight-bar {
+            margin-top: 1rem;
+            height: 6px;
+            border-radius: 999px;
+            background: rgba(255, 255, 255, 0.06);
+            overflow: hidden;
+        }
+
+        .insight-bar div {
+            height: 100%;
+            border-radius: 999px;
+        }
+
         .footer-note {
-            margin-top: 2rem;
+            margin-top: 1.2rem;
             display: flex;
             justify-content: space-between;
             flex-wrap: wrap;
@@ -348,12 +534,10 @@
 <body>
     <div class="bg-grid"></div>
 
-    {{TECH_NAVBAR}}
-
-    <div class="page-wrapper navbar-collapsed" id="mainContent">
+    <div class="page-wrapper" id="mainContent">
         <main class="home-shell">
             <section class="hero">
-                <div class="fade-up">
+                <div class="fade-up fade-delay-1">
                     <div class="panel-title">Sistema de Automacao</div>
                     <h1 class="hero-title">Extratos <span>Contabeis</span> Control Center</h1>
                     <p class="hero-subtitle">
@@ -361,13 +545,8 @@
                         rotinas contabeis. Acesse monitoramento, simulacao e reversoes com um
                         clique.
                     </p>
-                    <div class="hero-actions">
-                        <a class="btn-primary" href="/monitor">Ir para Monitor</a>
-                        <a class="btn-secondary" href="/extratos">Extratos</a>
-                        <a class="btn-secondary" href="/reversao">Reversao</a>
-                    </div>
                 </div>
-                <aside class="hero-panel fade-up fade-delay-1">
+                <aside class="hero-panel fade-up fade-delay-2">
                     <div class="panel-title">Status do Sistema</div>
                     <div class="panel-metric">
                         <span>24/7</span>
@@ -381,31 +560,74 @@
                 </aside>
             </section>
 
-            <section class="nav-grid">
-                <a class="nav-card fade-up fade-delay-1" href="/monitor">
-                    <div class="chip">Live</div>
-                    <h3>Monitor</h3>
-                    <p>Eventos em tempo real, jobs ativos e fila de processamento.</p>
-                    <span>Entrar</span>
-                </a>
-                <a class="nav-card fade-up fade-delay-2" href="/extratos">
-                    <div class="chip">Flow</div>
-                    <h3>Extratos</h3>
-                    <p>Upload, acompanhamento e validacao de extratos contabeis.</p>
-                    <span>Entrar</span>
-                </a>
-                <a class="nav-card fade-up fade-delay-2" href="/extratos/simular">
-                    <div class="chip">Lab</div>
-                    <h3>Simulacao</h3>
-                    <p>Teste cenarios e confira mapeamentos antes da execucao.</p>
-                    <span>Entrar</span>
-                </a>
-                <a class="nav-card fade-up fade-delay-3" href="/reversao">
-                    <div class="chip">Ops</div>
-                    <h3>Reversao</h3>
-                    <p>Controle reversoes, limpezas e ajustes de processamento.</p>
-                    <span>Entrar</span>
-                </a>
+            <section class="module-shelf">
+                <div class="module-panel fade-up fade-delay-1">
+                    <div class="module-title">Modulo Make</div>
+                    <div class="module-list">
+                        <a class="module-link" href="/monitor">
+                            <span><span class="module-icon">📺</span>Monitor</span>
+                            <small>Live</small>
+                        </a>
+                        <a class="module-link" href="/test">
+                            <span><span class="module-icon">🧪</span>Test Monitor</span>
+                            <small>QA</small>
+                        </a>
+                        <a class="module-link" href="/reversao">
+                            <span><span class="module-icon">🔁</span>Reversao</span>
+                            <small>Ops</small>
+                        </a>
+                    </div>
+                </div>
+                <div class="module-panel fade-up fade-delay-2">
+                    <div class="module-title">Modulo Extratos Baixados</div>
+                    <div class="module-list">
+                        <a class="module-link" href="/extratos">
+                            <span><span class="module-icon">📄</span>Extratos</span>
+                            <small>Flow</small>
+                        </a>
+                        <a class="module-link" href="/extratos/simular">
+                            <span><span class="module-icon">🔎</span>Simulacao</span>
+                            <small>Lab</small>
+                        </a>
+                        <a class="module-link" href="/extratos/reversao">
+                            <span><span class="module-icon">🧹</span>Reversao Extratos</span>
+                            <small>Ops</small>
+                        </a>
+                    </div>
+                </div>
+            </section>
+
+            <section class="insights fade-up fade-delay-2">
+                <div class="insights-header">
+                    <div class="insights-title">Dashboard Operacional</div>
+                    <div class="insights-note" id="insightsNote">Atualizando dados...</div>
+                </div>
+                <div class="insights-grid">
+                    <div class="insight-card">
+                        <div class="insight-label">Processados</div>
+                        <div class="insight-value"><span id="statProcessed">--</span></div>
+                        <div class="insight-sub" id="statProcessedSub">Total consolidado</div>
+                        <div class="insight-bar"><div id="statProcessedBar" style="width: 0%; background: linear-gradient(90deg, #2dd4bf, #38bdf8);"></div></div>
+                    </div>
+                    <div class="insight-card">
+                        <div class="insight-label">Nao Identificados</div>
+                        <div class="insight-value"><span id="statUnidentified">--</span></div>
+                        <div class="insight-sub" id="statUnidentifiedSub">0% do total</div>
+                        <div class="insight-bar"><div id="statUnidentifiedBar" style="width: 0%; background: linear-gradient(90deg, #f6b04e, #f97316);"></div></div>
+                    </div>
+                    <div class="insight-card">
+                        <div class="insight-label">Falhas</div>
+                        <div class="insight-value"><span id="statFailures">--</span></div>
+                        <div class="insight-sub" id="statFailuresSub">0% do total</div>
+                        <div class="insight-bar"><div id="statFailuresBar" style="width: 0%; background: linear-gradient(90deg, #ff6b6b, #f43f5e);"></div></div>
+                    </div>
+                    <div class="insight-card">
+                        <div class="insight-label">Sucesso</div>
+                        <div class="insight-value"><span id="statSuccess">--</span></div>
+                        <div class="insight-sub" id="statSuccessSub">0% do total</div>
+                        <div class="insight-bar"><div id="statSuccessBar" style="width: 0%; background: linear-gradient(90deg, #60a5fa, #818cf8);"></div></div>
+                    </div>
+                </div>
             </section>
 
             <section class="strip fade-up fade-delay-3">
@@ -416,12 +638,71 @@
 
             <div class="footer-note">
                 <span>Versao 1.0.0</span>
-                <span>Equipe Contabil - Operacao Extratos</span>
+                <span>Equipe TI - Operacao Extratos</span>
             </div>
         </main>
     </div>
 
-    <script src="/static/js/tech-navbar.js"></script>
+    <script>
+        async function fetchStats() {
+            const note = document.getElementById('insightsNote');
+            const statProcessed = document.getElementById('statProcessed');
+            const statUnidentified = document.getElementById('statUnidentified');
+            const statFailures = document.getElementById('statFailures');
+            const statSuccess = document.getElementById('statSuccess');
+            const statProcessedSub = document.getElementById('statProcessedSub');
+            const statUnidentifiedSub = document.getElementById('statUnidentifiedSub');
+            const statFailuresSub = document.getElementById('statFailuresSub');
+            const statSuccessSub = document.getElementById('statSuccessSub');
+            const statProcessedBar = document.getElementById('statProcessedBar');
+            const statUnidentifiedBar = document.getElementById('statUnidentifiedBar');
+            const statFailuresBar = document.getElementById('statFailuresBar');
+            const statSuccessBar = document.getElementById('statSuccessBar');
+
+            try {
+                const [mainRes, extratosRes] = await Promise.all([
+                    fetch('/logs/stats'),
+                    fetch('/extratos/logs/stats'),
+                ]);
+
+                if (!mainRes.ok || !extratosRes.ok) {
+                    throw new Error('Falha ao carregar estatisticas');
+                }
+
+                const mainStats = await mainRes.json();
+                const extratosStats = await extratosRes.json();
+
+                const total = (mainStats.total || 0) + (extratosStats.total || 0);
+                const sucesso = (mainStats.sucesso || 0) + (extratosStats.sucesso || 0);
+                const naoIdentificado = (mainStats.nao_identificado || 0) + (extratosStats.nao_identificado || 0);
+                const falha = (mainStats.falha || 0) + (extratosStats.falha || 0);
+
+                const pct = (value) => total > 0 ? Math.round((value / total) * 100) : 0;
+
+                statProcessed.textContent = total.toLocaleString('pt-BR');
+                statUnidentified.textContent = naoIdentificado.toLocaleString('pt-BR');
+                statFailures.textContent = falha.toLocaleString('pt-BR');
+                statSuccess.textContent = sucesso.toLocaleString('pt-BR');
+
+                statProcessedSub.textContent = total > 0 ? 'Total consolidado' : 'Sem dados';
+                statUnidentifiedSub.textContent = `${pct(naoIdentificado)}% do total`;
+                statFailuresSub.textContent = `${pct(falha)}% do total`;
+                statSuccessSub.textContent = `${pct(sucesso)}% do total`;
+
+                statProcessedBar.style.width = total > 0 ? '100%' : '0%';
+                statUnidentifiedBar.style.width = `${pct(naoIdentificado)}%`;
+                statFailuresBar.style.width = `${pct(falha)}%`;
+                statSuccessBar.style.width = `${pct(sucesso)}%`;
+
+                const now = new Date();
+                note.textContent = `Atualizado em ${now.toLocaleTimeString('pt-BR')} - Logs consolidados`;
+            } catch (error) {
+                note.textContent = 'Erro ao carregar estatisticas';
+            }
+        }
+
+        fetchStats();
+    </script>
 </body>
 
 </html>

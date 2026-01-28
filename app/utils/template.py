@@ -34,6 +34,13 @@ def render_tech_navbar(
         </div>
 
         <div class="navbar-nav">
+            <div class="nav-item nav-item-home">
+                <a href="/" class="nav-link">
+                    <span class="nav-icon">&#127968;</span>
+                    <span class="nav-text">Pagina Inicial</span>
+                </a>
+                <span class="nav-tooltip">Pagina Inicial</span>
+            </div>
             <div class="nav-section nav-main"{main_style}>
                 <div class="nav-section-title">Módulo MAKE</div>
                 <div class="nav-item nav-item-monitor{active_class(active_main, 'monitor')}">

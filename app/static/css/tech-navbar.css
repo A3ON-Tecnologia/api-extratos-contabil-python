@@ -188,6 +188,10 @@
     filter: drop-shadow(0 0 10px #06b6d4);
 }
 
+.nav-item-home:hover .nav-icon {
+    filter: drop-shadow(0 0 10px #2dd4bf);
+}
+
 .nav-item-test:hover .nav-icon {
     filter: drop-shadow(0 0 10px #10b981);
 }
@@ -214,6 +218,10 @@
 
 .tech-navbar.collapsed .nav-item-monitor:hover .nav-icon {
     filter: drop-shadow(0 0 12px #06b6d4);
+}
+
+.tech-navbar.collapsed .nav-item-home:hover .nav-icon {
+    filter: drop-shadow(0 0 12px #2dd4bf);
 }
 
 .tech-navbar.collapsed .nav-item-test:hover .nav-icon {
