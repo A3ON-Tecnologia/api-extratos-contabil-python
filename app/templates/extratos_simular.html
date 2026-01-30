@@ -10,23 +10,24 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="/static/css/tech-navbar.css">
+    <link rel="stylesheet" href="/static/css/compact-ui.css">
     <style>
         :root {
-            --bg-primary: #0a0a0f;
-            --bg-secondary: #12121a;
-            --bg-card: #1a1a24;
-            --bg-card-hover: #22222e;
-            --accent-primary: #6366f1;
-            --accent-secondary: #818cf8;
+            --bg-primary: #0a0f14;
+            --bg-secondary: #121527;
+            --bg-card: #151a2e;
+            --bg-card-hover: #1b2140;
+            --accent-primary: #a855f7;
+            --accent-secondary: #8b5cf6;
             --accent-test: #a855f7;
             --accent-success: #10b981;
-            --accent-warning: #a855f7;
+            --accent-warning: #f59e0b;
             --accent-error: #ef4444;
-            --text-primary: #f1f5f9;
+            --text-primary: #f8fafc;
             --text-secondary: #94a3b8;
             --text-muted: #64748b;
-            --border-color: #2a2a3a;
-            --glow-test: rgba(168, 85, 247, 0.3);
+            --border-color: rgba(139, 92, 246, 0.25);
+            --glow-test: rgba(168, 85, 247, 0.35);
         }
 
         * {
@@ -50,8 +51,12 @@
             height: 100%;
             pointer-events: none;
             z-index: 0;
-            background: radial-gradient(circle at 30% 20%, var(--glow-test) 0%, transparent 50%),
-                radial-gradient(circle at 70% 80%, rgba(99, 102, 241, 0.2) 0%, transparent 50%);
+            background:
+                radial-gradient(circle at 15% 10%, rgba(168, 85, 247, 0.25) 0%, transparent 45%),
+                radial-gradient(circle at 70% 20%, rgba(99, 102, 241, 0.2) 0%, transparent 45%),
+                linear-gradient(transparent 23px, rgba(139, 92, 246, 0.08) 24px),
+                linear-gradient(90deg, transparent 23px, rgba(139, 92, 246, 0.08) 24px);
+            background-size: auto, auto, 24px 24px, 24px 24px;
         }
 
         .container {
@@ -69,17 +74,17 @@
             padding: 2rem;
         }
 
-        .header {
+        .hero {
             display: flex;
             align-items: center;
             justify-content: space-between;
             gap: 1rem;
-            margin-bottom: 1.5rem;
+            margin-bottom: 0.75rem;
             flex-wrap: wrap;
         }
 
-        .header h1 {
-            font-size: 2rem;
+        .hero-title {
+            font-size: 2.1rem;
             font-weight: 700;
             background: linear-gradient(135deg, var(--accent-test), var(--accent-secondary));
             background-clip: text;
@@ -90,12 +95,13 @@
         .badge {
             background: rgba(168, 85, 247, 0.2);
             color: var(--accent-test);
-            padding: 0.25rem 0.75rem;
-            border-radius: 0.5rem;
-            font-size: 0.75rem;
+            padding: 0.35rem 0.9rem;
+            border-radius: 999px;
+            font-size: 0.7rem;
             font-weight: 700;
             text-transform: uppercase;
-            border: 1px solid var(--accent-test);
+            letter-spacing: 0.12em;
+            border: 1px solid rgba(168, 85, 247, 0.5);
         }
 
         .controls {
@@ -148,7 +154,22 @@
             background: var(--bg-card);
             border: 1px solid var(--border-color);
             border-radius: 0.75rem;
-            padding: 1.25rem;
+            padding: 1rem;
+            display: flex;
+            align-items: center;
+            gap: 1rem;
+            box-shadow: 0 18px 40px rgba(12, 8, 26, 0.5);
+        }
+
+        .stat-icon {
+            width: 42px;
+            height: 42px;
+            border-radius: 12px;
+            display: grid;
+            place-items: center;
+            font-size: 1.1rem;
+            background: rgba(168, 85, 247, 0.2);
+            color: var(--accent-test);
         }
 
         .stat-label {
@@ -398,39 +419,55 @@
 
     <div class="page-wrapper navbar-collapsed" id="mainContent">
         <div class="container">
-            <div class="header">
+            
+            
+            <div class="hero">
                 <div style="display: flex; align-items: center; gap: 1rem;">
-                    <h1>Simulação de Processamento</h1>
-                    <span class="badge">MODO TESTE</span>
+                    <div class="hero-title">Modo Teste</div>
+                    <span class="badge">Monitoramento em tempo real</span>
                 </div>
                 <div class="controls">
                     <button class="btn" onclick="carregarArquivos()">
-                        🔄 Atualizar Lista
+                        Atualizar Lista
                     </button>
                     <button class="btn success" onclick="simularTodos()" id="btnSimularTodos" disabled>
-                        ▶️ Simular Todos
+                        Simular Todos
                     </button>
                 </div>
             </div>
 
             <div class="stats" id="statsContainer" style="display: none;">
                 <div class="stat-card">
-                    <div class="stat-label">Total de Arquivos</div>
-                    <div class="stat-value" id="statTotal">0</div>
+                    <div class="stat-icon">T</div>
+                    <div>
+                        <div class="stat-label">Total</div>
+                        <div class="stat-value" id="statTotal">0</div>
+                    </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Processados</div>
-                    <div class="stat-value" id="statProcessados">0</div>
+                    <div class="stat-icon">P</div>
+                    <div>
+                        <div class="stat-label">Processados</div>
+                        <div class="stat-value" id="statProcessados">0</div>
+                    </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Identificados</div>
-                    <div class="stat-value" style="color: var(--accent-success);" id="statSucesso">0</div>
+                    <div class="stat-icon">OK</div>
+                    <div>
+                        <div class="stat-label">Identificados</div>
+                        <div class="stat-value" style="color: var(--accent-success);" id="statSucesso">0</div>
+                    </div>
                 </div>
                 <div class="stat-card">
-                    <div class="stat-label">Não Identificados</div>
-                    <div class="stat-value" style="color: var(--accent-warning);" id="statNaoIdentificado">0</div>
+                    <div class="stat-icon">!</div>
+                    <div>
+                        <div class="stat-label">Nao Identificados</div>
+                        <div class="stat-value" style="color: var(--accent-warning);" id="statNaoIdentificado">0</div>
+                    </div>
                 </div>
             </div>
+
+</div>
 
             <div class="file-list">
                 <div class="file-list-header">
@@ -528,7 +565,7 @@
                             <path d="M9 2a1 1 0 000 2h2a1 1 0 100-2H9z"></path>
                             <path fill-rule="evenodd" d="M4 5a2 2 0 012-2 3 3 0 003 3h2a3 3 0 003-3 2 2 0 012 2v11a2 2 0 01-2 2H6a2 2 0 01-2-2V5zm3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3zm-3 4a1 1 0 000 2h.01a1 1 0 100-2H7zm3 0a1 1 0 000 2h3a1 1 0 100-2h-3z" clip-rule="evenodd"></path>
                         </svg>
-                        <p>${arquivos.length === 0 ? 'Nenhum arquivo PDF encontrado na pasta de extratos' : 'Nenhum arquivo encontrado para o filtro aplicado'}</p>
+                        <p>${arquivos.length === 0 ? 'Nenhum arquivo PDF/OFX encontrado na pasta de extratos' : 'Nenhum arquivo encontrado para o filtro aplicado'}</p>
                     </div>
                 `;
                 paginationContainer.style.display = 'none';
@@ -677,7 +714,7 @@
                                 </div>
                                 <div class="detail-row">
                                     <span class="detail-label">Conta:</span>
-                                    <span class="detail-value">${resultado.cliente.conta || 'N/A'}</span>
+                                    <span class="detail-value">${resultado.extrato_info.conta || 'N/A'}</span>
                                 </div>
                                 <div class="detail-row">
                                     <span class="detail-label">Método:</span>

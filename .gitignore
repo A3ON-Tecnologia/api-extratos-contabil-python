@@ -66,3 +66,6 @@ tmp/
 
 # Scripts de teste locais
 scripts/test_output.txt
+
+# Dados baixados
+/arquivos/

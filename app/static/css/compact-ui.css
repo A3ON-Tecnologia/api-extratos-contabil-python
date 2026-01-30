@@ -1,0 +1,67 @@
+:root {
+  --compact-padding: 1.25rem;
+  --compact-gap: 0.75rem;
+  --compact-font: 0.78rem;
+}
+
+body {
+  font-size: 0.92rem;
+}
+
+.container {
+  padding: var(--compact-padding);
+}
+
+.hero,
+.header {
+  margin-bottom: 0.75rem;
+}
+
+.controls {
+  gap: 0.5rem;
+}
+
+.card-header {
+  padding: 0.75rem 1rem;
+}
+
+.stats-grid {
+  gap: 0.75rem;
+  margin-bottom: 0.9rem;
+}
+
+.stat-card {
+  padding: 0.75rem;
+}
+
+.stat-card .value {
+  font-size: 1.35rem;
+  margin-top: 0.15rem;
+}
+
+.btn,
+button {
+  padding: 0.4rem 0.7rem;
+  font-size: 0.78rem;
+}
+
+.status-pill {
+  padding: 0.25rem 0.6rem;
+  font-size: 0.72rem;
+}
+
+table th,
+table td {
+  padding: 0.55rem 0.75rem;
+  font-size: var(--compact-font);
+}
+
+table th {
+  font-size: 0.65rem;
+}
+
+.path-cell,
+pre,
+code {
+  font-size: 0.7rem;
+}

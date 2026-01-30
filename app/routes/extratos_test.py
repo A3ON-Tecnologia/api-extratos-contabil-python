@@ -118,9 +118,9 @@ async def list_test_jobs():
 @router.post("/processar-pasta")
 async def processar_pasta_teste():
     """
-    MODO TESTE: Processa todos os PDFs da pasta WATCH_FOLDER_PATH.
+    MODO TESTE: Processa todos os PDFs/OFX da pasta WATCH_FOLDER_PATH.
 
-    Processa todos os arquivos PDF encontrados na pasta configurada,
+    Processa todos os arquivos PDF/OFX encontrados na pasta configurada,
     simulando onde seriam salvos sem salvar de verdade.
 
     Returns:
@@ -135,13 +135,15 @@ async def processar_pasta_teste():
             detail=f"Pasta não encontrada: {watch_path}"
         )
 
-    # Lista todos os PDFs
+    # Lista todos os PDFs/OFX
     pdf_files = list(watch_path.glob("*.pdf"))
+    ofx_files = list(watch_path.glob("*.ofx"))
+    files = pdf_files + ofx_files
 
-    if not pdf_files:
+    if not files:
         return {
             "mode": "TESTE",
-            "message": "Nenhum PDF encontrado na pasta",
+            "message": "Nenhum PDF/OFX encontrado na pasta",
             "path": str(watch_path),
             "total": 0,
             "files": []
@@ -149,7 +151,7 @@ async def processar_pasta_teste():
 
     results = []
 
-    for pdf_path in pdf_files:
+    for pdf_path in files:
         try:
             content = pdf_path.read_bytes()
             file_hash = compute_hash(content)
@@ -168,7 +170,7 @@ async def processar_pasta_teste():
 
     return {
         "mode": "TESTE",
-        "total_files": len(pdf_files),
+        "total_files": len(files),
         "processed": len(results),
         "results": results
     }
@@ -298,10 +300,56 @@ async def _process_test_extrato(content: bytes, filename: str, file_hash: str) -
     # 3. Matching pela mesma lógica do sistema
     logger.info("[TESTE] Fazendo matching na planilha RELAÇÃO CLIENTES...")
     matching_service = MatchingService(ClientService())
-    match_result = matching_service.match(extraction)
+    is_ofx = filename.lower().endswith(".ofx")
+    match_result = matching_service.match(extraction, is_ofx=is_ofx)
+
+    # Se identificou o cliente, USA SEMPRE OS DADOS DA PLANILHA (não do PDF)
+    if match_result.identificado and match_result.cliente:
+        # BANCO: sempre usa o da planilha
+        if match_result.cliente.banco:
+            banco_original = extraction.banco
+            extraction.banco = match_result.cliente.banco.strip().upper()
+            if banco_original != extraction.banco:
+                logger.info(
+                    "[TESTE] Banco corrigido pela planilha: '%s' -> '%s'",
+                    banco_original,
+                    extraction.banco,
+                )
+
+        # AGÊNCIA: sempre usa a da planilha
+        if match_result.cliente.agencia:
+            agencia_original = extraction.agencia
+            extraction.agencia = str(match_result.cliente.agencia)
+            if agencia_original != extraction.agencia:
+                logger.info(
+                    "[TESTE] Agência corrigida pela planilha: '%s' -> '%s'",
+                    agencia_original,
+                    extraction.agencia,
+                )
+
+        # CONTA: sempre usa a da planilha (exceto para Conta Capital)
+        if match_result.cliente.conta:
+            is_conta_capital = extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper()
+            if not is_conta_capital:
+                conta_original = extraction.conta
+                extraction.conta = str(match_result.cliente.conta)
+                if conta_original != extraction.conta:
+                    logger.info(
+                        "[TESTE] Conta corrigida pela planilha: '%s' -> '%s'",
+                        conta_original,
+                        extraction.conta,
+                    )
 
     # 4. Determina caminho simulado (mesma lógica do modo teste)
     storage_service = StorageService()
+    if extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper():
+        conta_cadastrada = match_result.cliente.conta if match_result.identificado else None
+        extraction.conta = storage_service._select_account(
+            extraction.banco,
+            extraction.conta,
+            conta_cadastrada,
+            extraction.tipo_documento,
+        )
     ano, mes = storage_service._get_previous_month()
 
     if match_result.identificado:
@@ -311,6 +359,7 @@ async def _process_test_extrato(content: bytes, filename: str, file_hash: str) -
                 extraction.banco,
                 extraction.conta,
                 match_result.cliente.conta,
+                extraction.tipo_documento,
             )
             target_path = storage_service._build_path_structure(
                 client_base_path,
@@ -322,9 +371,11 @@ async def _process_test_extrato(content: bytes, filename: str, file_hash: str) -
             file_name = storage_service._build_filename(
                 extraction.banco,
                 extraction.tipo_documento,
+                extraction.contrato,
                 content,
                 target_path,
                 filename,
+                conta,
             )
             caminho_simulado = str(target_path / file_name)
         else:

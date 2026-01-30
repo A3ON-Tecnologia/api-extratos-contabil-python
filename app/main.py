@@ -50,7 +50,7 @@ from app.services.extratos_baixados_reversao_service import get_extratos_baixado
 from app.services.extratos_baixados_simulacao_service import (
     ExtratosBaixadosSimulacaoService,
 )
-from app.utils.hash import compute_hash
+from app.utils.hash import compute_hash, short_hash
 from app.utils.template import render_tech_navbar
 
 # Configuracao de logging
@@ -281,6 +281,26 @@ def _render_template_with_navbar(
     return navbar_placeholder_re.sub(lambda _m: navbar_html, html)
 
 
+def _ensure_unique_filename_with_extension(
+    original_filename: str,
+    file_data: bytes,
+    target_path: Path,
+) -> str:
+    """Gera nome unico preservando a extensao original."""
+    name = Path(original_filename).stem or "arquivo"
+    ext = Path(original_filename).suffix or ".pdf"
+    filename = f"{name}{ext}"
+    if not (target_path / filename).exists():
+        return filename
+
+    counter = 1
+    while True:
+        candidate = f"{name}-{counter}{ext}"
+        if not (target_path / candidate).exists():
+            return candidate
+        counter += 1
+
+
 # ============================================================
 # HOME
 # ============================================================
@@ -349,7 +369,7 @@ async def _watch_folder_loop():
                 if not file_path.is_file():
                     continue
 
-                if file_path.suffix.lower() not in {".pdf", ".zip"}:
+                if file_path.suffix.lower() not in {".pdf", ".zip", ".ofx"}:
                     continue
 
                 file_key = str(file_path.resolve())
@@ -479,7 +499,7 @@ async def extratos_watch_debug():
 
 @app.get("/extratos/mapear")
 async def mapear_extratos():
-    """Lista todos os arquivos PDF disponíveis na pasta de extratos."""
+    """Lista todos os arquivos PDF/OFX disponíveis na pasta de extratos."""
     settings = get_settings()
     watch_path = settings.watch_folder_path
 
@@ -511,14 +531,14 @@ async def mapear_extratos():
                 detail=f"Erro ao acessar pasta: {str(e)}"
             )
 
-        pdf_files = []
+        files = []
         erros_leitura = []
 
         for file_path in watch_path.iterdir():
             try:
-                if file_path.is_file() and file_path.suffix.lower() == '.pdf':
+                if file_path.is_file() and file_path.suffix.lower() in {'.pdf', '.ofx'}:
                     stat = file_path.stat()
-                    pdf_files.append({
+                    files.append({
                         "nome": file_path.name,
                         "tamanho": stat.st_size,
                         "tamanho_mb": round(stat.st_size / (1024 * 1024), 2),
@@ -533,12 +553,12 @@ async def mapear_extratos():
                 logger.warning(f"Erro ao ler arquivo {file_path}: {e}")
 
         # Ordena por data de modificação (mais recente primeiro)
-        pdf_files.sort(key=lambda x: x["modificado_em"], reverse=True)
+        files.sort(key=lambda x: x["modificado_em"], reverse=True)
 
         resultado = {
-            "total": len(pdf_files),
+            "total": len(files),
             "pasta": str(watch_path),
-            "arquivos": pdf_files
+            "arquivos": files
         }
 
         if erros_leitura:
@@ -613,7 +633,7 @@ async def simular_processamento_arquivo(request: dict):
 @app.post("/extratos/simular-todos")
 async def simular_todos_extratos():
     """
-    Simula o processamento de TODOS os arquivos PDF da pasta de extratos.
+    Simula o processamento de TODOS os arquivos PDF/OFX da pasta de extratos.
 
     Retorna uma lista com a simulação de cada arquivo.
     """
@@ -625,15 +645,14 @@ async def simular_todos_extratos():
 
     resultados = []
     erros = []
+    # Lista todos os PDFs/OFX
+    files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() in {'.pdf', '.ofx'}]
 
-    # Lista todos os PDFs
-    pdf_files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() == '.pdf']
-
-    logger.info(f"[SIMULACAO EM LOTE] Processando {len(pdf_files)} arquivos")
+    logger.info(f"[SIMULACAO EM LOTE] Processando {len(files)} arquivos")
 
     sim_service = get_extratos_sim_service()
 
-    for file_path in pdf_files:
+    for file_path in files:
         try:
             filename = file_path.name
             pdf_data = file_path.read_bytes()
@@ -661,7 +680,7 @@ async def simular_todos_extratos():
     nao_identificado = sum(1 for r in resultados if r["status"] == "NAO_IDENTIFICADO")
 
     return {
-        "total_arquivos": len(pdf_files),
+        "total_arquivos": len(files),
         "processados": total,
         "erros": len(erros),
         "estatisticas": {
@@ -1280,20 +1299,29 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
         
     except Exception as e:
         logger.exception(f"Erro no processamento do job {job_id}")
-        
+
+        result = await create_failure_result(
+            filename,
+            compute_hash(content),
+            str(e),
+            pdf_data=content,
+            test_mode=test_mode,
+        )
+
         # Atualiza o job com erro
         jobs_dict[job_id].update({
             "status": "error",
             "message": f"Erro: {str(e)}",
             "completed_at": datetime.now().isoformat(),
-            "results": None,
+            "results": UploadResponse(
+                sucesso=False,
+                total_arquivos=1,
+                arquivos_sucesso=0,
+                arquivos_nao_identificados=0,
+                arquivos_falha=1,
+                resultados=[result],
+            ).model_dump(),
         })
-        
-        await event_manager.emit(ProcessingEvent(
-            event_type=EventType.PROCESSING_ERROR,
-            filename=filename,
-            message=str(e)
-        ))
 
 
 async def process_zip_async(zip_data: bytes, filename: str, job_id: str | None = None, test_mode: bool = False) -> UploadResponse:
@@ -1481,7 +1509,78 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
              raise asyncio.CancelledError("Cancelado pelo usuário")
 
         matching_service = get_matching_service()
-        match_result = matching_service.match(extraction)
+        # Detecta se é arquivo OFX para priorizar busca por conta
+        is_ofx = filename.lower().endswith('.ofx')
+        match_result = matching_service.match(extraction, is_ofx=is_ofx)
+
+        # Se identificou o cliente, USA SEMPRE OS DADOS DA PLANILHA (não do PDF)
+        # Isso garante que não haja inconsistências entre PDF e cadastro
+        if match_result.identificado and match_result.cliente:
+            # BANCO: sempre usa o da planilha
+            if match_result.cliente.banco:
+                banco_original = extraction.banco
+                extraction.banco = match_result.cliente.banco.strip().upper()
+                if banco_original != extraction.banco:
+                    logger.info(
+                        "Banco corrigido pela planilha: '%s' -> '%s'",
+                        banco_original,
+                        extraction.banco,
+                    )
+
+            # AGÊNCIA: sempre usa a da planilha
+            if match_result.cliente.agencia:
+                agencia_original = extraction.agencia
+                extraction.agencia = str(match_result.cliente.agencia)
+                if agencia_original != extraction.agencia:
+                    logger.info(
+                        "Agência corrigida pela planilha: '%s' -> '%s'",
+                        agencia_original,
+                        extraction.agencia,
+                    )
+
+            # CONTA: sempre usa a da planilha (exceto para Conta Capital que tem número diferente)
+            if match_result.cliente.conta:
+                # Conta Capital tem número diferente, então não sobrescreve
+                is_conta_capital = extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper()
+                if not is_conta_capital:
+                    conta_original = extraction.conta
+                    extraction.conta = str(match_result.cliente.conta)
+                    if conta_original != extraction.conta:
+                        logger.info(
+                            "Conta corrigida pela planilha: '%s' -> '%s'",
+                            conta_original,
+                            extraction.conta,
+                        )
+
+        if extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper():
+            storage_service = get_storage_service()
+            conta_cadastrada = match_result.cliente.conta if match_result.identificado else None
+            extraction.conta = storage_service._select_account(
+                extraction.banco,
+                extraction.conta,
+                conta_cadastrada,
+                extraction.tipo_documento,
+            )
+
+        if extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper():
+            storage_service = get_storage_service()
+            conta_cadastrada = match_result.cliente.conta if match_result.identificado else None
+            extraction.conta = storage_service._select_account(
+                extraction.banco,
+                extraction.conta,
+                conta_cadastrada,
+                extraction.tipo_documento,
+            )
+
+        if extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper():
+            storage_service = get_storage_service()
+            conta_cadastrada = match_result.cliente.conta if match_result.identificado else None
+            extraction.conta = storage_service._select_account(
+                extraction.banco,
+                extraction.conta,
+                conta_cadastrada,
+                extraction.tipo_documento,
+            )
         
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.MATCHING_COMPLETED,
@@ -1517,7 +1616,12 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                 client_base_path = storage_service._resolve_client_path(match_result.cliente)
                 if client_base_path:
                     # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
-                    conta = storage_service._select_account(extraction.banco, extraction.conta, match_result.cliente.conta)
+                    conta = storage_service._select_account(
+                        extraction.banco,
+                        extraction.conta,
+                        match_result.cliente.conta,
+                        extraction.tipo_documento,
+                    )
                     target_path = storage_service._build_path_structure(
                         client_base_path,
                         ano,
@@ -1530,9 +1634,11 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                     file_name = storage_service._build_filename(
                         extraction.banco,
                         extraction.tipo_documento,
+                        extraction.contrato,
                         pdf_data,
                         target_path,
-                        filename
+                        filename,
+                        conta
                     )
                     saved_path = str(target_path / file_name)
                 else:
@@ -1551,6 +1657,7 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                 tipo_documento=extraction.tipo_documento,
                 banco=extraction.banco,
                 conta_extrato=extraction.conta,
+                contrato=extraction.contrato,
             )
         
         await event_manager.emit(ProcessingEvent(
@@ -1714,7 +1821,7 @@ async def create_failure_result(
             target_path = storage_service.settings.unidentified_path
             if not target_path.exists():
                 target_path.mkdir(parents=True, exist_ok=True)
-            filename_final = storage_service._ensure_unique_filename(
+            filename_final = _ensure_unique_filename_with_extension(
                 filename,
                 pdf_data,
                 target_path,
@@ -1726,11 +1833,36 @@ async def create_failure_result(
         except Exception as e:
             logger.warning(f"Falha ao salvar arquivo com erro em NAO_IDENTIFICADOS: {e}")
 
+    log_id = None
+    try:
+        if test_mode:
+            db_teste_service = get_db_log_teste_service()
+            log_entry = db_teste_service.log_extrato_teste(
+                arquivo_original=filename,
+                status=ProcessingStatus.FALHA.value,
+                arquivo_salvo=saved_path or None,
+                hash_arquivo=file_hash,
+                erro=error,
+            )
+            log_id = log_entry.id
+        else:
+            db_log_service = get_db_log_service()
+            log_entry = db_log_service.log_extrato(
+                arquivo_original=filename,
+                status=ProcessingStatus.FALHA.value,
+                arquivo_salvo=saved_path or None,
+                hash_arquivo=file_hash,
+                erro=error,
+            )
+            log_id = log_entry.id
+    except Exception as e:
+        logger.error(f"Erro ao salvar log de falha: {e}")
+
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.PROCESSING_ERROR,
         filename=filename,
         message=error,
-        details={"path": saved_path} if saved_path else None,
+        details={"path": saved_path, "log_id": log_id} if saved_path or log_id else None,
     ))
 
     event_manager.update_stats(falha=True)
@@ -1814,17 +1946,28 @@ async def process_extratos_file_background(
         })
     except Exception as e:
         logger.exception(f"Erro no processamento do job {job_id} (extratos baixados)")
+
+        result = await create_extratos_failure_result(
+            filename,
+            compute_hash(content),
+            str(e),
+            pdf_data=content,
+            test_mode=test_mode,
+        )
+
         jobs_dict[job_id].update({
             "status": "error",
             "message": f"Erro: {str(e)}",
             "completed_at": datetime.now().isoformat(),
-            "results": None,
+            "results": UploadResponse(
+                sucesso=False,
+                total_arquivos=1,
+                arquivos_sucesso=0,
+                arquivos_nao_identificados=0,
+                arquivos_falha=1,
+                resultados=[result],
+            ).model_dump(),
         })
-        await event_manager.emit(ProcessingEvent(
-            event_type=EventType.PROCESSING_ERROR,
-            filename=filename,
-            message=str(e)
-        ))
 
 
 async def process_extratos_zip_async(
@@ -2007,7 +2150,48 @@ async def process_extratos_pdf_async(
             raise asyncio.CancelledError("Cancelado pelo usuario")
 
         matching_service = get_matching_service()
-        match_result = matching_service.match(extraction)
+        # Detecta se é arquivo OFX para priorizar busca por conta
+        is_ofx = filename.lower().endswith('.ofx')
+        match_result = matching_service.match(extraction, is_ofx=is_ofx)
+
+        # Se identificou o cliente, USA SEMPRE OS DADOS DA PLANILHA (não do PDF)
+        # Isso garante que não haja inconsistências entre PDF e cadastro
+        if match_result.identificado and match_result.cliente:
+            # BANCO: sempre usa o da planilha
+            if match_result.cliente.banco:
+                banco_original = extraction.banco
+                extraction.banco = match_result.cliente.banco.strip().upper()
+                if banco_original != extraction.banco:
+                    logger.info(
+                        "Banco corrigido pela planilha: '%s' -> '%s'",
+                        banco_original,
+                        extraction.banco,
+                    )
+
+            # AGÊNCIA: sempre usa a da planilha
+            if match_result.cliente.agencia:
+                agencia_original = extraction.agencia
+                extraction.agencia = str(match_result.cliente.agencia)
+                if agencia_original != extraction.agencia:
+                    logger.info(
+                        "Agência corrigida pela planilha: '%s' -> '%s'",
+                        agencia_original,
+                        extraction.agencia,
+                    )
+
+            # CONTA: sempre usa a da planilha (exceto para Conta Capital que tem número diferente)
+            if match_result.cliente.conta:
+                # Conta Capital tem número diferente, então não sobrescreve
+                is_conta_capital = extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper()
+                if not is_conta_capital:
+                    conta_original = extraction.conta
+                    extraction.conta = str(match_result.cliente.conta)
+                    if conta_original != extraction.conta:
+                        logger.info(
+                            "Conta corrigida pela planilha: '%s' -> '%s'",
+                            conta_original,
+                            extraction.conta,
+                        )
 
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.MATCHING_COMPLETED,
@@ -2039,7 +2223,12 @@ async def process_extratos_pdf_async(
             if match_result.identificado:
                 client_base_path = storage_service._resolve_client_path(match_result.cliente)
                 if client_base_path:
-                    conta = storage_service._select_account(extraction.banco, extraction.conta, match_result.cliente.conta)
+                    conta = storage_service._select_account(
+                        extraction.banco,
+                        extraction.conta,
+                        match_result.cliente.conta,
+                        extraction.tipo_documento,
+                    )
                     target_path = storage_service._build_path_structure(
                         client_base_path,
                         ano,
@@ -2050,9 +2239,11 @@ async def process_extratos_pdf_async(
                     file_name = storage_service._build_filename(
                         extraction.banco,
                         extraction.tipo_documento,
+                        extraction.contrato,
                         pdf_data,
                         target_path,
                         filename,
+                        conta,
                     )
                     saved_path = str(target_path / file_name)
                 else:
@@ -2068,6 +2259,7 @@ async def process_extratos_pdf_async(
                 tipo_documento=extraction.tipo_documento,
                 banco=extraction.banco,
                 conta_extrato=extraction.conta,
+                contrato=extraction.contrato,
             )
 
         await event_manager.emit(ProcessingEvent(
@@ -2229,7 +2421,7 @@ async def create_extratos_failure_result(
             target_path = storage_service.settings.unidentified_path
             if not target_path.exists():
                 target_path.mkdir(parents=True, exist_ok=True)
-            filename_final = storage_service._ensure_unique_filename(
+            filename_final = _ensure_unique_filename_with_extension(
                 filename,
                 pdf_data,
                 target_path,
@@ -2241,11 +2433,36 @@ async def create_extratos_failure_result(
         except Exception as e:
             logger.warning(f"Falha ao salvar arquivo com erro em NAO_IDENTIFICADOS: {e}")
 
+    log_id = None
+    try:
+        if test_mode:
+            db_teste_service = get_extratos_baixados_log_teste_service()
+            log_entry = db_teste_service.log_extrato_teste(
+                arquivo_original=filename,
+                status=ProcessingStatus.FALHA.value,
+                arquivo_salvo=saved_path or None,
+                hash_arquivo=file_hash,
+                erro=error,
+            )
+            log_id = log_entry.id
+        else:
+            db_log_service = get_extratos_baixados_log_service()
+            log_entry = db_log_service.log_extrato(
+                arquivo_original=filename,
+                status=ProcessingStatus.FALHA.value,
+                arquivo_salvo=saved_path or None,
+                hash_arquivo=file_hash,
+                erro=error,
+            )
+            log_id = log_entry.id
+    except Exception as e:
+        logger.error(f"Erro ao salvar log de falha (extratos baixados): {e}")
+
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.PROCESSING_ERROR,
         filename=filename,
         message=error,
-        details={"path": saved_path} if saved_path else None,
+        details={"path": saved_path, "log_id": log_id} if saved_path or log_id else None,
     ))
 
     event_manager.update_stats(falha=True)
@@ -2706,6 +2923,154 @@ async def get_extratos_log_detail(log_id: int):
 async def view_extratos_log_file(log_id: int):
     """Retorna o arquivo associado ao log de extratos baixados."""
     try:
+        from fastapi.responses import FileResponse, HTMLResponse
+        import os
+
+        db_service = get_extratos_baixados_log_service()
+        log = db_service.get_log_by_id(log_id)
+
+        if not log:
+            raise HTTPException(status_code=404, detail="Log nao encontrado")
+
+        file_path = log.arquivo_salvo
+        filename = log.arquivo_original
+
+        if (not file_path or file_path == '-') and filename:
+            settings = get_settings()
+            potential_path = settings.unidentified_path / filename
+            if potential_path.exists():
+                file_path = str(potential_path)
+
+        if not file_path or not os.path.exists(file_path):
+            raise HTTPException(status_code=404, detail="Arquivo fisico nao encontrado")
+
+        # Se for arquivo .ofx, exibe como texto
+        if filename and filename.lower().endswith('.ofx'):
+            try:
+                import html as html_module
+                with open(file_path, 'r', encoding='latin-1', errors='ignore') as f:
+                    content = f.read()
+
+                # Escapa HTML para evitar problemas com tags
+                escaped_content = html_module.escape(content)
+
+                # Adiciona syntax highlighting básico
+                # Destaca tags XML
+                import re
+                highlighted = re.sub(
+                    r'(&lt;/?[A-Z0-9]+&gt;)',
+                    r'<span style="color: #22d3ee;">\1</span>',
+                    escaped_content
+                )
+
+                # Destaca valores numéricos
+                highlighted = re.sub(
+                    r'(&gt;)([-]?\d+\.?\d*)(&lt;)',
+                    r'\1<span style="color: #10b981;">\2</span>\3',
+                    highlighted
+                )
+
+                # Cria HTML formatado para exibir o OFX
+                html_content = f"""
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{filename}</title>
+    <style>
+        body {{
+            font-family: 'Courier New', monospace;
+            background: #0a0f14;
+            color: #f8fafc;
+            padding: 2rem;
+            margin: 0;
+        }}
+        .container {{
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #111b2a;
+            border: 1px solid rgba(34, 211, 238, 0.25);
+            border-radius: 0.8rem;
+            padding: 1.5rem;
+        }}
+        h1 {{
+            color: #22d3ee;
+            font-size: 1.5rem;
+            margin-bottom: 1rem;
+            border-bottom: 1px solid rgba(34, 211, 238, 0.25);
+            padding-bottom: 0.5rem;
+        }}
+        pre {{
+            background: #0c1622;
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            font-size: 0.85rem;
+            line-height: 1.5;
+            border: 1px solid rgba(34, 211, 238, 0.15);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+        }}
+        .info {{
+            background: rgba(59, 130, 246, 0.1);
+            padding: 0.75rem;
+            border-radius: 0.5rem;
+            margin-bottom: 1rem;
+            border-left: 3px solid #3b82f6;
+            font-size: 0.9rem;
+        }}
+        .download-btn {{
+            display: inline-block;
+            background: rgba(34, 211, 238, 0.2);
+            color: #22d3ee;
+            padding: 0.5rem 1rem;
+            border-radius: 0.5rem;
+            text-decoration: none;
+            border: 1px solid rgba(34, 211, 238, 0.4);
+            font-size: 0.85rem;
+            transition: all 0.2s;
+        }}
+        .download-btn:hover {{
+            background: rgba(34, 211, 238, 0.3);
+            border-color: #22d3ee;
+        }}
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📄 {filename}</h1>
+        <div class="info">
+            📊 Arquivo OFX (Open Financial Exchange) - Formato de texto para dados financeiros<br>
+            <a href="/extratos/logs/{log_id}/download" class="download-btn" style="margin-top: 0.5rem; display: inline-block;">⬇️ Baixar arquivo</a>
+        </div>
+        <pre>{highlighted}</pre>
+    </div>
+</body>
+</html>
+"""
+                return HTMLResponse(content=html_content)
+            except Exception as e:
+                logger.error(f"Erro ao ler arquivo OFX: {e}")
+                raise HTTPException(status_code=500, detail=f"Erro ao ler arquivo OFX: {str(e)}")
+
+        # Para PDFs, mantém o comportamento original
+        return FileResponse(
+            path=file_path,
+            filename=filename or "documento.pdf",
+            media_type="application/pdf",
+            content_disposition_type="inline",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao visualizar arquivo de extratos baixados: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.get("/extratos/logs/{log_id}/download")
+async def download_extratos_log_file(log_id: int):
+    """Faz download do arquivo associado ao log de extratos baixados."""
+    try:
         from fastapi.responses import FileResponse
         import os
 
@@ -2727,16 +3092,22 @@ async def view_extratos_log_file(log_id: int):
         if not file_path or not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="Arquivo fisico nao encontrado")
 
+        # Detecta o tipo de arquivo para definir o media_type
+        if filename and filename.lower().endswith('.ofx'):
+            media_type = "text/plain"
+        else:
+            media_type = "application/pdf"
+
         return FileResponse(
             path=file_path,
-            filename=filename or "documento.pdf",
-            media_type="application/pdf",
-            content_disposition_type="inline",
+            filename=filename or "documento",
+            media_type=media_type,
+            content_disposition_type="attachment",  # Força o download
         )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Erro ao visualizar arquivo de extratos baixados: {e}")
+        logger.error(f"Erro ao fazer download do arquivo: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/extratos/logs")
@@ -2956,8 +3327,49 @@ async def _process_single_test_pdf(
                 progress=60
             ))
         matching_service = get_matching_service()
-        match_result = matching_service.match(extraction)
-        
+        # Detecta se é arquivo OFX para priorizar busca por conta
+        is_ofx = filename.lower().endswith('.ofx')
+        match_result = matching_service.match(extraction, is_ofx=is_ofx)
+
+        # Se identificou o cliente, USA SEMPRE OS DADOS DA PLANILHA (não do PDF)
+        # Isso garante que não haja inconsistências entre PDF e cadastro
+        if match_result.identificado and match_result.cliente:
+            # BANCO: sempre usa o da planilha
+            if match_result.cliente.banco:
+                banco_original = extraction.banco
+                extraction.banco = match_result.cliente.banco.strip().upper()
+                if banco_original != extraction.banco:
+                    logger.info(
+                        "Banco corrigido pela planilha: '%s' -> '%s'",
+                        banco_original,
+                        extraction.banco,
+                    )
+
+            # AGÊNCIA: sempre usa a da planilha
+            if match_result.cliente.agencia:
+                agencia_original = extraction.agencia
+                extraction.agencia = str(match_result.cliente.agencia)
+                if agencia_original != extraction.agencia:
+                    logger.info(
+                        "Agência corrigida pela planilha: '%s' -> '%s'",
+                        agencia_original,
+                        extraction.agencia,
+                    )
+
+            # CONTA: sempre usa a da planilha (exceto para Conta Capital que tem número diferente)
+            if match_result.cliente.conta:
+                # Conta Capital tem número diferente, então não sobrescreve
+                is_conta_capital = extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper()
+                if not is_conta_capital:
+                    conta_original = extraction.conta
+                    extraction.conta = str(match_result.cliente.conta)
+                    if conta_original != extraction.conta:
+                        logger.info(
+                            "Conta corrigida pela planilha: '%s' -> '%s'",
+                            conta_original,
+                            extraction.conta,
+                        )
+
         # 4. Calcula caminho que SERIA usado (sem salvar)
         storage_service = get_storage_service()
         ano, mes = storage_service._get_previous_month()
@@ -2966,7 +3378,12 @@ async def _process_single_test_pdf(
             client_base_path = storage_service._resolve_client_path(match_result.cliente)
             if client_base_path:
                 # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
-                conta = storage_service._select_account(extraction.banco, extraction.conta, match_result.cliente.conta)
+                conta = storage_service._select_account(
+                    extraction.banco,
+                    extraction.conta,
+                    match_result.cliente.conta,
+                    extraction.tipo_documento,
+                )
                 target_path = storage_service._build_path_structure(
                     client_base_path,
                     ano,
@@ -2979,9 +3396,11 @@ async def _process_single_test_pdf(
                 file_name = storage_service._build_filename(
                     extraction.banco,
                     extraction.tipo_documento,
+                    extraction.contrato,
                     pdf_content,
                     target_path,
-                    filename
+                    filename,
+                    conta
                 )
                 simulated_path = str(target_path / file_name)
             else:

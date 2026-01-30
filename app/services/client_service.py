@@ -115,6 +115,61 @@ class ClientService:
             ClientService._cache_time = datetime.now()
             
             return clients
+
+    def load_clients_from_path(self, excel_path: Path, force_reload: bool = False) -> list[ClientInfo]:
+        """
+        Carrega clientes a partir de um caminho de planilha informado.
+
+        Usa o cache padrao apenas quando o caminho for o mesmo de clients_excel_path.
+        """
+        if excel_path == self.settings.clients_excel_path:
+            return self.load_clients(force_reload=force_reload)
+
+        logger.info(f"Carregando planilha de clientes (override): {excel_path}")
+
+        if not excel_path.exists():
+            raise FileNotFoundError(f"Planilha de clientes nao encontrada: {excel_path}")
+
+        try:
+            df = pd.read_excel(
+                excel_path,
+                dtype=str,
+                engine="openpyxl",
+            )
+        except Exception as e:
+            raise ValueError(f"Erro ao ler planilha de clientes: {e}")
+
+        df.columns = df.columns.str.strip().str.upper()
+
+        required_columns = {"COD", "NOME"}
+        missing = required_columns - set(df.columns)
+        if missing:
+            raise ValueError(f"Colunas obrigatorias faltando na planilha: {missing}")
+
+        clients: list[ClientInfo] = []
+
+        for _, row in df.iterrows():
+            cod = str(row.get("COD", "")).strip()
+            nome = str(row.get("NOME", "")).strip()
+
+            if not cod or not nome or cod.lower() == "nan":
+                continue
+
+            cod = cod.zfill(3)
+
+            client = ClientInfo(
+                cod=cod,
+                nome=nome,
+                cnpj=self._clean_value(row.get("CNPJ")),
+                banco=self._clean_value(row.get("BANCO")),
+                agencia=self._clean_value(row.get("AGENCIA")),
+                conta=self._clean_value(row.get("NÂº CONTA") or row.get("CONTA")),
+            )
+
+            clients.append(client)
+
+        logger.info(f"Carregados {len(clients)} clientes da planilha (override)")
+        return clients
     
     def _is_cache_valid(self) -> bool:
         """Verifica se o cache ainda é válido."""

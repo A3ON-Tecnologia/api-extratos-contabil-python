@@ -56,6 +56,16 @@ Regras:
 
 Responda APENAS com o nome do banco, sem explicacoes adicionais."""
 
+# Prompt para extrair numero de contrato de emprestimo
+VISION_CONTRACT_PROMPT = """Extraia o NUMERO DO CONTRATO visivel nesta imagem de documento.
+
+Regras:
+- Procure o campo "Numero do Contrato" ou "Nº do Contrato"
+- O numero costuma estar na mesma linha do rótulo, abaixo do nome do cliente
+- Retorne APENAS o numero (somente digitos e/ou separadores como - ou /)
+- Se nao encontrar, retorne apenas: "DESCONHECIDO"
+"""
+
 
 class VisionService:
     """Servico de identificacao de logos usando visao computacional."""
@@ -225,6 +235,95 @@ class VisionService:
             if banco and banco != "DESCONHECIDO":
                 return banco
             return None
+
+    def extract_contract_number_from_pdf(self, pdf_data: bytes, max_pages: int = 1) -> str | None:
+        """
+        Extrai o numero do contrato a partir do texto visivel (OCR) nas paginas do PDF.
+        """
+        try:
+            logger.info("Iniciando OCR para numero do contrato...")
+
+            pdf_document = fitz.open(stream=pdf_data, filetype="pdf")
+            for page_num in range(min(max_pages, len(pdf_document))):
+                page = pdf_document[page_num]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img_data = pix.tobytes("png")
+
+                # Tenta primeiro na area superior esquerda (onde fica o cabecalho)
+                cropped = self._crop_image_bytes(img_data, left=0.0, top=0.0, right=0.6, bottom=0.45)
+                contrato = self._extract_contract_from_image(cropped)
+                if contrato and contrato != "DESCONHECIDO":
+                    logger.info(f"Contrato identificado por OCR (recorte): {contrato}")
+                    pdf_document.close()
+                    return contrato
+
+                # Fallback: tenta na pagina inteira
+                contrato = self._extract_contract_from_image(img_data)
+                if contrato and contrato != "DESCONHECIDO":
+                    logger.info(f"Contrato identificado por OCR (pagina inteira): {contrato}")
+                    pdf_document.close()
+                    return contrato
+
+            pdf_document.close()
+            logger.warning("Nao foi possivel identificar contrato via OCR")
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao identificar contrato por OCR: {e}")
+            return None
+
+    def _extract_contract_from_image(self, image_data: bytes) -> str | None:
+        """Extrai numero do contrato a partir de uma imagem."""
+        try:
+            base64_image = base64.b64encode(image_data).decode('utf-8')
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": VISION_CONTRACT_PROMPT},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}",
+                                    "detail": "high"
+                                },
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=100,
+                temperature=0,
+            )
+
+            contrato = response.choices[0].message.content.strip()
+            return contrato
+        except Exception as e:
+            logger.error(f"Erro ao extrair contrato via visao: {e}")
+            return None
+
+    def _crop_image_bytes(
+        self,
+        image_data: bytes,
+        *,
+        left: float,
+        top: float,
+        right: float,
+        bottom: float,
+    ) -> bytes:
+        """Recorta a imagem usando porcentagens (0-1) e retorna bytes PNG."""
+        image = Image.open(BytesIO(image_data))
+        width, height = image.size
+        crop_box = (
+            int(width * left),
+            int(height * top),
+            int(width * right),
+            int(height * bottom),
+        )
+        cropped = image.crop(crop_box)
+        buffer = BytesIO()
+        cropped.save(buffer, format="PNG")
+        return buffer.getvalue()
         except Exception as e:
             logger.error(f"Erro ao processar OCR com visao: {e}")
             return None

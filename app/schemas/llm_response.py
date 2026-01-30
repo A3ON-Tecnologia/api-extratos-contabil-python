@@ -46,6 +46,12 @@ class LLMExtractionResult(BaseModel):
         default=None,
         description="Número da conta bancária"
     )
+
+
+    contrato: str | None = Field(
+        default=None,
+        description="N?mero do contrato (ex: empr?stimo)"
+    )
     
     tipo_documento: str = Field(
         default="documento",
@@ -58,4 +64,3 @@ class LLMExtractionResult(BaseModel):
         le=1.0,
         description="Nível de confiança da extração"
     )
-
