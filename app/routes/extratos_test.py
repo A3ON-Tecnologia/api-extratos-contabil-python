@@ -118,9 +118,9 @@ async def list_test_jobs():
 @router.post("/processar-pasta")
 async def processar_pasta_teste():
     """
-    MODO TESTE: Processa todos os PDFs da pasta WATCH_FOLDER_PATH.
+    MODO TESTE: Processa todos os PDFs/OFX da pasta WATCH_FOLDER_PATH.
 
-    Processa todos os arquivos PDF encontrados na pasta configurada,
+    Processa todos os arquivos PDF/OFX encontrados na pasta configurada,
     simulando onde seriam salvos sem salvar de verdade.
 
     Returns:
@@ -135,13 +135,13 @@ async def processar_pasta_teste():
             detail=f"Pasta não encontrada: {watch_path}"
         )
 
-    # Lista todos os PDFs
-    pdf_files = list(watch_path.glob("*.pdf"))
+    # Lista todos os PDFs/OFX
+    pdf_files = list(watch_path.glob("*.pdf")) + list(watch_path.glob("*.ofx"))
 
     if not pdf_files:
         return {
             "mode": "TESTE",
-            "message": "Nenhum PDF encontrado na pasta",
+            "message": "Nenhum PDF/OFX encontrado na pasta",
             "path": str(watch_path),
             "total": 0,
             "files": []
@@ -298,7 +298,8 @@ async def _process_test_extrato(content: bytes, filename: str, file_hash: str) -
     # 3. Matching pela mesma lógica do sistema
     logger.info("[TESTE] Fazendo matching na planilha RELAÇÃO CLIENTES...")
     matching_service = MatchingService(ClientService())
-    match_result = matching_service.match(extraction)
+    is_ofx = filename.lower().endswith(".ofx")
+    match_result = matching_service.match(extraction, is_ofx=is_ofx)
 
     # 4. Determina caminho simulado (mesma lógica do modo teste)
     storage_service = StorageService()

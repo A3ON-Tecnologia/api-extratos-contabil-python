@@ -110,6 +110,7 @@ class StorageService:
         Returns:
             Tupla (caminho_salvo, ano, mes)
         """
+        module_norm = (module or "make").lower()
         # Usa automaticamente o mês anterior
         ano, mes = self._get_previous_month()
 
@@ -141,6 +142,11 @@ class StorageService:
                     target_path,
                     original_filename
                 )
+                if module_norm.startswith("extra"):
+                    filename = self._ensure_unique_filename_incremental(
+                        filename,
+                        target_path
+                    )
             else:
                 logger.warning(
                     f"Estrutura de pastas não encontrada para cliente {match_result.cliente.cod}. "
@@ -156,11 +162,17 @@ class StorageService:
                 logger.warning(f"Pasta NAO_IDENTIFICADOS nao encontrada, criando: {target_path}")
                 target_path.mkdir(parents=True, exist_ok=True)
             
-            filename = self._ensure_unique_filename(
-                original_filename,
-                pdf_data,
-                target_path
-            )
+            if module_norm.startswith("extra"):
+                filename = self._ensure_unique_filename_incremental(
+                    original_filename,
+                    target_path,
+                )
+            else:
+                filename = self._ensure_unique_filename(
+                    original_filename,
+                    pdf_data,
+                    target_path
+                )
         
         # Salva o arquivo
         full_path = target_path / filename
@@ -315,6 +327,29 @@ class StorageService:
             filename = f"{name}_{hash_suffix}.pdf"
         
         return filename
+
+    def _ensure_unique_filename_incremental(
+        self,
+        original_filename: str,
+        target_path: Path
+    ) -> str:
+        """
+        Garante nome único adicionando sufixo incremental (_1, _2, ...).
+        """
+        original_path = Path(original_filename)
+        stem = original_path.stem or "DOCUMENTO"
+        suffix = original_path.suffix.lower() or ".pdf"
+        filename = f"{stem}{suffix}"
+
+        if not (target_path / filename).exists():
+            return filename
+
+        counter = 1
+        while True:
+            candidate = f"{stem}_{counter}{suffix}"
+            if not (target_path / candidate).exists():
+                return candidate
+            counter += 1
     
     def check_folder_exists(self, client: ClientInfo) -> bool:
         """

@@ -14,7 +14,17 @@ from pathlib import Path
 from typing import Annotated, List
 from concurrent.futures import ThreadPoolExecutor
 
-from fastapi import FastAPI, File, HTTPException, UploadFile, WebSocket, WebSocketDisconnect, status, BackgroundTasks
+from fastapi import (
+    BackgroundTasks,
+    FastAPI,
+    File,
+    HTTPException,
+    Request,
+    UploadFile,
+    WebSocket,
+    WebSocketDisconnect,
+    status,
+)
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import HTMLResponse, JSONResponse
 from pydantic import BaseModel
@@ -334,7 +344,7 @@ async def _watch_folder_loop():
                 if not file_path.is_file():
                     continue
 
-                if file_path.suffix.lower() not in {".pdf", ".zip"}:
+                if file_path.suffix.lower() not in {".pdf", ".zip", ".ofx"}:
                     continue
 
                 file_key = str(file_path.resolve())
@@ -464,7 +474,7 @@ async def extratos_watch_debug():
 
 @app.get("/extratos/mapear")
 async def mapear_extratos():
-    """Lista todos os arquivos PDF disponíveis na pasta de extratos."""
+    """Lista todos os arquivos PDF/OFX disponíveis na pasta de extratos."""
     settings = get_settings()
     watch_path = settings.watch_folder_path
 
@@ -501,7 +511,7 @@ async def mapear_extratos():
 
         for file_path in watch_path.iterdir():
             try:
-                if file_path.is_file() and file_path.suffix.lower() == '.pdf':
+                if file_path.is_file() and file_path.suffix.lower() in {'.pdf', '.ofx'}:
                     stat = file_path.stat()
                     pdf_files.append({
                         "nome": file_path.name,
@@ -612,7 +622,7 @@ async def simular_todos_extratos():
     erros = []
 
     # Lista todos os PDFs
-    pdf_files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() == '.pdf']
+    pdf_files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() in {'.pdf', '.ofx'}]
 
     logger.info(f"[SIMULACAO EM LOTE] Processando {len(pdf_files)} arquivos")
 
@@ -862,18 +872,34 @@ async def health_check():
     }
 
 
-@app.get("/")
-async def root():
-    """Endpoint raiz com informacoes da API."""
+@app.get("/", response_class=HTMLResponse)
+async def root(request: Request):
+    """Home da aplicacao (HTML) ou resumo da API (JSON)."""
+    accept = (request.headers.get("accept") or "").lower()
+    wants_html = "text/html" in accept or "*/*" in accept
+    if wants_html:
+        template_path = Path(__file__).parent / "templates" / "home.html"
+        if not template_path.exists():
+            raise HTTPException(status_code=500, detail="Template home nao encontrado")
+        return HTMLResponse(
+            content=_render_template_with_navbar(
+                template_path,
+                show_main=True,
+                show_extratos=True,
+            )
+        )
+
     settings = get_settings()
-    return {
-        "name": "Extratos Contabeis API",
-        "version": "1.0.0",
-        "base_path": str(settings.base_path),
-        "docs": "/docs",
-        "monitor": "/monitor",
-        "extratos": "/extratos",
-    }
+    return JSONResponse(
+        content={
+            "name": "Extratos Contabeis API",
+            "version": "1.0.0",
+            "base_path": str(settings.base_path),
+            "docs": "/docs",
+            "monitor": "/monitor",
+            "extratos": "/extratos",
+        }
+    )
 
 
 @app.get("/config")
@@ -1068,7 +1094,7 @@ async def _handle_extratos_webhook(
 
 @app.post("/extratos/webhook")
 async def extratos_webhook_prod(
-    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos")],
+    file: Annotated[UploadFile, File(description="Arquivo PDF, OFX ou ZIP de extratos")],
     background_tasks: BackgroundTasks,
 ):
     """
@@ -1085,7 +1111,7 @@ async def extratos_webhook_prod(
 
 @app.post("/extratos/webhook/test")
 async def extratos_webhook_test(
-    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos para teste")],
+    file: Annotated[UploadFile, File(description="Arquivo PDF, OFX ou ZIP de extratos para teste")],
     background_tasks: BackgroundTasks
 ):
     """
@@ -1104,7 +1130,7 @@ async def extratos_webhook_test(
 
 @app.post("/extratos/webhook/monitor")
 async def extratos_webhook_monitor(
-    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos (Monitor Extratos)")],
+    file: Annotated[UploadFile, File(description="Arquivo PDF, OFX ou ZIP de extratos (Monitor Extratos)")],
     background_tasks: BackgroundTasks,
 ):
     """Webhook específico da view Monitor Extratos (produção)."""
@@ -1117,7 +1143,7 @@ async def extratos_webhook_monitor(
 
 @app.post("/extratos/webhook/extratos")
 async def extratos_webhook_extratos(
-    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos (Extratos)")],
+    file: Annotated[UploadFile, File(description="Arquivo PDF, OFX ou ZIP de extratos (Extratos)")],
     background_tasks: BackgroundTasks,
 ):
     """Webhook específico da view Extratos (produção)."""
@@ -1130,7 +1156,7 @@ async def extratos_webhook_extratos(
 
 @app.post("/extratos/webhook/monitor/test")
 async def extratos_webhook_monitor_test(
-    file: Annotated[UploadFile, File(description="Arquivo PDF ou ZIP de extratos (Monitor Teste)")],
+    file: Annotated[UploadFile, File(description="Arquivo PDF, OFX ou ZIP de extratos (Monitor Teste)")],
     background_tasks: BackgroundTasks,
 ):
     """Webhook específico da view Monitor Teste (extratos baixados)."""
@@ -1885,7 +1911,7 @@ async def process_extratos_pdf_async(
     job_id: str | None = None,
     test_mode: bool = False,
 ) -> ProcessingResult:
-    """Processa um unico arquivo PDF (extratos baixados)."""
+    """Processa um unico arquivo PDF/OFX (extratos baixados)."""
     event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
     file_hash = compute_hash(pdf_data)
     jobs_dict = _extratos_test_jobs if test_mode else _extratos_jobs
@@ -1921,7 +1947,9 @@ async def process_extratos_pdf_async(
 
     _extratos_processed_hashes.add(file_hash)
 
-    is_pdf = pdf_data.startswith(b"%PDF-") or filename.lower().endswith(".pdf")
+    filename_lower = filename.lower()
+    is_pdf = pdf_data.startswith(b"%PDF-") or filename_lower.endswith(".pdf")
+    is_ofx = filename_lower.endswith(".ofx")
     if not is_pdf:
         logger.info(f"Processando arquivo nao-PDF: {filename}")
 
@@ -1998,7 +2026,7 @@ async def process_extratos_pdf_async(
             raise asyncio.CancelledError("Cancelado pelo usuario")
 
         matching_service = get_matching_service()
-        match_result = matching_service.match(extraction)
+        match_result = matching_service.match(extraction, is_ofx=is_ofx)
 
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.MATCHING_COMPLETED,
