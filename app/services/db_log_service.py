@@ -141,8 +141,17 @@ class DatabaseLogService:
         try:
             total = db.query(ExtratoLog).count()
             sucesso = db.query(ExtratoLog).filter(ExtratoLog.status == "SUCESSO").count()
-            nao_identificado = db.query(ExtratoLog).filter(ExtratoLog.status == "NAO_IDENTIFICADO").count()
-            falha = db.query(ExtratoLog).filter(ExtratoLog.status == "FALHA").count()
+
+            nao_identificado_values = [
+                "NAO_IDENTIFICADO",
+                "NAO IDENTIFICADO",
+                "NÃO IDENTIFICADO",
+                "NÃƒO IDENTIFICADO",
+            ]
+            nao_identificado = db.query(ExtratoLog).filter(ExtratoLog.status.in_(nao_identificado_values)).count()
+
+            falha_values = ["FALHA", "ERRO"]
+            falha = db.query(ExtratoLog).filter(ExtratoLog.status.in_(falha_values)).count()
             
             return {
                 "total": total,

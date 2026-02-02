@@ -44,25 +44,11 @@ class Settings(BaseSettings):
     db_user: str
     db_password: str
     db_name: str
+
+    # ==================== Pastas de Não Identificados ====================
+    unidentified_make_path: Path = Path(r"J:\JP Digital\000 - AUTOMAÇÕES\000 - NAO_IDENTIFICADOS\NÃO IDENTIFICADOS MAKE")
+    unidentified_extratos_path: Path = Path(r"J:\JP Digital\000 - AUTOMAÇÕES\000 - NAO_IDENTIFICADOS\NÃO IDENTIFICADOS EXTRATOS BAIXADOS")
     
-    @property
-    def unidentified_path(self) -> Path:
-        """Caminho raiz para arquivos não identificados."""
-        return self.base_path / "000 - AUTOMAÇÕES" / "000 - NAO_IDENTIFICADOS"
-
-    def _unidentified_module_base(self, module: str | None) -> Path:
-        """Base de pasta de não identificados por módulo."""
-        module_key = (module or "").strip().lower()
-        if module_key in {"make", "main", "principal"}:
-            return self.unidentified_path / "NÃO IDENTIFICADOS MAKE"
-        if module_key in {"extratos", "extratos_baixados", "extratos-baixados"}:
-            return self.unidentified_path / "NÃO IDENTIFICADOS EXTRATOS BAIXADOS"
-        return self.unidentified_path
-
-    def get_unidentified_path(self, module: str | None, test_mode: bool = False) -> Path:
-        """Retorna o caminho de não identificados por módulo."""
-        return self._unidentified_module_base(module)
-
     @property
     def database_url(self) -> str:
         """URL de conexão com o banco de dados MySQL."""
@@ -83,7 +69,8 @@ class Settings(BaseSettings):
             "log_excel_path": self.log_excel_path.exists(),
             "extratos_excel_path": self.extratos_excel_path.exists(),
             "watch_folder_path": self.watch_folder_path.exists(),
-            "unidentified_path": self.unidentified_path.exists(),
+            "unidentified_make_path": self.unidentified_make_path.exists(),
+            "unidentified_extratos_path": self.unidentified_extratos_path.exists(),
         }
 
     def validate_database_connection(self) -> dict[str, any]:
@@ -143,6 +130,8 @@ class Settings(BaseSettings):
             "watch_folder_path": str(self.watch_folder_path),
             "similarity_threshold": self.similarity_threshold,
             "port": self.port,
+            "unidentified_make_path": str(self.unidentified_make_path),
+            "unidentified_extratos_path": str(self.unidentified_extratos_path),
             "database": {
                 "host": self.db_host,
                 "port": self.db_port,

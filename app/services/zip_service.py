@@ -24,20 +24,20 @@ class ExtractedFile:
 
 
 class ZIPService:
-    """Serviço para extração de PDFs/OFX de arquivos ZIP."""
+    """Serviço para extração de PDFs e OFX de arquivos ZIP."""
     
     def extract_pdfs(self, zip_data: bytes) -> list[ExtractedFile]:
         """
-        Extrai todos os PDFs/OFX de um arquivo ZIP.
+        Extrai todos os PDFs e OFX de um arquivo ZIP.
         
-        Ignora arquivos que não sejam PDFs/OFX e arquivos em pastas
+        Ignora arquivos que não sejam PDFs e arquivos em pastas
         que comecem com "__" (como __MACOSX).
         
         Args:
             zip_data: Bytes do arquivo ZIP
             
         Returns:
-            Lista de arquivos PDF/OFX extraídos
+            Lista de arquivos PDF extraídos
             
         Raises:
             ValueError: Se o ZIP estiver corrompido ou vazio
@@ -64,16 +64,17 @@ class ZIPService:
                 continue
             
             # Verifica se é PDF ou OFX pela extensão
-            is_pdf = filename.lower().endswith(".pdf")
-            is_ofx = filename.lower().endswith(".ofx")
+            lower_name = filename.lower()
+            is_pdf = lower_name.endswith(".pdf")
+            is_ofx = lower_name.endswith(".ofx")
             if not (is_pdf or is_ofx):
-                logger.debug(f"Ignorando arquivo não suportado: {filename}")
+                logger.debug(f"Ignorando arquivo não-PDF/OFX: {filename}")
                 continue
             
             try:
                 data = zip_file.read(file_info.filename)
                 
-                # Validação adicional para PDF
+                # Validação adicional: verifica magic bytes do PDF
                 if is_pdf and not data.startswith(b"%PDF-"):
                     logger.warning(
                         f"Arquivo {filename} tem extensão .pdf mas não é um PDF válido"
@@ -92,7 +93,7 @@ class ZIPService:
                 continue
         
         if not extracted_files:
-            raise ValueError("Nenhum arquivo PDF/OFX encontrado no ZIP")
+            raise ValueError("Nenhum arquivo PDF ou OFX encontrado no ZIP")
         
         logger.info(f"Total de arquivos extraídos: {len(extracted_files)}")
         return extracted_files

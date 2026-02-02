@@ -50,53 +50,7 @@ class ExtratosBaixadosSimulacaoService:
             executor, self._llm_service.extract_info_with_fallback, text, pdf_data
         )
 
-        is_ofx = filename.lower().endswith(".ofx")
-        match_result = self._matching_service.match(extraction, is_ofx=is_ofx)
-
-        # Se identificou o cliente, USA SEMPRE OS DADOS DA PLANILHA (não do PDF)
-        if match_result.identificado and match_result.cliente:
-            # BANCO: sempre usa o da planilha
-            if match_result.cliente.banco:
-                banco_original = extraction.banco
-                extraction.banco = match_result.cliente.banco.strip().upper()
-                if banco_original != extraction.banco:
-                    logger.info(
-                        "[SIMULACAO] Banco corrigido pela planilha: '%s' -> '%s'",
-                        banco_original,
-                        extraction.banco,
-                    )
-
-            # AGÊNCIA: sempre usa a da planilha
-            if match_result.cliente.agencia:
-                agencia_original = extraction.agencia
-                extraction.agencia = str(match_result.cliente.agencia)
-                if agencia_original != extraction.agencia:
-                    logger.info(
-                        "[SIMULACAO] Agência corrigida pela planilha: '%s' -> '%s'",
-                        agencia_original,
-                        extraction.agencia,
-                    )
-
-            # CONTA: sempre usa a da planilha (exceto para Conta Capital)
-            if match_result.cliente.conta:
-                is_conta_capital = extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper()
-                if not is_conta_capital:
-                    conta_original = extraction.conta
-                    extraction.conta = str(match_result.cliente.conta)
-                    if conta_original != extraction.conta:
-                        logger.info(
-                            "[SIMULACAO] Conta corrigida pela planilha: '%s' -> '%s'",
-                            conta_original,
-                            extraction.conta,
-                        )
-        if extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper():
-            conta_cadastrada = match_result.cliente.conta if match_result.identificado else None
-            extraction.conta = self._storage_service._select_account(
-                extraction.banco,
-                extraction.conta,
-                conta_cadastrada,
-                extraction.tipo_documento,
-            )
+        match_result = self._matching_service.match(extraction)
         ano, mes = self._storage_service._get_previous_month()
 
         caminho_destino, pasta_destino_existe, status, cliente_nome = (
@@ -105,15 +59,12 @@ class ExtratosBaixadosSimulacaoService:
                 match_result=match_result,
                 banco=extraction.banco,
                 conta_extrato=extraction.conta,
-                contrato=extraction.contrato,
                 tipo_documento=extraction.tipo_documento,
                 pdf_data=pdf_data,
                 ano=ano,
                 mes=mes,
             )
         )
-
-        motivo_falha = match_result.motivo_fallback if not match_result.identificado else None
 
         log_entry = self._log_teste_service.log_extrato_teste(
             arquivo_original=filename,
@@ -131,7 +82,6 @@ class ExtratosBaixadosSimulacaoService:
             mes=mes,
             metodo_identificacao=match_result.metodo.value,
             confianca_ia=extraction.confianca,
-            erro=motivo_falha,
         )
 
         await self._emit_test_event(
@@ -143,7 +93,6 @@ class ExtratosBaixadosSimulacaoService:
             ano=ano,
             mes=mes,
             log_id=log_entry.id,
-            erro=motivo_falha,
         )
 
         return {
@@ -170,7 +119,6 @@ class ExtratosBaixadosSimulacaoService:
                 "confianca": extraction.confianca,
             },
             "periodo": {"ano": ano, "mes": mes},
-            "motivo_nao_identificado": motivo_falha,
             "hash": file_hash,
             "tamanho_mb": round(len(pdf_data) / (1024 * 1024), 2),
             "log_id": log_entry.id,
@@ -182,7 +130,6 @@ class ExtratosBaixadosSimulacaoService:
         match_result: MatchResult,
         banco: str | None,
         conta_extrato: str | None,
-        contrato: str | None,
         tipo_documento: str,
         pdf_data: bytes,
         ano: int,
@@ -193,16 +140,13 @@ class ExtratosBaixadosSimulacaoService:
             client_base_path = self._storage_service._resolve_client_path(match_result.cliente)
             if client_base_path:
                 conta = self._storage_service._select_account(
-                    banco,
-                    conta_extrato,
-                    match_result.cliente.conta,
-                    tipo_documento,
+                    banco, conta_extrato, match_result.cliente.conta
                 )
                 target_path = self._storage_service._build_path_structure(
                     client_base_path, ano, mes, banco, conta
                 )
                 file_name = self._storage_service._build_filename(
-                    banco, tipo_documento, contrato, pdf_data, target_path, filename, conta
+                    banco, tipo_documento, pdf_data, target_path, filename
                 )
                 return (
                     str(target_path / file_name),
@@ -212,8 +156,8 @@ class ExtratosBaixadosSimulacaoService:
                 )
 
         return (
-            str(self._storage_service.get_unidentified_path("extratos", test_mode=True) / filename),
-            self._storage_service.get_unidentified_path("extratos", test_mode=True).exists(),
+            str(self._storage_service.get_unidentified_path("extratos") / filename),
+            self._storage_service.get_unidentified_path("extratos").exists(),
             "NAO_IDENTIFICADO",
             None,
         )
@@ -228,7 +172,6 @@ class ExtratosBaixadosSimulacaoService:
         ano: int,
         mes: int,
         log_id: int | None,
-        erro: str | None,
     ) -> None:
         """Emite evento no monitor de teste para refletir a simulacao."""
         event_manager = get_extratos_test_event_manager()
@@ -255,7 +198,6 @@ class ExtratosBaixadosSimulacaoService:
                     "mes": mes,
                     "metodo": match_result.metodo.value,
                     "log_id": log_id,
-                    "erro": erro,
                 },
                 progress=100,
             )

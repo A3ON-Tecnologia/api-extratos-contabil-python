@@ -6,14 +6,12 @@ de pastas em rede Windows.
 """
 
 import logging
-import re
 from datetime import datetime
 from pathlib import Path
 
 from app.config import get_settings
 from app.schemas.client import ClientInfo, MatchResult
 from app.utils.hash import short_hash
-from app.utils.text import extract_numbers
 
 logger = logging.getLogger(__name__)
 
@@ -35,8 +33,6 @@ MONTH_NAMES = {
 
 # Mapeamento de tipos de documento para nomes de arquivo
 DOCUMENT_TYPE_MAPPING = {
-    "EXTRATO EMPR?STIMO": "EXTRATO EMPR?STIMO",
-    "EXTRATO EMPRESTIMO": "EXTRATO EMPR?STIMO",
     "EXTRATO DA CONTA CAPITAL": "EXTRATO DA CONTA CAPITAL",
     "EXTRATO DE CONTA CORRENTE": "EXTRATO DE CONTA CORRENTE",
     "EXTRATO CONSOLIDADO RENDA FIXA": "EXTRATO CONSOLIDADO RENDA FIXA",
@@ -47,6 +43,7 @@ DOCUMENT_TYPE_MAPPING = {
     "EXTRATO CONTA POUPANÇA": "EXTRATO CONTA POUPANÇA",
     "SALDO DE APLICAÇÃO": "EXTRATO APLICAÇÃO",
     "EXTRATO APLICAÇÃO": "EXTRATO APLICAÇÃO",
+    "CONTA GRÁFICA DETALHADA": "CONTA GRÁFICA DETALHADA",
     "CC": "EXTRATO DE CONTA CORRENTE",
     "POUPANÇA": "EXTRATO CONTA POUPANÇA",
     "CARTÃO": "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO",
@@ -84,19 +81,10 @@ class StorageService:
         banco: str | None,
         conta_extrato: str | None,
         conta_cadastrada: str | None,
-        tipo_documento: str | None = None,
     ) -> str | None:
         """Seleciona a conta respeitando regras por banco."""
         if self._is_cresol(banco) and conta_cadastrada:
             return conta_cadastrada
-        if tipo_documento and "CONTA CAPITAL" in tipo_documento.upper():
-            if not conta_extrato or not conta_cadastrada:
-                return None
-            conta_numbers = extract_numbers(conta_extrato)
-            cadastrado_numbers = extract_numbers(conta_cadastrada)
-            if conta_numbers and conta_numbers == cadastrado_numbers:
-                return conta_extrato
-            return None
         return conta_extrato or conta_cadastrada
 
     def save_file(
@@ -107,9 +95,7 @@ class StorageService:
         tipo_documento: str | None = None,
         banco: str | None = None,
         conta_extrato: str | None = None,
-        contrato: str | None = None,
         module: str = "make",
-        test_mode: bool = False,
     ) -> tuple[str, int, int]:
         """
         Salva o arquivo PDF no caminho correto.
@@ -134,48 +120,46 @@ class StorageService:
             client_base_path = self._resolve_client_path(match_result.cliente)
 
             if client_base_path:
-                # Pasta padrao: cliente/Departamento Contabil/ANO/MES/(BANCO)/(CONTA)
-                conta = self._select_account(
-                    banco,
-                    conta_extrato,
-                    match_result.cliente.conta,
-                    tipo_documento,
-                )
-                target_path = self._build_path_structure(client_base_path, ano, mes, banco, conta)
+                # Pasta padrão: cliente/Departamento Contabil/ANO/MES
+                target_path = self._build_path_structure(client_base_path, ano, mes)
 
-                # Garante que a pasta do destino existe
+                # Garante que a pasta do mes existe
+                month_path = self._build_path_structure(client_base_path, ano, mes)
+                if not month_path.exists():
+                    logger.info(f"Criando pasta do mes: {month_path}")
+                    month_path.mkdir(parents=True, exist_ok=True)
+
+                # Garante que a pasta do mes existe
                 if not target_path.exists():
-                    logger.info(f"Criando pasta do destino: {target_path}")
+                    logger.info(f"Criando pasta do mes: {target_path}")
                     target_path.mkdir(parents=True, exist_ok=True)
 
                 filename = self._build_filename(
                     banco,
                     tipo_documento,
-                    contrato,
                     pdf_data,
                     target_path,
-                    original_filename,
-                    conta
+                    original_filename
                 )
-                filename = self._ensure_incremental_filename(filename, target_path)
             else:
                 logger.warning(
                     f"Estrutura de pastas não encontrada para cliente {match_result.cliente.cod}. "
                     "Salvando em NAO_IDENTIFICADOS."
                 )
         
-        # Fallback: salva direto na pasta de NAO_IDENTIFICADOS do módulo (sem subpastas)
+        # Fallback: salva direto na pasta NAO_IDENTIFICADOS (sem subpastas)
         if not target_path:
-            target_path = self.get_unidentified_path(module, test_mode)
+            target_path = self.get_unidentified_path(module)
             
             # Verifica se a pasta de não identificados existe
             if not target_path.exists():
                 logger.warning(f"Pasta NAO_IDENTIFICADOS nao encontrada, criando: {target_path}")
                 target_path.mkdir(parents=True, exist_ok=True)
             
-            filename = self._ensure_incremental_filename(
-                self._ensure_unique_filename(original_filename),
-                target_path,
+            filename = self._ensure_unique_filename(
+                original_filename,
+                pdf_data,
+                target_path
             )
         
         # Salva o arquivo
@@ -221,7 +205,8 @@ class StorageService:
         """
         Constrói a estrutura de pastas dentro da pasta do cliente.
 
-        Estrutura padrao: cliente/Departamento Contabil/ANO/MES/(BANCO)/(CONTA)
+        Estrutura padrão: cliente/Departamento Contabil/ANO/MES
+        NUNCA cria subpastas por banco ou conta.
 
         Aceita tanto "Departamento Contábil" quanto "Departamento Contabil" (sem acento)
         """
@@ -241,80 +226,51 @@ class StorageService:
                 # Retorna o padrão com acento (mesmo que não exista, será tratado depois)
                 base_path = client_base_path / "Departamento Contábil" / str(ano) / mes_str
 
-        # Subpastas opcionais por banco/conta (quando informados)
-        if banco:
-            banco_folder = self._sanitize_folder_name(str(banco).upper().strip())
-            if banco_folder:
-                base_path = base_path / banco_folder
-        if conta:
-            conta_folder = self._sanitize_folder_name(str(conta).strip())
-            if conta_folder:
-                base_path = base_path / conta_folder
-
         return base_path
-
-    def _sanitize_folder_name(self, value: str) -> str:
-        """Remove caracteres invalidos para nomes de pasta no Windows."""
-        cleaned = re.sub(r'[<>:"/\\|?*]', "", value)
-        cleaned = re.sub(r"\s+", " ", cleaned).strip()
-        return cleaned
-
-    def _build_unidentified_path(
-        self,
-        ano: int,
-        mes: int,
-        module: str = "make",
-        test_mode: bool = False,
-    ) -> Path:
+    
+    def _build_unidentified_path(self, ano: int, mes: int, module: str = "make") -> Path:
         """
         Constrói o caminho para arquivos não identificados.
         
         Estrutura: NAO_IDENTIFICADOS/ANO/MÊS
         """
         mes_nome = MONTH_NAMES.get(mes, f"MES_{mes}")
-        return self.get_unidentified_path(module, test_mode) / str(ano) / mes_nome
+        return self.get_unidentified_path(module) / str(ano) / mes_nome
 
-    def get_unidentified_path(self, module: str, test_mode: bool = False) -> Path:
-        """Retorna o caminho de não identificados por módulo e modo."""
-        return self.settings.get_unidentified_path(module, test_mode)
+    def get_unidentified_path(self, module: str = "make") -> Path:
+        """
+        Retorna o caminho base de NAO_IDENTIFICADOS conforme o módulo.
+        module: "make" | "extratos"
+        """
+        module_norm = (module or "make").lower()
+        if module_norm.startswith("extra"):
+            return self.settings.unidentified_extratos_path
+        return self.settings.unidentified_make_path
 
     
     def _build_filename(
         self,
         banco: str | None,
         tipo_documento: str | None,
-        contrato: str | None,
         pdf_data: bytes,
         target_path: Path,
         original_filename: str = "",
-        conta: str | None = None,
     ) -> str:
         """
         Constrói o nome do arquivo usando o mapeamento de tipos de documento.
 
-        Formato: NOME_DO_TIPO_DOCUMENTO - CONTA.pdf
-        Ex: EXTRATO DE CONTA CORRENTE - 75662.pdf
-
-        O número da conta é usado como identificador único quando disponível.
+        Formato: NOME_DO_TIPO_DOCUMENTO.pdf
+        Ex: EXTRATO DE CONTA CORRENTE.pdf
         """
         # Extensão (pega do original ou assume .pdf)
         ext = Path(original_filename).suffix.lower() if original_filename else ".pdf"
         if not ext:
             ext = ".pdf"
 
-        # Normaliza o número da conta (remove caracteres não numéricos)
-        conta_normalizada = None
-        if conta:
-            conta_normalizada = extract_numbers(conta)
-
         # Tenta mapear o tipo de documento
         if tipo_documento:
             # Normaliza o tipo para uppercase para buscar no mapeamento
             tipo_upper = tipo_documento.upper()
-
-            if "EMPRESTIMO" in tipo_upper and contrato:
-                filename = f"EXTRATO EMPR?STIMO {contrato}{ext}"
-                return filename
 
             # Busca no mapeamento (case-insensitive)
             mapped_name = None
@@ -325,56 +281,41 @@ class StorageService:
 
             # Se encontrou no mapeamento, usa o nome mapeado
             if mapped_name:
-                # Adiciona o número da conta se disponível
-                if conta_normalizada:
-                    filename = f"{mapped_name} - {conta_normalizada}{ext}"
-                else:
-                    filename = f"{mapped_name}{ext}"
+                filename = f"{mapped_name}{ext}"
             else:
                 # Se não encontrou, usa o tipo original
-                if conta_normalizada:
-                    filename = f"{tipo_documento} - {conta_normalizada}{ext}"
-                else:
-                    filename = f"{tipo_documento}{ext}"
+                filename = f"{tipo_documento}{ext}"
         else:
             # Fallback: usa banco se disponível
             if banco:
-                if conta_normalizada:
-                    filename = f"EXTRATO_{banco.upper()} - {conta_normalizada}{ext}"
-                else:
-                    filename = f"EXTRATO_{banco.upper()}{ext}"
+                filename = f"EXTRATO_{banco.upper()}{ext}"
             else:
-                if conta_normalizada:
-                    filename = f"DOCUMENTO - {conta_normalizada}{ext}"
-                else:
-                    filename = f"DOCUMENTO{ext}"
+                filename = f"DOCUMENTO{ext}"
 
         # Se já existir arquivo com mesmo nome, será sobrescrito
         return filename
     
-    def _ensure_unique_filename(self, original_filename: str) -> str:
-        """Normaliza o nome base do arquivo mantendo a extensao."""
+    def _ensure_unique_filename(
+        self,
+        original_filename: str,
+        pdf_data: bytes,
+        target_path: Path
+    ) -> str:
+        """
+        Garante que o nome do arquivo seja único no diretório.
+        
+        Se já existir arquivo com mesmo nome, adiciona sufixo.
+        """
+        # Remove extensão e adiciona de volta .pdf
         name = Path(original_filename).stem
-        ext = Path(original_filename).suffix or ".pdf"
-        return f"{name}{ext}"
-
-    def _ensure_incremental_filename(self, filename: str, target_path: Path) -> str:
-        """
-        Garante nome unico no diretorio usando sufixo incremental: -1, -2, ...
-        """
-        candidate = filename
-        if not (target_path / candidate).exists():
-            return candidate
-
-        base = Path(filename).stem
-        ext = Path(filename).suffix or ".pdf"
-        counter = 1
-        while True:
-            candidate = f"{base}-{counter}{ext}"
-            if not (target_path / candidate).exists():
-                return candidate
-            counter += 1
-
+        filename = f"{name}.pdf"
+        
+        if (target_path / filename).exists():
+            hash_suffix = short_hash(pdf_data)
+            filename = f"{name}_{hash_suffix}.pdf"
+        
+        return filename
+    
     def check_folder_exists(self, client: ClientInfo) -> bool:
         """
         Verifica se a pasta do cliente existe.

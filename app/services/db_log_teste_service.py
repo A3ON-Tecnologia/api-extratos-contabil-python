@@ -109,7 +109,13 @@ class DatabaseLogTesteService:
         try:
             total = db.query(ExtratoLogTeste).count()
             sucesso = db.query(ExtratoLogTeste).filter(ExtratoLogTeste.status == "SUCESSO").count()
-            nao_identificado = db.query(ExtratoLogTeste).filter(ExtratoLogTeste.status == "NAO_IDENTIFICADO").count()
+            nao_identificado_values = [
+                "NAO_IDENTIFICADO",
+                "NAO IDENTIFICADO",
+                "NÃO IDENTIFICADO",
+                "NÃƒO IDENTIFICADO",
+            ]
+            nao_identificado = db.query(ExtratoLogTeste).filter(ExtratoLogTeste.status.in_(nao_identificado_values)).count()
             falha = db.query(ExtratoLogTeste).filter(ExtratoLogTeste.status == "FALHA").count()
             
             return {

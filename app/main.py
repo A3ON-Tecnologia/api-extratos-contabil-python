@@ -281,41 +281,6 @@ def _render_template_with_navbar(
     return navbar_placeholder_re.sub(lambda _m: navbar_html, html)
 
 
-def _ensure_unique_filename_with_extension(
-    original_filename: str,
-    file_data: bytes,
-    target_path: Path,
-) -> str:
-    """Gera nome unico preservando a extensao original."""
-    name = Path(original_filename).stem or "arquivo"
-    ext = Path(original_filename).suffix or ".pdf"
-    filename = f"{name}{ext}"
-    if not (target_path / filename).exists():
-        return filename
-
-    counter = 1
-    while True:
-        candidate = f"{name}-{counter}{ext}"
-        if not (target_path / candidate).exists():
-            return candidate
-        counter += 1
-
-
-# ============================================================
-# HOME
-# ============================================================
-
-@app.get("/", response_class=HTMLResponse)
-async def home_page():
-    """Pagina inicial do projeto."""
-    template_path = Path(__file__).parent / "templates" / "home.html"
-
-    if not template_path.exists():
-        raise HTTPException(status_code=500, detail="Template da home nao encontrado")
-
-    return HTMLResponse(content=_render_template_with_navbar(template_path, show_main=True, show_extratos=True))
-
-
 # ============================================================
 # DASHBOARD DE MONITORAMENTO
 # ============================================================
@@ -369,7 +334,7 @@ async def _watch_folder_loop():
                 if not file_path.is_file():
                     continue
 
-                if file_path.suffix.lower() not in {".pdf", ".zip", ".ofx"}:
+                if file_path.suffix.lower() not in {".pdf", ".zip"}:
                     continue
 
                 file_key = str(file_path.resolve())
@@ -499,7 +464,7 @@ async def extratos_watch_debug():
 
 @app.get("/extratos/mapear")
 async def mapear_extratos():
-    """Lista todos os arquivos PDF/OFX disponíveis na pasta de extratos."""
+    """Lista todos os arquivos PDF disponíveis na pasta de extratos."""
     settings = get_settings()
     watch_path = settings.watch_folder_path
 
@@ -531,14 +496,14 @@ async def mapear_extratos():
                 detail=f"Erro ao acessar pasta: {str(e)}"
             )
 
-        files = []
+        pdf_files = []
         erros_leitura = []
 
         for file_path in watch_path.iterdir():
             try:
-                if file_path.is_file() and file_path.suffix.lower() in {'.pdf', '.ofx'}:
+                if file_path.is_file() and file_path.suffix.lower() == '.pdf':
                     stat = file_path.stat()
-                    files.append({
+                    pdf_files.append({
                         "nome": file_path.name,
                         "tamanho": stat.st_size,
                         "tamanho_mb": round(stat.st_size / (1024 * 1024), 2),
@@ -553,12 +518,12 @@ async def mapear_extratos():
                 logger.warning(f"Erro ao ler arquivo {file_path}: {e}")
 
         # Ordena por data de modificação (mais recente primeiro)
-        files.sort(key=lambda x: x["modificado_em"], reverse=True)
+        pdf_files.sort(key=lambda x: x["modificado_em"], reverse=True)
 
         resultado = {
-            "total": len(files),
+            "total": len(pdf_files),
             "pasta": str(watch_path),
-            "arquivos": files
+            "arquivos": pdf_files
         }
 
         if erros_leitura:
@@ -633,7 +598,7 @@ async def simular_processamento_arquivo(request: dict):
 @app.post("/extratos/simular-todos")
 async def simular_todos_extratos():
     """
-    Simula o processamento de TODOS os arquivos PDF/OFX da pasta de extratos.
+    Simula o processamento de TODOS os arquivos PDF da pasta de extratos.
 
     Retorna uma lista com a simulação de cada arquivo.
     """
@@ -645,14 +610,15 @@ async def simular_todos_extratos():
 
     resultados = []
     erros = []
-    # Lista todos os PDFs/OFX
-    files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() in {'.pdf', '.ofx'}]
 
-    logger.info(f"[SIMULACAO EM LOTE] Processando {len(files)} arquivos")
+    # Lista todos os PDFs
+    pdf_files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() == '.pdf']
+
+    logger.info(f"[SIMULACAO EM LOTE] Processando {len(pdf_files)} arquivos")
 
     sim_service = get_extratos_sim_service()
 
-    for file_path in files:
+    for file_path in pdf_files:
         try:
             filename = file_path.name
             pdf_data = file_path.read_bytes()
@@ -680,7 +646,7 @@ async def simular_todos_extratos():
     nao_identificado = sum(1 for r in resultados if r["status"] == "NAO_IDENTIFICADO")
 
     return {
-        "total_arquivos": len(files),
+        "total_arquivos": len(pdf_files),
         "processados": total,
         "erros": len(erros),
         "estatisticas": {
@@ -695,6 +661,11 @@ async def simular_todos_extratos():
 class ExtratosSimulacaoWebhook(BaseModel):
     filename: str | None = None
     todos: bool = False
+
+
+class AssignClientRequest(BaseModel):
+    log_id: int
+    client_cod: str
 
 @app.post("/extratos/webhook/simulacao")
 async def extratos_webhook_simulacao(payload: ExtratosSimulacaoWebhook):
@@ -785,7 +756,7 @@ async def extratos_watch_stop():
 async def monitor_stats():
     """Retorna estatísticas do sistema de arquivos."""
     settings = get_settings()
-    unidentified_path = settings.get_unidentified_path("make", test_mode=False)
+    unidentified_path = settings.unidentified_make_path
     
     # Conta arquivos na pasta NAO_IDENTIFICADOS (recursivamente)
     count_unidentified = 0
@@ -804,7 +775,7 @@ async def monitor_stats():
 async def extratos_monitor_stats():
     """Retorna estatisticas do sistema de arquivos para extratos baixados."""
     settings = get_settings()
-    unidentified_path = settings.get_unidentified_path("extratos", test_mode=False)
+    unidentified_path = settings.unidentified_extratos_path
 
     count_unidentified = 0
     if unidentified_path.exists():
@@ -1299,29 +1270,20 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
         
     except Exception as e:
         logger.exception(f"Erro no processamento do job {job_id}")
-
-        result = await create_failure_result(
-            filename,
-            compute_hash(content),
-            str(e),
-            pdf_data=content,
-            test_mode=test_mode,
-        )
-
+        
         # Atualiza o job com erro
         jobs_dict[job_id].update({
             "status": "error",
             "message": f"Erro: {str(e)}",
             "completed_at": datetime.now().isoformat(),
-            "results": UploadResponse(
-                sucesso=False,
-                total_arquivos=1,
-                arquivos_sucesso=0,
-                arquivos_nao_identificados=0,
-                arquivos_falha=1,
-                resultados=[result],
-            ).model_dump(),
+            "results": None,
         })
+        
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PROCESSING_ERROR,
+            filename=filename,
+            message=str(e)
+        ))
 
 
 async def process_zip_async(zip_data: bytes, filename: str, job_id: str | None = None, test_mode: bool = False) -> UploadResponse:
@@ -1424,100 +1386,273 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         logger.info(f"Processando arquivo não-PDF: {filename}")
 
     try:
+        # Check Cancelamento
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
-            raise asyncio.CancelledError("Cancelado pelo usuario")
+             raise asyncio.CancelledError("Cancelado pelo usuário")
 
-        def _cancel_check() -> bool:
-            return bool(job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled")
-
-        def _log_writer(state):
-            match_result = state["match_result"]
-            extraction = state["extraction"]
-            proc_status = ProcessingStatus.SUCESSO if match_result.identificado else ProcessingStatus.NAO_IDENTIFICADO
-            cliente_nome = match_result.cliente.nome if match_result.identificado else None
-            db_log_service = get_db_log_service()
-            log_entry = db_log_service.log_extrato(
-                arquivo_original=state["filename"],
-                status=proc_status.value,
-                arquivo_salvo=state["saved_path"],
-                hash_arquivo=state["file_hash"],
-                cliente_nome=cliente_nome,
-                cliente_cod=match_result.cliente.cod if match_result.identificado else None,
-                cliente_cnpj=extraction.cnpj,
-                banco=extraction.banco,
-                tipo_documento=extraction.tipo_documento,
-                agencia=extraction.agencia,
-                conta=extraction.conta,
-                ano=state["ano"],
-                mes=state["mes"],
-                metodo_identificacao=match_result.metodo.value,
-                confianca_ia=extraction.confianca,
-                erro=match_result.motivo_fallback if not match_result.identificado else None,
+        # 1. Extrai texto (Documento Genérico)
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PDF_TEXT_EXTRACTING,
+            filename=filename,
+            message=f"Extraindo conteúdo de {filename}...",
+            progress=10
+        ))
+        
+        pdf_service = get_pdf_service()
+        try:
+            # Executar em thread separada para nao bloquear
+            loop = asyncio.get_event_loop()
+            # Passa o filename para ajudar na detecção do tipo
+            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
+        except ValueError as e:
+            # Se falhar extração, salva em NAO_IDENTIFICADOS para análise posterior
+            return await create_failure_result(
+                filename,
+                file_hash,
+                f"Erro ao extrair conteúdo: {e}",
+                pdf_data=pdf_data,
+                test_mode=test_mode,
             )
-            return log_entry.id
+        
+        # Check Cancelamento
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+             raise asyncio.CancelledError("Cancelado pelo usuário")
 
-        def _log_teste_writer(state):
-            match_result = state["match_result"]
-            extraction = state["extraction"]
-            proc_status = ProcessingStatus.SUCESSO if match_result.identificado else ProcessingStatus.NAO_IDENTIFICADO
-            cliente_nome = match_result.cliente.nome if match_result.identificado else None
-            db_teste_service = get_db_log_teste_service()
-            db_teste_service.log_extrato_teste(
-                arquivo_original=state["filename"],
-                status=proc_status.value,
-                arquivo_salvo=state["saved_path"],
-                hash_arquivo=state["file_hash"],
-                cliente_nome=cliente_nome,
-                cliente_cod=match_result.cliente.cod if match_result.identificado else None,
-                cliente_cnpj=extraction.cnpj,
-                banco=extraction.banco,
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PDF_TEXT_EXTRACTED,
+            filename=filename,
+            message=f"Conteúdo extraído: {len(text)} caracteres",
+            details={"chars": len(text)},
+            progress=25
+        ))
+        
+        # 2. Envia para LLM
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.LLM_ANALYZING,
+            filename=filename,
+            message="Analisando documento com IA...",
+            progress=30
+        ))
+        
+        llm_service = get_llm_service()
+        # Executar LLM em thread separada (com fallback de visão para identificar banco)
+        loop = asyncio.get_event_loop()
+        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+        
+        # Check Cancelamento
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+             raise asyncio.CancelledError("Cancelado pelo usuário")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.LLM_COMPLETED,
+            filename=filename,
+            message=f"Analise textual concluida: {extraction.cliente_sugerido or 'N/A'}",
+            details={
+                "cliente": extraction.cliente_sugerido,
+                "banco": extraction.banco,
+                "tipo": extraction.tipo_documento,
+                "confianca": extraction.confianca
+            },
+            progress=40
+        ))
+
+        # Fallbacks visuais e por planilha de clientes são tratados dentro do LLMService
+        
+        # 3. Faz matching do cliente
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.MATCHING_START,
+            filename=filename,
+            message="Buscando cliente na base...",
+            progress=55
+        ))
+        
+        # Check Cancelamento
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+             raise asyncio.CancelledError("Cancelado pelo usuário")
+
+        matching_service = get_matching_service()
+        match_result = matching_service.match(extraction)
+        
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.MATCHING_COMPLETED,
+            filename=filename,
+            message=f"Match: {match_result.cliente.nome if match_result.identificado else 'Nao encontrado'}",
+            details={
+                "found": match_result.identificado,
+                "cliente": match_result.cliente.nome if match_result.identificado else None,
+                "metodo": match_result.metodo.value,
+                "score": match_result.score
+            },
+            progress=70
+        ))
+        
+        # Check Cancelamento
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+             raise asyncio.CancelledError("Cancelado pelo usuário")
+
+        # 4. Salva o arquivo (Simulado se modo de teste)
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.FILE_SAVING,
+            filename=filename,
+            message="Salvando arquivo...",
+            progress=75
+        ))
+        
+        storage_service = get_storage_service()
+        
+        if test_mode:
+            # MODO TESTE: Calcula caminho simulado e NÃO salva
+            ano, mes = storage_service._get_previous_month()
+            if match_result.identificado:
+                client_base_path = storage_service._resolve_client_path(match_result.cliente)
+                if client_base_path:
+                    # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
+                    conta = storage_service._select_account(extraction.banco, extraction.conta, match_result.cliente.conta)
+                    target_path = storage_service._build_path_structure(
+                        client_base_path,
+                        ano,
+                        mes,
+                        extraction.banco,
+                        conta
+                    )
+
+                    # Constrói o nome do arquivo usando a mesma lógica do storage_service
+                    file_name = storage_service._build_filename(
+                        extraction.banco,
+                        extraction.tipo_documento,
+                        pdf_data,
+                        target_path,
+                        filename
+                    )
+                    saved_path = str(target_path / file_name)
+                else:
+                    saved_path = str(storage_service.get_unidentified_path("make") / filename)
+            else:
+                saved_path = str(storage_service.get_unidentified_path("make") / filename)
+            
+            logger.info(f"[TESTE] Arquivo seria salvo em: {saved_path}")
+            
+        else:
+            # MODO PRODUCÃO: Salva arquivo
+            saved_path, ano, mes = storage_service.save_file(
+                pdf_data=pdf_data,
+                match_result=match_result,
+                original_filename=filename,
                 tipo_documento=extraction.tipo_documento,
-                agencia=extraction.agencia,
-                conta=extraction.conta,
-                ano=state["ano"],
-                mes=state["mes"],
-                metodo_identificacao=match_result.metodo.value,
-                confianca_ia=extraction.confianca,
-                erro=match_result.motivo_fallback if not match_result.identificado else None,
+                banco=extraction.banco,
+                conta_extrato=extraction.conta,
+                module="make",
             )
-
-        state = {
-            "pdf_data": pdf_data,
-            "filename": filename,
-            "file_hash": file_hash,
-            "test_mode": test_mode,
-            "is_ofx": filename.lower().endswith(".ofx"),
-            "module": "make",
-            "event_manager": event_manager,
-            "cancel_check": _cancel_check,
-            "pdf_service": get_pdf_service(),
-            "llm_service": get_llm_service(),
-            "matching_service": get_matching_service(),
-            "storage_service": get_storage_service(),
-            "executor": _executor,
-            "log_writer": _log_writer if not test_mode else None,
-            "log_teste_writer": _log_teste_writer if test_mode else None,
-        }
-
-        from app.graphs.processing_graph import run_processing_graph
-
-        result_state = await run_processing_graph(state)
-
-        extraction = result_state["extraction"]
-        match_result = result_state["match_result"]
-        saved_path = result_state["saved_path"]
-        ano = result_state["ano"]
-        mes = result_state["mes"]
-        proc_status = result_state["proc_status"]
-        cliente_nome = result_state["cliente_nome"]
-
-        logger.info(
-            "Processamento concluido: %s -> %s (cliente: %s)",
-            filename,
-            proc_status.value,
-            cliente_nome or "N/A",
+        
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.FILE_SAVED,
+            filename=filename,
+            message="Arquivo salvo (Simulado)" if test_mode else "Arquivo salvo",
+            details={"path": saved_path},
+            progress=85
+        ))
+        
+        # 5. Determina status
+        if match_result.identificado:
+            proc_status = ProcessingStatus.SUCESSO
+            cliente_nome = match_result.cliente.nome
+        else:
+            proc_status = ProcessingStatus.NAO_IDENTIFICADO
+            cliente_nome = None
+        
+        # 6. Registra no log do banco de dados
+        log_id = None
+        if not test_mode:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.LOG_WRITING,
+                filename=filename,
+                message="Registrando no banco de dados...",
+                progress=90
+            ))
+            
+            # Salva log no banco de dados ANTES de emitir evento de conclusão
+            try:
+                db_log_service = get_db_log_service()
+                log_entry = db_log_service.log_extrato(
+                    arquivo_original=filename,
+                    status=proc_status.value,
+                    arquivo_salvo=saved_path,
+                    hash_arquivo=file_hash,
+                    cliente_nome=cliente_nome,
+                    cliente_cod=match_result.cliente.cod if match_result.identificado else None,
+                    cliente_cnpj=extraction.cnpj,
+                    banco=extraction.banco,
+                    tipo_documento=extraction.tipo_documento,
+                    agencia=extraction.agencia,
+                    conta=extraction.conta,
+                    ano=ano,
+                    mes=mes,
+                    metodo_identificacao=match_result.metodo.value,
+                    confianca_ia=extraction.confianca,
+                    erro=match_result.motivo_fallback if not match_result.identificado else None,
+                )
+                log_id = log_entry.id
+            except Exception as e:
+                logger.error(f"Erro ao salvar log no banco de dados: {e}")
+            
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.LOG_WRITTEN,
+                filename=filename,
+                message="Log registrado",
+                progress=95
+            ))
+        else:
+            # MODO TESTE: Salva apenas registro de teste
+            try:
+                db_teste_service = get_db_log_teste_service()
+                db_teste_service.log_extrato_teste(
+                    arquivo_original=filename,
+                    status=proc_status.value,
+                    arquivo_salvo=saved_path,
+                    hash_arquivo=file_hash,
+                    cliente_nome=cliente_nome,
+                    cliente_cod=match_result.cliente.cod if match_result.identificado else None,
+                    cliente_cnpj=extraction.cnpj,
+                    banco=extraction.banco,
+                    tipo_documento=extraction.tipo_documento,
+                    agencia=extraction.agencia,
+                    conta=extraction.conta,
+                    ano=ano,
+                    mes=mes,
+                    metodo_identificacao=match_result.metodo.value,
+                    confianca_ia=extraction.confianca,
+                    erro=match_result.motivo_fallback if not match_result.identificado else None,
+                )
+            except Exception as e:
+                logger.error(f"Erro ao salvar log de teste no banco de dados: {e}")
+        
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PROCESSING_COMPLETED,
+            filename=filename,
+            message=f"Processamento concluido: {proc_status.value}",
+            details={
+                "status": proc_status.value,
+                "cliente": cliente_nome,
+                "path": saved_path,
+                "banco": extraction.banco,
+                "tipo": extraction.tipo_documento,
+                "ano": ano,
+                "mes": mes,
+                "metodo": match_result.metodo.value,
+                "log_id": log_id,  # ID do log no banco para reversão
+            },
+            progress=100
+        ))
+        
+        event_manager.update_stats(
+            sucesso=(proc_status == ProcessingStatus.SUCESSO),
+            nao_identificado=(proc_status == ProcessingStatus.NAO_IDENTIFICADO)
         )
-
+        event_manager.end_processing()
+        await event_manager.emit_stats()
+        
+        logger.info(f"Processamento concluido: {filename} -> {proc_status.value} (cliente: {cliente_nome or 'N/A'})")
+        
         return ProcessingResult(
             nome_arquivo_original=filename,
             nome_arquivo_final=saved_path,
@@ -1530,6 +1665,7 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
             hash_arquivo=file_hash,
             erro=match_result.motivo_fallback if not match_result.identificado else None,
         )
+        
     except asyncio.CancelledError:
         logger.warning(f"Processamento cancelado explicitamente: {filename}")
         event_manager.end_processing()
@@ -1539,15 +1675,6 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
             hash_arquivo=file_hash,
             erro="Cancelado manualmente pelo usuário",
             nome_arquivo_final=""
-        )
-
-    except ValueError as e:
-        return await create_failure_result(
-            filename,
-            file_hash,
-            f"Erro ao extrair conteudo: {e}",
-            pdf_data=pdf_data,
-            test_mode=test_mode,
         )
 
     except Exception as e:
@@ -1575,10 +1702,10 @@ async def create_failure_result(
     if pdf_data:
         try:
             storage_service = get_storage_service()
-            target_path = storage_service.get_unidentified_path("make", test_mode)
+            target_path = storage_service.get_unidentified_path("make")
             if not target_path.exists():
                 target_path.mkdir(parents=True, exist_ok=True)
-            filename_final = _ensure_unique_filename_with_extension(
+            filename_final = storage_service._ensure_unique_filename(
                 filename,
                 pdf_data,
                 target_path,
@@ -1590,36 +1717,11 @@ async def create_failure_result(
         except Exception as e:
             logger.warning(f"Falha ao salvar arquivo com erro em NAO_IDENTIFICADOS: {e}")
 
-    log_id = None
-    try:
-        if test_mode:
-            db_teste_service = get_db_log_teste_service()
-            log_entry = db_teste_service.log_extrato_teste(
-                arquivo_original=filename,
-                status=ProcessingStatus.FALHA.value,
-                arquivo_salvo=saved_path or None,
-                hash_arquivo=file_hash,
-                erro=error,
-            )
-            log_id = log_entry.id
-        else:
-            db_log_service = get_db_log_service()
-            log_entry = db_log_service.log_extrato(
-                arquivo_original=filename,
-                status=ProcessingStatus.FALHA.value,
-                arquivo_salvo=saved_path or None,
-                hash_arquivo=file_hash,
-                erro=error,
-            )
-            log_id = log_entry.id
-    except Exception as e:
-        logger.error(f"Erro ao salvar log de falha: {e}")
-
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.PROCESSING_ERROR,
         filename=filename,
         message=error,
-        details={"path": saved_path, "log_id": log_id} if saved_path or log_id else None,
+        details={"path": saved_path} if saved_path else None,
     ))
 
     event_manager.update_stats(falha=True)
@@ -1703,28 +1805,17 @@ async def process_extratos_file_background(
         })
     except Exception as e:
         logger.exception(f"Erro no processamento do job {job_id} (extratos baixados)")
-
-        result = await create_extratos_failure_result(
-            filename,
-            compute_hash(content),
-            str(e),
-            pdf_data=content,
-            test_mode=test_mode,
-        )
-
         jobs_dict[job_id].update({
             "status": "error",
             "message": f"Erro: {str(e)}",
             "completed_at": datetime.now().isoformat(),
-            "results": UploadResponse(
-                sucesso=False,
-                total_arquivos=1,
-                arquivos_sucesso=0,
-                arquivos_nao_identificados=0,
-                arquivos_falha=1,
-                resultados=[result],
-            ).model_dump(),
+            "results": None,
         })
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PROCESSING_ERROR,
+            filename=filename,
+            message=str(e)
+        ))
 
 
 async def process_extratos_zip_async(
@@ -1838,89 +1929,241 @@ async def process_extratos_pdf_async(
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
             raise asyncio.CancelledError("Cancelado pelo usuario")
 
-        def _cancel_check() -> bool:
-            return bool(job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled")
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PDF_TEXT_EXTRACTING,
+            filename=filename,
+            message=f"Extraindo conteudo de {filename}...",
+            progress=10
+        ))
 
-        def _log_writer(state):
-            match_result = state["match_result"]
-            extraction = state["extraction"]
-            proc_status = ProcessingStatus.SUCESSO if match_result.identificado else ProcessingStatus.NAO_IDENTIFICADO
-            cliente_nome = match_result.cliente.nome if match_result.identificado else None
-            db_log_service = get_extratos_baixados_log_service()
-            log_entry = db_log_service.log_extrato(
-                arquivo_original=state["filename"],
-                status=proc_status.value,
-                arquivo_salvo=state["saved_path"],
-                hash_arquivo=state["file_hash"],
-                cliente_nome=cliente_nome,
-                cliente_cod=match_result.cliente.cod if match_result.identificado else None,
-                cliente_cnpj=extraction.cnpj,
-                banco=extraction.banco,
-                tipo_documento=extraction.tipo_documento,
-                agencia=extraction.agencia,
-                conta=extraction.conta,
-                ano=state["ano"],
-                mes=state["mes"],
-                metodo_identificacao=match_result.metodo.value,
-                confianca_ia=extraction.confianca,
-                erro=match_result.motivo_fallback if not match_result.identificado else None,
-            )
-            return log_entry.id
-
-        def _log_teste_writer(state):
-            match_result = state["match_result"]
-            extraction = state["extraction"]
-            proc_status = ProcessingStatus.SUCESSO if match_result.identificado else ProcessingStatus.NAO_IDENTIFICADO
-            cliente_nome = match_result.cliente.nome if match_result.identificado else None
-            db_teste_service = get_extratos_baixados_log_teste_service()
-            db_teste_service.log_extrato_teste(
-                arquivo_original=state["filename"],
-                status=proc_status.value,
-                arquivo_salvo=state["saved_path"],
-                hash_arquivo=state["file_hash"],
-                cliente_nome=cliente_nome,
-                cliente_cod=match_result.cliente.cod if match_result.identificado else None,
-                cliente_cnpj=extraction.cnpj,
-                banco=extraction.banco,
-                tipo_documento=extraction.tipo_documento,
-                agencia=extraction.agencia,
-                conta=extraction.conta,
-                ano=state["ano"],
-                mes=state["mes"],
-                metodo_identificacao=match_result.metodo.value,
-                confianca_ia=extraction.confianca,
-                erro=match_result.motivo_fallback if not match_result.identificado else None,
+        pdf_service = get_pdf_service()
+        try:
+            loop = asyncio.get_event_loop()
+            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
+        except ValueError as e:
+            return await create_extratos_failure_result(
+                filename,
+                file_hash,
+                f"Erro ao extrair conteudo: {e}",
+                pdf_data=pdf_data,
+                test_mode=test_mode,
             )
 
-        state = {
-            "pdf_data": pdf_data,
-            "filename": filename,
-            "file_hash": file_hash,
-            "test_mode": test_mode,
-            "is_ofx": filename.lower().endswith(".ofx"),
-            "module": "extratos",
-            "event_manager": event_manager,
-            "cancel_check": _cancel_check,
-            "pdf_service": get_pdf_service(),
-            "llm_service": get_llm_service(),
-            "matching_service": get_matching_service(),
-            "storage_service": get_storage_service(),
-            "executor": _executor,
-            "log_writer": _log_writer if not test_mode else None,
-            "log_teste_writer": _log_teste_writer if test_mode else None,
-        }
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            raise asyncio.CancelledError("Cancelado pelo usuario")
 
-        from app.graphs.processing_graph import run_processing_graph
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PDF_TEXT_EXTRACTED,
+            filename=filename,
+            message=f"Conteudo extraido: {len(text)} caracteres",
+            details={"chars": len(text)},
+            progress=25
+        ))
 
-        result_state = await run_processing_graph(state)
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.LLM_ANALYZING,
+            filename=filename,
+            message="Analisando documento com IA...",
+            progress=30
+        ))
 
-        extraction = result_state["extraction"]
-        match_result = result_state["match_result"]
-        saved_path = result_state["saved_path"]
-        ano = result_state["ano"]
-        mes = result_state["mes"]
-        proc_status = result_state["proc_status"]
-        cliente_nome = result_state["cliente_nome"]
+        llm_service = get_llm_service()
+        loop = asyncio.get_event_loop()
+        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            raise asyncio.CancelledError("Cancelado pelo usuario")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.LLM_COMPLETED,
+            filename=filename,
+            message=f"Analise concluida: {extraction.cliente_sugerido or 'N/A'}",
+            details={
+                "cliente": extraction.cliente_sugerido,
+                "banco": extraction.banco,
+                "tipo": extraction.tipo_documento,
+                "confianca": extraction.confianca,
+            },
+            progress=50
+        ))
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.MATCHING_START,
+            filename=filename,
+            message="Buscando cliente na base...",
+            progress=55
+        ))
+
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            raise asyncio.CancelledError("Cancelado pelo usuario")
+
+        matching_service = get_matching_service()
+        match_result = matching_service.match(extraction)
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.MATCHING_COMPLETED,
+            filename=filename,
+            message=f"Match: {match_result.cliente.nome if match_result.identificado else 'Nao encontrado'}",
+            details={
+                "found": match_result.identificado,
+                "cliente": match_result.cliente.nome if match_result.identificado else None,
+                "metodo": match_result.metodo.value,
+                "score": match_result.score,
+            },
+            progress=70
+        ))
+
+        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+            raise asyncio.CancelledError("Cancelado pelo usuario")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.FILE_SAVING,
+            filename=filename,
+            message="Salvando arquivo...",
+            progress=75
+        ))
+
+        storage_service = get_storage_service()
+
+        if test_mode:
+            ano, mes = storage_service._get_previous_month()
+            if match_result.identificado:
+                client_base_path = storage_service._resolve_client_path(match_result.cliente)
+                if client_base_path:
+                    conta = storage_service._select_account(extraction.banco, extraction.conta, match_result.cliente.conta)
+                    target_path = storage_service._build_path_structure(
+                        client_base_path,
+                        ano,
+                        mes,
+                        extraction.banco,
+                        conta,
+                    )
+                    file_name = storage_service._build_filename(
+                        extraction.banco,
+                        extraction.tipo_documento,
+                        pdf_data,
+                        target_path,
+                        filename,
+                    )
+                    saved_path = str(target_path / file_name)
+                else:
+                    saved_path = str(storage_service.get_unidentified_path("extratos") / filename)
+            else:
+                saved_path = str(storage_service.get_unidentified_path("extratos") / filename)
+            logger.info(f"[TESTE EXTRATOS] Arquivo seria salvo em: {saved_path}")
+        else:
+            saved_path, ano, mes = storage_service.save_file(
+                pdf_data=pdf_data,
+                match_result=match_result,
+                original_filename=filename,
+                tipo_documento=extraction.tipo_documento,
+                banco=extraction.banco,
+                conta_extrato=extraction.conta,
+                module="extratos",
+            )
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.FILE_SAVED,
+            filename=filename,
+            message="Arquivo salvo (Simulado)" if test_mode else "Arquivo salvo",
+            details={"path": saved_path},
+            progress=85
+        ))
+
+        if match_result.identificado:
+            proc_status = ProcessingStatus.SUCESSO
+            cliente_nome = match_result.cliente.nome
+        else:
+            proc_status = ProcessingStatus.NAO_IDENTIFICADO
+            cliente_nome = None
+
+        log_id = None
+        if not test_mode:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.LOG_WRITING,
+                filename=filename,
+                message="Registrando no banco de dados...",
+                progress=90
+            ))
+            try:
+                db_log_service = get_extratos_baixados_log_service()
+                log_entry = db_log_service.log_extrato(
+                    arquivo_original=filename,
+                    status=proc_status.value,
+                    arquivo_salvo=saved_path,
+                    hash_arquivo=file_hash,
+                    cliente_nome=cliente_nome,
+                    cliente_cod=match_result.cliente.cod if match_result.identificado else None,
+                    cliente_cnpj=extraction.cnpj,
+                    banco=extraction.banco,
+                    tipo_documento=extraction.tipo_documento,
+                    agencia=extraction.agencia,
+                    conta=extraction.conta,
+                    ano=ano,
+                    mes=mes,
+                    metodo_identificacao=match_result.metodo.value,
+                    confianca_ia=extraction.confianca,
+                    erro=match_result.motivo_fallback if not match_result.identificado else None,
+                )
+                log_id = log_entry.id
+            except Exception as e:
+                logger.error(f"Erro ao salvar log de extratos baixados: {e}")
+
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.LOG_WRITTEN,
+                filename=filename,
+                message="Log registrado",
+                progress=95
+            ))
+        else:
+            try:
+                db_teste_service = get_extratos_baixados_log_teste_service()
+                db_teste_service.log_extrato_teste(
+                    arquivo_original=filename,
+                    status=proc_status.value,
+                    arquivo_salvo=saved_path,
+                    hash_arquivo=file_hash,
+                    cliente_nome=cliente_nome,
+                    cliente_cod=match_result.cliente.cod if match_result.identificado else None,
+                    cliente_cnpj=extraction.cnpj,
+                    banco=extraction.banco,
+                    tipo_documento=extraction.tipo_documento,
+                    agencia=extraction.agencia,
+                    conta=extraction.conta,
+                    ano=ano,
+                    mes=mes,
+                    metodo_identificacao=match_result.metodo.value,
+                    confianca_ia=extraction.confianca,
+                    erro=match_result.motivo_fallback if not match_result.identificado else None,
+                )
+            except Exception as e:
+                logger.error(f"Erro ao salvar log de teste extratos baixados: {e}")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PROCESSING_COMPLETED,
+            filename=filename,
+            message=f"Processamento concluido: {proc_status.value}",
+            details={
+                "status": proc_status.value,
+                "cliente": cliente_nome,
+                "path": saved_path,
+                "banco": extraction.banco,
+                "tipo": extraction.tipo_documento,
+                "ano": ano,
+                "mes": mes,
+                "metodo": match_result.metodo.value,
+                "log_id": log_id,
+            },
+            progress=100
+        ))
+
+        event_manager.update_stats(
+            sucesso=(proc_status == ProcessingStatus.SUCESSO),
+            nao_identificado=(proc_status == ProcessingStatus.NAO_IDENTIFICADO),
+            falha=(proc_status == ProcessingStatus.FALHA),
+        )
+        event_manager.end_processing()
+        await event_manager.emit_stats()
 
         logger.info(
             "Processamento concluido (extratos baixados): %s -> %s",
@@ -1950,15 +2193,6 @@ async def process_extratos_pdf_async(
             erro="Cancelado manualmente pelo usuario",
             nome_arquivo_final=""
         )
-    except ValueError as e:
-        return await create_extratos_failure_result(
-            filename,
-            file_hash,
-            f"Erro ao extrair conteudo: {e}",
-            pdf_data=pdf_data,
-            test_mode=test_mode,
-        )
-
     except Exception as e:
         logger.exception(f"Erro inesperado ao processar extratos baixados: {filename}")
         return await create_extratos_failure_result(
@@ -1984,10 +2218,10 @@ async def create_extratos_failure_result(
     if pdf_data:
         try:
             storage_service = get_storage_service()
-            target_path = storage_service.get_unidentified_path("extratos", test_mode)
+            target_path = storage_service.get_unidentified_path("extratos")
             if not target_path.exists():
                 target_path.mkdir(parents=True, exist_ok=True)
-            filename_final = _ensure_unique_filename_with_extension(
+            filename_final = storage_service._ensure_unique_filename(
                 filename,
                 pdf_data,
                 target_path,
@@ -1999,36 +2233,11 @@ async def create_extratos_failure_result(
         except Exception as e:
             logger.warning(f"Falha ao salvar arquivo com erro em NAO_IDENTIFICADOS: {e}")
 
-    log_id = None
-    try:
-        if test_mode:
-            db_teste_service = get_extratos_baixados_log_teste_service()
-            log_entry = db_teste_service.log_extrato_teste(
-                arquivo_original=filename,
-                status=ProcessingStatus.FALHA.value,
-                arquivo_salvo=saved_path or None,
-                hash_arquivo=file_hash,
-                erro=error,
-            )
-            log_id = log_entry.id
-        else:
-            db_log_service = get_extratos_baixados_log_service()
-            log_entry = db_log_service.log_extrato(
-                arquivo_original=filename,
-                status=ProcessingStatus.FALHA.value,
-                arquivo_salvo=saved_path or None,
-                hash_arquivo=file_hash,
-                erro=error,
-            )
-            log_id = log_entry.id
-    except Exception as e:
-        logger.error(f"Erro ao salvar log de falha (extratos baixados): {e}")
-
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.PROCESSING_ERROR,
         filename=filename,
         message=error,
-        details={"path": saved_path, "log_id": log_id} if saved_path or log_id else None,
+        details={"path": saved_path} if saved_path else None,
     ))
 
     event_manager.update_stats(falha=True)
@@ -2106,6 +2315,124 @@ async def get_history():
         logger.error(f"Erro ao buscar histórico: {e}")
         return []
 
+
+@app.get("/monitor/clients")
+async def list_monitor_clients():
+    """Lista clientes disponiveis para selecao manual no Monitor."""
+    try:
+        client_service = get_client_service()
+        clients = client_service.load_clients()
+        return {
+            "total": len(clients),
+            "clients": [
+                {"cod": c.cod, "nome": c.nome, "cnpj": c.cnpj}
+                for c in clients
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Erro ao listar clientes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/monitor/assign-client")
+async def assign_client_to_unidentified(payload: AssignClientRequest):
+    """Atualiza um log NAO_IDENTIFICADO com o cliente correto e move o arquivo."""
+    from app.database import SessionLocal
+    from app.models.extrato_log import ExtratoLog
+    import shutil
+
+    db = SessionLocal()
+    try:
+        log = db.query(ExtratoLog).filter(ExtratoLog.id == payload.log_id).first()
+        if not log:
+            raise HTTPException(status_code=404, detail="Log nao encontrado")
+        if log.status != "NAO_IDENTIFICADO":
+            raise HTTPException(status_code=400, detail="Log nao esta como NAO_IDENTIFICADO")
+
+        client_service = get_client_service()
+        client = client_service.get_client_by_cod(payload.client_cod)
+        if not client:
+            raise HTTPException(status_code=404, detail="Cliente nao encontrado")
+
+        storage_service = get_storage_service()
+
+        source_path = Path(log.arquivo_salvo) if log.arquivo_salvo else None
+        if not source_path or not source_path.exists():
+            if log.arquivo_original:
+                fallback = storage_service.get_unidentified_path("make") / log.arquivo_original
+                if fallback.exists():
+                    source_path = fallback
+
+        if not source_path or not source_path.exists():
+            raise HTTPException(status_code=404, detail="Arquivo fisico nao encontrado")
+
+        pdf_data = source_path.read_bytes()
+        client_base_path = storage_service._resolve_client_path(client)
+        if not client_base_path:
+            raise HTTPException(status_code=400, detail="Pasta do cliente nao encontrada")
+
+        ano = log.ano or storage_service._get_previous_month()[0]
+        mes = log.mes or storage_service._get_previous_month()[1]
+        conta = storage_service._select_account(log.banco, log.conta, client.conta)
+
+        target_path = storage_service._build_path_structure(
+            client_base_path,
+            ano,
+            mes,
+            log.banco,
+            conta,
+        )
+        if not target_path.exists():
+            target_path.mkdir(parents=True, exist_ok=True)
+
+        target_filename = storage_service._build_filename(
+            log.banco,
+            log.tipo_documento,
+            pdf_data,
+            target_path,
+            log.arquivo_original or source_path.name,
+        )
+        target_full_path = target_path / target_filename
+        if target_full_path.exists():
+            suffix = target_full_path.suffix or ".pdf"
+            target_full_path = target_path / f"{target_full_path.stem}_{short_hash(pdf_data)}{suffix}"
+
+        try:
+            shutil.move(str(source_path), str(target_full_path))
+        except Exception as e:
+            logger.error(f"Erro ao mover arquivo: {e}")
+            raise HTTPException(status_code=500, detail="Falha ao mover o arquivo")
+
+        log.cliente_nome = client.nome
+        log.cliente_cod = client.cod
+        log.cliente_cnpj = client.cnpj
+        log.status = "SUCESSO"
+        log.metodo_identificacao = "MANUAL"
+        log.arquivo_salvo = str(target_full_path)
+
+        db.commit()
+        db.refresh(log)
+
+        event_manager = get_event_manager()
+        event_manager.stats["nao_identificados"] = max(0, event_manager.stats["nao_identificados"] - 1)
+        event_manager.stats["sucesso"] += 1
+        await event_manager.emit_stats()
+
+        return {
+            "success": True,
+            "log_id": log.id,
+            "cliente": log.cliente_nome,
+            "path": log.arquivo_salvo,
+            "status": log.status,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao atualizar cliente manualmente: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 
 @app.get("/extratos/monitor/history")
@@ -2377,7 +2704,6 @@ async def view_log_file(log_id: int):
         
         file_path = None
         filename = None
-        is_test_log = False
         
         if log:
             file_path = log.arquivo_salvo
@@ -2399,7 +2725,6 @@ async def view_log_file(log_id: int):
                 if log_teste:
                     file_path = log_teste.arquivo_salvo
                     filename = log_teste.arquivo_original
-                    is_test_log = True
             finally:
                 db.close()
             
@@ -2408,7 +2733,7 @@ async def view_log_file(log_id: int):
             # (Caso comum em falhas)
             if filename:
                  settings = get_settings()
-                 potential_path = settings.get_unidentified_path("make", test_mode=is_test_log) / filename
+                 potential_path = settings.unidentified_make_path / filename
                  if potential_path.exists():
                      file_path = str(potential_path)
         
@@ -2491,154 +2816,6 @@ async def get_extratos_log_detail(log_id: int):
 async def view_extratos_log_file(log_id: int):
     """Retorna o arquivo associado ao log de extratos baixados."""
     try:
-        from fastapi.responses import FileResponse, HTMLResponse
-        import os
-
-        db_service = get_extratos_baixados_log_service()
-        log = db_service.get_log_by_id(log_id)
-
-        if not log:
-            raise HTTPException(status_code=404, detail="Log nao encontrado")
-
-        file_path = log.arquivo_salvo
-        filename = log.arquivo_original
-
-        if (not file_path or file_path == '-') and filename:
-            settings = get_settings()
-            potential_path = settings.get_unidentified_path("extratos", test_mode=False) / filename
-            if potential_path.exists():
-                file_path = str(potential_path)
-
-        if not file_path or not os.path.exists(file_path):
-            raise HTTPException(status_code=404, detail="Arquivo fisico nao encontrado")
-
-        # Se for arquivo .ofx, exibe como texto
-        if filename and filename.lower().endswith('.ofx'):
-            try:
-                import html as html_module
-                with open(file_path, 'r', encoding='latin-1', errors='ignore') as f:
-                    content = f.read()
-
-                # Escapa HTML para evitar problemas com tags
-                escaped_content = html_module.escape(content)
-
-                # Adiciona syntax highlighting básico
-                # Destaca tags XML
-                import re
-                highlighted = re.sub(
-                    r'(&lt;/?[A-Z0-9]+&gt;)',
-                    r'<span style="color: #22d3ee;">\1</span>',
-                    escaped_content
-                )
-
-                # Destaca valores numéricos
-                highlighted = re.sub(
-                    r'(&gt;)([-]?\d+\.?\d*)(&lt;)',
-                    r'\1<span style="color: #10b981;">\2</span>\3',
-                    highlighted
-                )
-
-                # Cria HTML formatado para exibir o OFX
-                html_content = f"""
-<!DOCTYPE html>
-<html lang="pt-BR">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{filename}</title>
-    <style>
-        body {{
-            font-family: 'Courier New', monospace;
-            background: #0a0f14;
-            color: #f8fafc;
-            padding: 2rem;
-            margin: 0;
-        }}
-        .container {{
-            max-width: 1200px;
-            margin: 0 auto;
-            background: #111b2a;
-            border: 1px solid rgba(34, 211, 238, 0.25);
-            border-radius: 0.8rem;
-            padding: 1.5rem;
-        }}
-        h1 {{
-            color: #22d3ee;
-            font-size: 1.5rem;
-            margin-bottom: 1rem;
-            border-bottom: 1px solid rgba(34, 211, 238, 0.25);
-            padding-bottom: 0.5rem;
-        }}
-        pre {{
-            background: #0c1622;
-            padding: 1rem;
-            border-radius: 0.5rem;
-            overflow-x: auto;
-            font-size: 0.85rem;
-            line-height: 1.5;
-            border: 1px solid rgba(34, 211, 238, 0.15);
-            white-space: pre-wrap;
-            word-wrap: break-word;
-        }}
-        .info {{
-            background: rgba(59, 130, 246, 0.1);
-            padding: 0.75rem;
-            border-radius: 0.5rem;
-            margin-bottom: 1rem;
-            border-left: 3px solid #3b82f6;
-            font-size: 0.9rem;
-        }}
-        .download-btn {{
-            display: inline-block;
-            background: rgba(34, 211, 238, 0.2);
-            color: #22d3ee;
-            padding: 0.5rem 1rem;
-            border-radius: 0.5rem;
-            text-decoration: none;
-            border: 1px solid rgba(34, 211, 238, 0.4);
-            font-size: 0.85rem;
-            transition: all 0.2s;
-        }}
-        .download-btn:hover {{
-            background: rgba(34, 211, 238, 0.3);
-            border-color: #22d3ee;
-        }}
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>📄 {filename}</h1>
-        <div class="info">
-            📊 Arquivo OFX (Open Financial Exchange) - Formato de texto para dados financeiros<br>
-            <a href="/extratos/logs/{log_id}/download" class="download-btn" style="margin-top: 0.5rem; display: inline-block;">⬇️ Baixar arquivo</a>
-        </div>
-        <pre>{highlighted}</pre>
-    </div>
-</body>
-</html>
-"""
-                return HTMLResponse(content=html_content)
-            except Exception as e:
-                logger.error(f"Erro ao ler arquivo OFX: {e}")
-                raise HTTPException(status_code=500, detail=f"Erro ao ler arquivo OFX: {str(e)}")
-
-        # Para PDFs, mantém o comportamento original
-        return FileResponse(
-            path=file_path,
-            filename=filename or "documento.pdf",
-            media_type="application/pdf",
-            content_disposition_type="inline",
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao visualizar arquivo de extratos baixados: {e}")
-        raise HTTPException(status_code=500, detail=str(e))
-
-@app.get("/extratos/logs/{log_id}/download")
-async def download_extratos_log_file(log_id: int):
-    """Faz download do arquivo associado ao log de extratos baixados."""
-    try:
         from fastapi.responses import FileResponse
         import os
 
@@ -2653,29 +2830,23 @@ async def download_extratos_log_file(log_id: int):
 
         if (not file_path or file_path == '-') and filename:
             settings = get_settings()
-            potential_path = settings.get_unidentified_path("extratos", test_mode=False) / filename
+            potential_path = settings.unidentified_make_path / filename
             if potential_path.exists():
                 file_path = str(potential_path)
 
         if not file_path or not os.path.exists(file_path):
             raise HTTPException(status_code=404, detail="Arquivo fisico nao encontrado")
 
-        # Detecta o tipo de arquivo para definir o media_type
-        if filename and filename.lower().endswith('.ofx'):
-            media_type = "text/plain"
-        else:
-            media_type = "application/pdf"
-
         return FileResponse(
             path=file_path,
-            filename=filename or "documento",
-            media_type=media_type,
-            content_disposition_type="attachment",  # Força o download
+            filename=filename or "documento.pdf",
+            media_type="application/pdf",
+            content_disposition_type="inline",
         )
     except HTTPException:
         raise
     except Exception as e:
-        logger.error(f"Erro ao fazer download do arquivo: {e}")
+        logger.error(f"Erro ao visualizar arquivo de extratos baixados: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.delete("/extratos/logs")
@@ -2895,49 +3066,8 @@ async def _process_single_test_pdf(
                 progress=60
             ))
         matching_service = get_matching_service()
-        # Detecta se é arquivo OFX para priorizar busca por conta
-        is_ofx = filename.lower().endswith('.ofx')
-        match_result = matching_service.match(extraction, is_ofx=is_ofx)
-
-        # Se identificou o cliente, USA SEMPRE OS DADOS DA PLANILHA (não do PDF)
-        # Isso garante que não haja inconsistências entre PDF e cadastro
-        if match_result.identificado and match_result.cliente:
-            # BANCO: sempre usa o da planilha
-            if match_result.cliente.banco:
-                banco_original = extraction.banco
-                extraction.banco = match_result.cliente.banco.strip().upper()
-                if banco_original != extraction.banco:
-                    logger.info(
-                        "Banco corrigido pela planilha: '%s' -> '%s'",
-                        banco_original,
-                        extraction.banco,
-                    )
-
-            # AGÊNCIA: sempre usa a da planilha
-            if match_result.cliente.agencia:
-                agencia_original = extraction.agencia
-                extraction.agencia = str(match_result.cliente.agencia)
-                if agencia_original != extraction.agencia:
-                    logger.info(
-                        "Agência corrigida pela planilha: '%s' -> '%s'",
-                        agencia_original,
-                        extraction.agencia,
-                    )
-
-            # CONTA: sempre usa a da planilha (exceto para Conta Capital que tem número diferente)
-            if match_result.cliente.conta:
-                # Conta Capital tem número diferente, então não sobrescreve
-                is_conta_capital = extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper()
-                if not is_conta_capital:
-                    conta_original = extraction.conta
-                    extraction.conta = str(match_result.cliente.conta)
-                    if conta_original != extraction.conta:
-                        logger.info(
-                            "Conta corrigida pela planilha: '%s' -> '%s'",
-                            conta_original,
-                            extraction.conta,
-                        )
-
+        match_result = matching_service.match(extraction)
+        
         # 4. Calcula caminho que SERIA usado (sem salvar)
         storage_service = get_storage_service()
         ano, mes = storage_service._get_previous_month()
@@ -2946,12 +3076,7 @@ async def _process_single_test_pdf(
             client_base_path = storage_service._resolve_client_path(match_result.cliente)
             if client_base_path:
                 # Usa a conta extraída do extrato (prioritário) ou a conta da planilha
-                conta = storage_service._select_account(
-                    extraction.banco,
-                    extraction.conta,
-                    match_result.cliente.conta,
-                    extraction.tipo_documento,
-                )
+                conta = storage_service._select_account(extraction.banco, extraction.conta, match_result.cliente.conta)
                 target_path = storage_service._build_path_structure(
                     client_base_path,
                     ano,
@@ -2964,19 +3089,17 @@ async def _process_single_test_pdf(
                 file_name = storage_service._build_filename(
                     extraction.banco,
                     extraction.tipo_documento,
-                    extraction.contrato,
                     pdf_content,
                     target_path,
-                    filename,
-                    conta
+                    filename
                 )
                 simulated_path = str(target_path / file_name)
             else:
-                simulated_path = str(storage_service.get_unidentified_path("make", test_mode=True) / filename)
+                simulated_path = str(storage_service.get_unidentified_path("make") / filename)
             proc_status = ProcessingStatus.SUCESSO
             cliente_nome = match_result.cliente.nome
         else:
-            simulated_path = str(storage_service.get_unidentified_path("make", test_mode=True) / filename)
+            simulated_path = str(storage_service.get_unidentified_path("make") / filename)
             proc_status = ProcessingStatus.NAO_IDENTIFICADO
             cliente_nome = None
         
