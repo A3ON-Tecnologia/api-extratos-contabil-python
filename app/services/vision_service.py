@@ -56,6 +56,15 @@ Regras:
 
 Responda APENAS com o nome do banco, sem explicacoes adicionais."""
 
+# Prompt para OCR de texto (cabecalho)
+VISION_TEXT_PROMPT = """Extraia o texto visivel desta imagem de documento bancario.
+
+Regras:
+- Retorne o texto bruto exatamente como aparece (sem explicar).
+- Preserve linhas quando possivel.
+- Se nao houver texto legivel, retorne apenas: "DESCONHECIDO"
+"""
+
 # Prompt para extrair numero de contrato de emprestimo
 VISION_CONTRACT_PROMPT = """Extraia o NUMERO DO CONTRATO visivel nesta imagem de documento.
 
@@ -235,6 +244,9 @@ class VisionService:
             if banco and banco != "DESCONHECIDO":
                 return banco
             return None
+        except Exception as e:
+            logger.error(f"Erro ao processar OCR com visao: {e}")
+            return None
 
     def extract_contract_number_from_pdf(self, pdf_data: bytes, max_pages: int = 1) -> str | None:
         """
@@ -271,6 +283,38 @@ class VisionService:
             logger.error(f"Erro ao identificar contrato por OCR: {e}")
             return None
 
+    def extract_header_text_from_pdf(self, pdf_data: bytes, max_pages: int = 1) -> str | None:
+        """
+        Extrai texto do cabecalho (OCR) das primeiras paginas do PDF.
+        """
+        try:
+            logger.info("Iniciando OCR para texto do cabecalho...")
+            pdf_document = fitz.open(stream=pdf_data, filetype="pdf")
+            for page_num in range(min(max_pages, len(pdf_document))):
+                page = pdf_document[page_num]
+                pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+                img_data = pix.tobytes("png")
+
+                # Prioriza a parte superior da pagina (cabecalho)
+                cropped = self._crop_image_bytes(img_data, left=0.0, top=0.0, right=1.0, bottom=0.5)
+                header_text = self._extract_text_from_image(cropped)
+                if header_text:
+                    pdf_document.close()
+                    return header_text
+
+                # Fallback: pagina inteira
+                header_text = self._extract_text_from_image(img_data)
+                if header_text:
+                    pdf_document.close()
+                    return header_text
+
+            pdf_document.close()
+            logger.warning("Nao foi possivel extrair texto do cabecalho via OCR")
+            return None
+        except Exception as e:
+            logger.error(f"Erro ao extrair texto do cabecalho por OCR: {e}")
+            return None
+
     def _extract_contract_from_image(self, image_data: bytes) -> str | None:
         """Extrai numero do contrato a partir de uma imagem."""
         try:
@@ -302,6 +346,39 @@ class VisionService:
             logger.error(f"Erro ao extrair contrato via visao: {e}")
             return None
 
+    def _extract_text_from_image(self, image_data: bytes) -> str | None:
+        """Extrai texto bruto a partir de uma imagem."""
+        try:
+            base64_image = base64.b64encode(image_data).decode('utf-8')
+            response = self.client.chat.completions.create(
+                model=self.model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": VISION_TEXT_PROMPT},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:image/png;base64,{base64_image}",
+                                    "detail": "low"
+                                },
+                            },
+                        ],
+                    }
+                ],
+                max_tokens=400,
+                temperature=0,
+            )
+
+            text = response.choices[0].message.content.strip()
+            if not text or text.strip().upper() == "DESCONHECIDO":
+                return None
+            return text
+        except Exception as e:
+            logger.error(f"Erro ao extrair texto via visao: {e}")
+            return None
+
     def _crop_image_bytes(
         self,
         image_data: bytes,
@@ -312,18 +389,19 @@ class VisionService:
         bottom: float,
     ) -> bytes:
         """Recorta a imagem usando porcentagens (0-1) e retorna bytes PNG."""
-        image = Image.open(BytesIO(image_data))
-        width, height = image.size
-        crop_box = (
-            int(width * left),
-            int(height * top),
-            int(width * right),
-            int(height * bottom),
-        )
-        cropped = image.crop(crop_box)
-        buffer = BytesIO()
-        cropped.save(buffer, format="PNG")
-        return buffer.getvalue()
+        try:
+            image = Image.open(BytesIO(image_data))
+            width, height = image.size
+            crop_box = (
+                int(width * left),
+                int(height * top),
+                int(width * right),
+                int(height * bottom),
+            )
+            cropped = image.crop(crop_box)
+            buffer = BytesIO()
+            cropped.save(buffer, format="PNG")
+            return buffer.getvalue()
         except Exception as e:
             logger.error(f"Erro ao processar OCR com visao: {e}")
             return None

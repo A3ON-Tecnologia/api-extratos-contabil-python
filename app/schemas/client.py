@@ -31,6 +31,7 @@ class ClientInfo(BaseModel):
     banco: str | None = Field(default=None, description="Banco do cliente")
     agencia: str | None = Field(default=None, description="Agência bancária")
     conta: str | None = Field(default=None, description="Número da conta")
+    tipo_documento: str | None = Field(default=None, description="Tipo de documento/extrato")
     
     @property
     def folder_name(self) -> str:

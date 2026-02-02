@@ -68,6 +68,29 @@ class MatchingService:
         else:
             clients = self.client_service.load_clients()
 
+        clients_extratos = None
+        if extraction.conta:
+            try:
+                clients_extratos = self.client_service.load_clients_from_path(
+                    self.settings.extratos_excel_path,
+                    force_reload=True,
+                )
+                logger.info("[CONTA] Planilha usada: %s", self.settings.extratos_excel_path)
+            except Exception as e:
+                logger.warning("[CONTA] Falha ao carregar planilha de extratos: %s", e)
+                clients_extratos = None
+
+        if extraction.conta:
+            base_clients = clients_extratos or clients
+            result = self._match_by_conta_exata(
+                extraction.conta,
+                extraction.tipo_documento,
+                base_clients,
+            )
+            if result.identificado:
+                logger.info("Match por CONTA EXATA: %s", result.cliente.nome)
+                return result
+
         # Para arquivos OFX: IDENTIFICA??O APENAS POR CONTA
         if is_ofx and extraction.conta:
             logger.info("[OFX] Buscando por CONTA (sem exigir ag?ncia)")
@@ -164,10 +187,9 @@ class MatchingService:
             )
 
         banco_cresol = self._is_cresol(banco)
-        conta_completa = None
-        conta_sem_verificador = None
+        conta_exata = None
         if conta:
-            conta_completa, conta_sem_verificador = self._normalize_conta_para_matching(conta)
+            conta_exata = self._normalize_conta_exata(conta)
 
         for client in clients:
             if not client.cnpj:
@@ -185,13 +207,12 @@ class MatchingService:
 
                 # SEMPRE verifica conta se fornecida (não só para CRESOL!)
                 # Importante: mesmo cliente pode ter várias contas em bancos diferentes
-                if conta_completa and client.conta:
-                    client_conta_completa, client_conta_sem_verificador = self._normalize_conta_para_matching(str(client.conta))
+                if conta_exata and client.conta:
                     # Match com ou sem verificador
-                    match_conta = (client_conta_completa == conta_completa) or (client_conta_sem_verificador == conta_sem_verificador)
+                    match_conta = (client_conta_exata == conta_exata)
                     if not match_conta:
                         continue  # Pula para próxima linha do mesmo cliente
-                elif conta_completa and not client.conta:
+                elif conta_exata and not client.conta:
                     # Se temos conta extraída mas cliente não tem conta cadastrada, skip
                     continue
 
@@ -301,12 +322,49 @@ class MatchingService:
         2. Conta sem último dígito (sem verificador)
 
         Returns:
-            Tupla (conta_completa, conta_sem_verificador)
+            Tupla (conta_exata, conta_sem_verificador)
         """
-        conta_numbers = extract_numbers(conta).lstrip("0") or "0"
+        conta_numbers = extract_numbers(conta)
         # Remove o último dígito (verificador) se tiver mais de 1 dígito
         conta_sem_verificador = conta_numbers[:-1] if len(conta_numbers) > 1 else conta_numbers
         return (conta_numbers, conta_sem_verificador)
+
+    def _normalize_conta_exata(self, conta: str) -> str:
+        """Normaliza conta mantendo zeros a esquerda (match exato)."""
+        return extract_numbers(conta)
+
+    def _tipo_documento_compat(self, tipo_extrato: str | None, tipo_cliente: str | None) -> bool:
+        if not tipo_extrato or not tipo_cliente:
+            return True
+        tipo_norm = normalize_text(tipo_extrato)
+        cliente_norm = normalize_text(tipo_cliente)
+        return tipo_norm == cliente_norm or tipo_norm in cliente_norm or cliente_norm in tipo_norm
+
+    def _match_by_conta_exata(self, conta: str, tipo_documento: str | None, clients: list[ClientInfo]) -> MatchResult:
+        """Match estrito por conta, com filtro opcional por tipo de documento."""
+        conta_exata = self._normalize_conta_exata(conta)
+        if not conta_exata:
+            return MatchResult(motivo_fallback="Conta vazia para matching exato")
+
+        candidates: list[ClientInfo] = []
+        candidates_tipo: list[ClientInfo] = []
+
+        for client in clients:
+            if not client.conta:
+                continue
+            client_conta = self._normalize_conta_exata(str(client.conta))
+            if client_conta != conta_exata:
+                continue
+            candidates.append(client)
+            if self._tipo_documento_compat(tipo_documento, client.tipo_documento):
+                candidates_tipo.append(client)
+
+        if tipo_documento and candidates_tipo:
+            return MatchResult(cliente=candidates_tipo[0], metodo=MatchMethod.CONTA_AGENCIA, score=100.0)
+        if candidates:
+            return MatchResult(cliente=candidates[0], metodo=MatchMethod.CONTA_AGENCIA, score=100.0)
+
+        return MatchResult(motivo_fallback=f"Conta nao encontrada (match exato): {conta}")
 
     def _match_by_conta_only(
         self,
@@ -315,16 +373,9 @@ class MatchingService:
         clients: list[ClientInfo],
     ) -> MatchResult:
         """
-        Match apenas por Conta (usado para OFX sem agência).
-
-        Compara apenas os números da conta. Se o banco for fornecido,
-        usa como critério adicional de desempate.
-
-        Tenta match de duas formas:
-        1. Com dígito verificador completo
-        2. Sem o último dígito (verificador)
+        Match apenas por Conta (usado para OFX sem ag??ncia), com match exato.
         """
-        conta_completa, conta_sem_verificador = self._normalize_conta_para_matching(conta)
+        conta_exata = self._normalize_conta_exata(conta)
         banco_normalized = normalize_text(banco) if banco else None
         banco_cresol = self._is_cresol(banco)
 
@@ -339,21 +390,11 @@ class MatchingService:
                 if "CRESOL" not in normalize_text(client.banco):
                     continue
 
-            client_conta_completa, client_conta_sem_verificador = self._normalize_conta_para_matching(str(client.conta))
-
-            # Tenta match de duas formas:
-            # 1. Completa com completa (ambos têm verificador)
-            # 2. Sem verificador com sem verificador (planilha pode não ter)
-            match_completo = (client_conta_completa == conta_completa)
-            match_sem_verificador = (client_conta_sem_verificador == conta_sem_verificador)
-
-            if not (match_completo or match_sem_verificador):
+            client_conta = self._normalize_conta_exata(str(client.conta))
+            if client_conta != conta_exata:
                 continue
 
-            score = 70.0
-            if match_completo:
-                score = 75.0  # Match completo tem score maior
-
+            score = 75.0
             if banco_normalized and client.banco:
                 client_banco = normalize_text(client.banco)
                 banco_norm_clean = banco_normalized.replace("BANCO", "").strip()
@@ -370,8 +411,8 @@ class MatchingService:
             candidates.sort(key=lambda x: x[1], reverse=True)
             best_client, best_score = candidates[0]
             logger.warning(
-                f"Match por conta apenas (OFX sem agência): {best_client.nome}. "
-                f"{'Múltiplos clientes encontrados!' if len(candidates) > 1 else ''}"
+                f"Match por conta apenas (OFX sem ag??ncia): {best_client.nome}. "
+                f"{'M??ltiplos clientes encontrados!' if len(candidates) > 1 else ''}"
             )
             return MatchResult(
                 cliente=best_client,
@@ -380,7 +421,7 @@ class MatchingService:
             )
 
         return MatchResult(
-            motivo_fallback=f"Conta não encontrada: Cc {conta}"
+            motivo_fallback=f"Conta n??o encontrada: Cc {conta}"
         )
 
     def _match_by_conta(
@@ -391,19 +432,10 @@ class MatchingService:
         clients: list[ClientInfo]
     ) -> MatchResult:
         """
-        Tenta encontrar cliente pela combinação Banco + Agência + Conta.
-
-        Compara apenas os números da agência e conta.
-        Se o banco for fornecido, usa como critério adicional.
-        IMPORTANTE: Remove zeros à esquerda para evitar mismatch.
-
-        Tenta match de conta de duas formas:
-        1. Com dígito verificador completo
-        2. Sem o último dígito (verificador)
+        Tenta encontrar cliente pela combina????o Banco + Ag??ncia + Conta (match exato).
         """
-        # Normaliza removendo zeros à esquerda
         agencia_numbers = extract_numbers(agencia).lstrip("0") or "0"
-        conta_completa, conta_sem_verificador = self._normalize_conta_para_matching(conta)
+        conta_exata = self._normalize_conta_exata(conta)
         banco_normalized = normalize_text(banco) if banco else None
         banco_cresol = self._is_cresol(banco)
 
@@ -418,27 +450,15 @@ class MatchingService:
                 if "CRESOL" not in normalize_text(client.banco):
                     continue
 
-            # Normaliza removendo zeros à esquerda
             client_agencia = extract_numbers(str(client.agencia)).lstrip("0") or "0"
-            client_conta_completa, client_conta_sem_verificador = self._normalize_conta_para_matching(str(client.conta))
-
-            # Verifica se agência bate
             if client_agencia != agencia_numbers:
                 continue
 
-            # Verifica se conta bate (com ou sem verificador)
-            match_completo = (client_conta_completa == conta_completa)
-            match_sem_verificador = (client_conta_sem_verificador == conta_sem_verificador)
-
-            if not (match_completo or match_sem_verificador):
+            client_conta = self._normalize_conta_exata(str(client.conta))
+            if client_conta != conta_exata:
                 continue
 
-            # Se chegou aqui, agência e conta batem
-            score = 90.0
-            if match_completo:
-                score = 92.0  # Match completo tem score maior
-
-            # Bonus se o banco também bater
+            score = 92.0
             if banco_normalized and client.banco:
                 client_banco = normalize_text(client.banco)
                 if banco_cresol and "CRESOL" not in client_banco:
@@ -448,7 +468,6 @@ class MatchingService:
 
             candidates.append((client, score))
 
-        # Retorna o candidato com maior score
         if candidates:
             candidates.sort(key=lambda x: x[1], reverse=True)
             best_client, best_score = candidates[0]
@@ -460,9 +479,8 @@ class MatchingService:
             )
 
         return MatchResult(
-            motivo_fallback=f"Conta/Agência não encontrada: Ag {agencia} / Cc {conta}"
+            motivo_fallback=f"Conta/Ag??ncia n??o encontrada: Ag {agencia} / Cc {conta}"
         )
-    
 
     def _clean_company_name(self, name: str) -> str:
         """
@@ -582,10 +600,9 @@ class MatchingService:
         
         best_match: tuple[ClientInfo, float] | None = None
         banco_cresol = self._is_cresol(banco)
-        conta_completa = None
-        conta_sem_verificador = None
+        conta_exata = None
         if conta:
-            conta_completa, conta_sem_verificador = self._normalize_conta_para_matching(conta)
+            conta_exata = self._normalize_conta_exata(conta)
 
         def get_max_score(target_name: str, candidate_name: str) -> float:
             return max([
@@ -605,12 +622,11 @@ class MatchingService:
                     client_banco = normalize_text(client.banco)
                     if "CRESOL" not in client_banco:
                         continue
-                    if require_conta_match and conta_completa:
+                    if require_conta_match and conta_exata:
                         if not client.conta:
                             continue
-                        client_conta_completa, client_conta_sem_verificador = self._normalize_conta_para_matching(str(client.conta))
-                        # Match com ou sem verificador
-                        match_conta = (client_conta_completa == conta_completa) or (client_conta_sem_verificador == conta_sem_verificador)
+                            # Match com ou sem verificador
+                        match_conta = (client_conta_exata == conta_exata)
                         if not match_conta:
                             continue
 

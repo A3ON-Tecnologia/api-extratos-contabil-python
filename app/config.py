@@ -47,8 +47,21 @@ class Settings(BaseSettings):
     
     @property
     def unidentified_path(self) -> Path:
-        """Caminho para arquivos não identificados."""
-        return self.base_path / "000 - NAO_IDENTIFICADOS"
+        """Caminho raiz para arquivos não identificados."""
+        return self.base_path / "000 - AUTOMAÇÕES" / "000 - NAO_IDENTIFICADOS"
+
+    def _unidentified_module_base(self, module: str | None) -> Path:
+        """Base de pasta de não identificados por módulo."""
+        module_key = (module or "").strip().lower()
+        if module_key in {"make", "main", "principal"}:
+            return self.unidentified_path / "NÃO IDENTIFICADOS MAKE"
+        if module_key in {"extratos", "extratos_baixados", "extratos-baixados"}:
+            return self.unidentified_path / "NÃO IDENTIFICADOS EXTRATOS BAIXADOS"
+        return self.unidentified_path
+
+    def get_unidentified_path(self, module: str | None, test_mode: bool = False) -> Path:
+        """Retorna o caminho de não identificados por módulo."""
+        return self._unidentified_module_base(module)
 
     @property
     def database_url(self) -> str:

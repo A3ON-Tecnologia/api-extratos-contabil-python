@@ -107,6 +107,11 @@ EXTRAÇÃO DE AGÊNCIA E CONTA - ONDE PROCURAR:
   Exemplos: "75.662-8" (com pontos e hífen), "001074-0", "12345-6"
   IMPORTANTE: Inclua TODOS os dígitos, inclusive o verificador (último número após hífen)
 
+  ⚠️ **ATENÇÃO CRÍTICA**: "MATRÍCULA" NÃO É "CONTA"!
+  - Se o documento tem "MATRÍCULA" mas NÃO tem campo "Conta", retorne conta=null
+  - NUNCA use o número da MATRÍCULA como conta
+  - Exemplo: "MATRÍCULA: 1038907" → conta=null (não use 1038907)
+
 **CASOS ESPECIAIS**:
 
 1. **SICOOB - Extrato Consolidado Renda Fixa**:
@@ -118,9 +123,12 @@ EXTRAÇÃO DE AGÊNCIA E CONTA - ONDE PROCURAR:
    - "Conta corrente 20000-X SUPERMERCADO" -> conta="20000-X"
    - Texto após o número da conta é o cliente_sugerido
 
-3. **Conta Capital (SICOOB)**:
-   - Use "MATRICULA" como conta se não houver campo "Conta"
-   - Confirme banco pela linha "COOPERATIVA"
+3. **SICOOB - Extrato da Conta Capital**:
+   - ⚠️ **ATENÇÃO**: Este tipo de extrato NÃO possui campo "Conta"
+   - Existe apenas "MATRÍCULA", mas MATRÍCULA ≠ CONTA
+   - Se o documento for "EXTRATO DA CONTA CAPITAL", retorne conta=null
+   - Extraia a COOPERATIVA como agencia e o nome após MATRÍCULA como cliente_sugerido
+   - Exemplo: "MATRÍCULA: 1038907 - EMPRESA X" → cliente_sugerido="EMPRESA X", conta=null
 
 EXTRAÇÃO DE CLIENTE (cliente_sugerido):
 - Procure por "Nome:", "Razão Social:", ou linha após Conta/Agência
@@ -373,7 +381,7 @@ class LLMService:
         # Remove caracteres não numéricos
         only_numbers = re.sub(r'[^0-9]', '', value)
         # Remove zeros à esquerda (mas mantém "0" se for só zeros)
-        return only_numbers.lstrip('0') or '0'
+        return only_numbers
 
     def extract_info(self, text: str) -> LLMExtractionResult:
         """
@@ -461,10 +469,16 @@ class LLMService:
             Resultado da extração (real ou fallback)
         """
         try:
-            result = self.extract_info(text)
+            analysis_text = text or ""
+            if pdf_data and self._needs_header_ocr(analysis_text):
+                header_text = self._try_extract_header_text(pdf_data)
+                if header_text:
+                    analysis_text = f"{header_text}\n\n{analysis_text}"
+
+            result = self.extract_info(analysis_text)
 
             # Heurística textual: confirma banco por pistas fortes no texto
-            banco_hint = self._infer_bank_from_text_hints(text)
+            banco_hint = self._infer_bank_from_text_hints(analysis_text)
             if banco_hint:
                 if not result.banco or result.banco == "null" or result.banco != banco_hint:
                     logger.info(f"Banco ajustado por pista textual: {banco_hint}")
@@ -472,31 +486,26 @@ class LLMService:
                 if result.confianca < 0.85:
                     result.confianca = 0.85
 
-            # Heuristica textual: conta capital (SICOOB) -> conta via MATRICULA quando presente
-            if self._is_conta_capital(text, result.tipo_documento):
-                banco_capital = self._infer_sicoob_from_conta_capital(text)
-                if banco_capital and (not result.banco or result.banco == "null" or result.banco != banco_capital):
-                    logger.info(f"Banco ajustado por conta capital: {banco_capital}")
-                    result.banco = banco_capital
-                    if result.confianca < 0.85:
-                        result.confianca = 0.85
-
-                conta_capital = self._extract_conta_capital_account(text)
-                if conta_capital:
-                    conta_numbers = extract_numbers(result.conta) if result.conta else ""
-                    capital_numbers = extract_numbers(conta_capital)
-                    if not conta_numbers or conta_numbers != capital_numbers:
-                        logger.info(f"Conta ajustada por conta capital: {conta_capital}")
-                        result.conta = conta_capital
-                        if result.confianca < 0.85:
-                            result.confianca = 0.85
+            # Heuristica textual: conta capital -> MATRICULA NÃO É CONTA!
+            if self._is_conta_capital(analysis_text, result.tipo_documento):
+                # IMPORTANTE: MATRÍCULA NÃO É CONTA!
+                # Extrato da Conta Capital não tem campo "Conta", então conta deve ser None
+                if result.conta:
+                    # Verifica se a conta extraída é na verdade uma matrícula
+                    conta_capital = self._extract_conta_capital_account(analysis_text)
+                    if conta_capital:
+                        conta_numbers = extract_numbers(result.conta) if result.conta else ""
+                        capital_numbers = extract_numbers(conta_capital)
+                        if conta_numbers == capital_numbers:
+                            logger.info(f"Removendo matrícula {conta_capital} do campo conta (MATRÍCULA ≠ CONTA)")
+                            result.conta = None
                 else:
                     # Se nao ha conta explicita, nao forcar numero
-                    if not self._has_explicit_conta_number(text):
+                    if not self._has_explicit_conta_number(analysis_text):
                         result.conta = None
             # Heuristica textual: contrato de emprestimo
-            if self._is_emprestimo(text, result.tipo_documento):
-                contrato = self._extract_contract_number(text)
+            if self._is_emprestimo(analysis_text, result.tipo_documento):
+                contrato = self._extract_contract_number(analysis_text)
                 if contrato and not result.contrato:
                     logger.info(f"Contrato identificado: {contrato}")
                     result.contrato = contrato
@@ -519,7 +528,7 @@ class LLMService:
 
 
             # Heurística textual: RENDE FACIL indica extrato de investimento
-            if self._has_rende_facil_hint(text):
+            if self._has_rende_facil_hint(analysis_text):
                 result.tipo_documento = "EXTRATO APLICACAO"
                 if result.confianca < 0.8:
                     result.confianca = 0.8
@@ -678,9 +687,11 @@ class LLMService:
     def _infer_bank_from_text_hints(self, text: str) -> str | None:
         """Infere banco com base em pistas fortes no texto."""
         normalized = self._normalize_text_for_hint(text)
+        compact = normalized.replace(" ", "")
+        compact_ambiguous = compact.replace("0", "O")
 
         # SICOOB - pistas MUITO fortes (NUNCA confundir com CRESOL!)
-        if "SICOOB" in normalized:
+        if "SICOOB" in normalized or "SICOOB" in compact or "SICOOB" in compact_ambiguous:
             return "SICOOB"
         if "SISBR" in normalized:
             return "SICOOB"
@@ -690,7 +701,7 @@ class LLMService:
             return "SICOOB"
 
         # CRESOL - diferente de SICOOB!
-        if "CRESOL" in normalized and "SICOOB" not in normalized:
+        if "CRESOL" in normalized and "SICOOB" not in normalized and "SICOOB" not in compact and "SICOOB" not in compact_ambiguous:
             return "CRESOL"
 
         # Banco do Brasil - pistas fortes
@@ -783,8 +794,49 @@ class LLMService:
         if tipo_documento and "CONTA CAPITAL" in tipo_documento.upper():
             return True
         normalized = self._normalize_text_for_hint(text)
-        return "EXTRATO DA CONTA CAPITAL" in normalized
+        if "CONTA CAPITAL" in normalized:
+            return True
+        if "CAPITAL SOCIAL" in normalized:
+            return True
+        return False
 
+
+    def _needs_header_ocr(self, text: str) -> bool:
+        """Detecta se o texto parece estar sem cabecalho relevante."""
+        normalized = self._normalize_text_for_hint(text)
+        if not normalized:
+            return True
+        markers = [
+            "BANCO",
+            "SICOOB",
+            "SICREDI",
+            "CRESOL",
+            "BRADESCO",
+            "ITAU",
+            "SANTANDER",
+            "CAIXA",
+            "BANCO DO BRASIL",
+            "CONTA",
+            "AGENCIA",
+            "COOPERATIVA",
+            "MATRICULA",
+            "EXTRATO",
+        ]
+        return not any(marker in normalized for marker in markers)
+
+    def _try_extract_header_text(self, pdf_data: bytes) -> str | None:
+        """Tenta extrair texto do cabecalho via OCR."""
+        try:
+            from app.services.vision_service import VisionService
+
+            vision_service = VisionService()
+            header_text = vision_service.extract_header_text_from_pdf(pdf_data, max_pages=1)
+            if header_text:
+                logger.info("Texto de cabecalho extraido por OCR.")
+                return header_text
+        except Exception as e:
+            logger.warning(f"Erro ao tentar extrair texto do cabecalho via OCR: {e}")
+        return None
     def _infer_sicoob_from_conta_capital(self, text: str) -> str | None:
         """Infere banco SICOOB por pistas fortes em extrato de conta capital."""
         normalized = self._normalize_text_for_hint(text)

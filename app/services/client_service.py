@@ -33,6 +33,43 @@ class ClientService:
         """Inicializa o serviço."""
         self.settings = get_settings()
     
+    def _pick_conta(self, row: dict) -> str | None:
+        """Obtem a conta a partir de possiveis colunas."""
+        import re
+
+        normalized_map: dict[str, str] = {}
+        for key in row.keys():
+            normalized = re.sub(r"[^A-Z0-9]", "", str(key).upper())
+            if normalized and normalized not in normalized_map:
+                normalized_map[normalized] = key
+
+        candidates = [
+            "NCONTA",
+            "NUMEROCONTA",
+            "NUMERODACONTA",
+            "CONTA",
+        ]
+        for key in candidates:
+            original = normalized_map.get(key)
+            if original is not None:
+                return self._clean_value(row.get(original))
+        return None
+
+    def _pick_tipo_documento(self, row: dict) -> str | None:
+        """Obtem o tipo de documento a partir de possiveis colunas."""
+        candidates = [
+            "TIPO_DOCUMENTO",
+            "TIPO DOCUMENTO",
+            "TIPO_EXTRATO",
+            "TIPO EXTRATO",
+            "TIPO",
+        ]
+        for key in candidates:
+            value = row.get(key)
+            if value is not None:
+                return self._clean_value(value)
+        return None
+
     def load_clients(self, force_reload: bool = False) -> list[ClientInfo]:
         """
         Carrega a lista de clientes da planilha Excel.
@@ -64,11 +101,20 @@ class ClientService:
                 )
             
             try:
-                df = pd.read_excel(
-                    self.settings.clients_excel_path,
-                    dtype=str,  # Lê tudo como string para evitar conversões
-                    engine="openpyxl",
-                )
+                suffix = self.settings.clients_excel_path.suffix.lower()
+                if suffix == ".csv":
+                    df = pd.read_csv(
+                        self.settings.clients_excel_path,
+                        dtype=str,
+                        sep=None,
+                        engine="python",
+                    )
+                else:
+                    df = pd.read_excel(
+                        self.settings.clients_excel_path,
+                        dtype=str,  # Le tudo como string para evitar conversoes
+                        engine="openpyxl",
+                    )
             except Exception as e:
                 raise ValueError(f"Erro ao ler planilha de clientes: {e}")
             
@@ -103,7 +149,8 @@ class ClientService:
                     cnpj=self._clean_value(row.get("CNPJ")),
                     banco=self._clean_value(row.get("BANCO")),
                     agencia=self._clean_value(row.get("AGENCIA")),
-                    conta=self._clean_value(row.get("Nº CONTA") or row.get("CONTA")),
+                    conta=self._pick_conta(row),
+                    tipo_documento=self._pick_tipo_documento(row),
                 )
                 
                 clients.append(client)
@@ -131,11 +178,15 @@ class ClientService:
             raise FileNotFoundError(f"Planilha de clientes nao encontrada: {excel_path}")
 
         try:
-            df = pd.read_excel(
-                excel_path,
-                dtype=str,
-                engine="openpyxl",
-            )
+            suffix = excel_path.suffix.lower()
+            if suffix == ".csv":
+                df = pd.read_csv(excel_path, dtype=str, sep=None, engine="python")
+            else:
+                df = pd.read_excel(
+                    excel_path,
+                    dtype=str,
+                    engine="openpyxl",
+                )
         except Exception as e:
             raise ValueError(f"Erro ao ler planilha de clientes: {e}")
 
@@ -163,14 +214,15 @@ class ClientService:
                 cnpj=self._clean_value(row.get("CNPJ")),
                 banco=self._clean_value(row.get("BANCO")),
                 agencia=self._clean_value(row.get("AGENCIA")),
-                conta=self._clean_value(row.get("NÂº CONTA") or row.get("CONTA")),
+                conta=self._pick_conta(row),
+                tipo_documento=self._pick_tipo_documento(row),
             )
 
             clients.append(client)
 
         logger.info(f"Carregados {len(clients)} clientes da planilha (override)")
         return clients
-    
+
     def _is_cache_valid(self) -> bool:
         """Verifica se o cache ainda é válido."""
         if self._cache is None or self._cache_time is None:

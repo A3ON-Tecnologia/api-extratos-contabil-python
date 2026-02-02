@@ -63,8 +63,12 @@ class ExtratosService:
                 raise FileNotFoundError(f"Planilha não encontrada: {excel_path}")
 
             try:
-                # Lê a planilha
-                df = pd.read_excel(excel_path, engine="openpyxl")
+                # Le a planilha (Excel ou CSV)
+                suffix = excel_path.suffix.lower()
+                if suffix == ".csv":
+                    df = pd.read_csv(excel_path, sep=None, engine="python")
+                else:
+                    df = pd.read_excel(excel_path, engine="openpyxl")
 
                 logger.info(f"Planilha carregada com {len(df)} registros")
                 logger.info(f"Colunas encontradas: {list(df.columns)}")
