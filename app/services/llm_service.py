@@ -45,6 +45,7 @@ TIPOS PRINCIPAIS:
 - "EXTRATO CONSOLIDADO RENDA FIXA" -> Para extratos consolidados de investimentos
 - "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO" -> Para faturas de cartão de crédito, maquininhas
 - "REL RECEBIMENTO" -> Para relatórios de títulos por período, recebimentos, títulos cadastrados
+- "CONTA GRÁFICA DETALHADA" -> Para documentos de conta gráfica detalhada
 
 CÓDIGOS CURTOS (use quando apropriado):
 - "CC" -> Conta Corrente (alternativa curta)

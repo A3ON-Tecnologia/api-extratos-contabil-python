@@ -912,6 +912,56 @@
         </div>
     </div>
 
+    <!-- Modal de Seleção de Cliente -->
+    <div id="assignClientModal" class="modal-overlay" style="display: none;">
+        <div class="modal-container">
+            <div class="modal-header">
+                <div class="modal-icon">CL</div>
+                <h3>Selecionar Cliente</h3>
+            </div>
+            <div class="modal-body">
+                <p class="modal-description">Selecione o cliente correto para este extrato.</p>
+
+                <div class="modal-info-card">
+                    <div class="info-row">
+                        <span class="info-label">Arquivo:</span>
+                        <span class="info-value" id="assignModalFileName">-</span>
+                    </div>
+                    <div class="info-row">
+                        <span class="info-label">Cliente atual:</span>
+                        <span class="info-value" id="assignModalCurrentClient">NAO IDENTIFICADO</span>
+                    </div>
+                </div>
+
+                <div style="margin-top: 0.75rem;">
+                    <label for="assignClientInput" style="display:block; font-size:0.75rem; color:var(--text-secondary); margin-bottom:0.35rem;">Cliente</label>
+                    <input id="assignClientInput" class="filter-input" list="assignClientDatalist"
+                        placeholder="Digite codigo ou nome do cliente" style="width: 100%;" />
+                    <datalist id="assignClientDatalist"></datalist>
+                </div>
+
+                <div class="modal-warning" style="margin-top: 0.75rem;">
+                    <div class="warning-icon">!</div>
+                    <div class="warning-text">
+                        <strong>Esta acao ira:</strong>
+                        <ul>
+                            <li>Mover o arquivo para a pasta do cliente</li>
+                            <li>Atualizar o status para SUCESSO</li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button class="modal-btn modal-btn-cancel" onclick="closeAssignClientModal()">
+                    Cancelar
+                </button>
+                <button class="modal-btn modal-btn-confirm" id="assignConfirmBtn" onclick="confirmAssignClient()">
+                    Confirmar
+                </button>
+            </div>
+        </div>
+    </div>
+
     <style>
         /* Modal Styles */
         .modal-overlay {
@@ -1414,6 +1464,7 @@
                     }
                     .view-btn { color: #60a5fa; }
                     .revert-btn { color: #f87171; }
+                    .assign-btn { color: #22c55e; }
                 `;
                 document.head.appendChild(style);
             }
@@ -1453,6 +1504,7 @@
                 const realIndex = processedExtratos.indexOf(e);
                 // Permite reverter se tiver logId, independentemente do status
                 const canRevert = !!e.logId;
+                const canAssign = e.status === 'NAO_IDENTIFICADO' && !!e.logId;
                 const isSelected = selectedItems.has(e.logId);
                 return `
                 <tr data-status="${e.statusClass}" data-index="${realIndex}" class="${isSelected ? 'selected' : ''}">
@@ -1472,6 +1524,13 @@
                         </button>` :
                         `<span style="color: var(--text-muted); font-size: 0.65rem;">-</span>`
                     }
+                        ${canAssign ? `
+                        <button class="assign-btn icon-btn" onclick="openAssignClientModal(${e.logId}, ${realIndex})" title="Selecionar Cliente">
+                            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                                <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                                <circle cx="12" cy="7" r="4"/>
+                            </svg>
+                        </button>` : ''}
                     </td>
                     <td class="hora">${e.hora}</td>
                     <td class="empresa" title="${e.empresa}">${e.empresa}</td>
@@ -1607,6 +1666,115 @@
         }
 
         // Função chamada pelo botão na tabela
+        // ============================================
+        // SELECIONAR CLIENTE PARA NAO IDENTIFICADOS
+        // ============================================
+        let pendingAssign = { logId: null, index: null };
+        let cachedClients = null;
+        let cachedClientsByCod = {};
+
+        async function loadClientsForAssign() {
+            if (cachedClients) return cachedClients;
+
+            const response = await fetch('/monitor/clients');
+            const data = await response.json();
+            cachedClients = data.clients || [];
+            cachedClientsByCod = {};
+
+            const datalist = document.getElementById('assignClientDatalist');
+            if (datalist) {
+                datalist.innerHTML = '';
+                cachedClients.forEach(client => {
+                    cachedClientsByCod[client.cod] = client;
+                    const option = document.createElement('option');
+                    option.value = `${client.cod} - ${client.nome}`;
+                    datalist.appendChild(option);
+                });
+            }
+
+            return cachedClients;
+        }
+
+        async function openAssignClientModal(logId, index) {
+            const extrato = processedExtratos[index];
+            if (!extrato) return;
+
+            pendingAssign = { logId, index };
+            document.getElementById('assignModalFileName').textContent = extrato.arquivo || '-';
+            document.getElementById('assignModalCurrentClient').textContent = extrato.empresa || 'NAO IDENTIFICADO';
+            document.getElementById('assignClientInput').value = '';
+
+            try {
+                await loadClientsForAssign();
+            } catch (e) {
+                console.error('Erro ao carregar clientes:', e);
+            }
+
+            document.getElementById('assignClientModal').style.display = 'flex';
+        }
+
+        function closeAssignClientModal() {
+            document.getElementById('assignClientModal').style.display = 'none';
+            pendingAssign = { logId: null, index: null };
+        }
+
+        async function confirmAssignClient() {
+            const { logId, index } = pendingAssign;
+            if (!logId) return;
+
+            const input = document.getElementById('assignClientInput');
+            const rawValue = input.value.trim();
+            const match = rawValue.match(/(\\d{1,3})/);
+            if (!match) {
+                alert('Informe um cliente valido (codigo ou nome).');
+                return;
+            }
+
+            const clientCod = match[1].padStart(3, '0');
+            const confirmBtn = document.getElementById('assignConfirmBtn');
+            const originalText = confirmBtn.innerHTML;
+            confirmBtn.innerHTML = 'Processando...';
+            confirmBtn.disabled = true;
+
+            try {
+                const response = await fetch('/monitor/assign-client', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ log_id: logId, client_cod: clientCod })
+                });
+                const data = await response.json();
+
+                if (!response.ok || !data.success) {
+                    throw new Error(data.detail || data.message || 'Erro ao atualizar cliente');
+                }
+
+                const extrato = processedExtratos.find(e => e.logId === logId);
+                if (extrato) {
+                    extrato.empresa = data.cliente || extrato.empresa;
+                    extrato.status = 'SUCESSO';
+                    extrato.statusClass = 'success';
+                    extrato.path = data.path || extrato.path;
+                }
+
+                const statSuccess = document.getElementById('statSuccess');
+                if (statSuccess) statSuccess.textContent = String(parseInt(statSuccess.textContent) + 1);
+                const statWarning = document.getElementById('statWarning');
+                if (statWarning) statWarning.textContent = String(Math.max(0, parseInt(statWarning.textContent) - 1));
+
+                addEvent('success', `Cliente atualizado: ${data.cliente || clientCod}`);
+                closeAssignClientModal();
+                renderExtratosTable();
+                fetchFolderStats();
+            } catch (error) {
+                console.error('Erro ao atualizar cliente:', error);
+                addEvent('error', `Erro ao atualizar cliente: ${error.message}`);
+                alert('Erro ao atualizar cliente: ' + error.message);
+            } finally {
+                confirmBtn.innerHTML = originalText;
+                confirmBtn.disabled = false;
+            }
+        }
+
         function reverterExtrato(logId, index) {
             openRevertModal(logId, index);
         }
@@ -1618,10 +1786,20 @@
             }
         });
 
+        document.getElementById('assignClientModal').addEventListener('click', (e) => {
+            if (e.target.id === 'assignClientModal') {
+                closeAssignClientModal();
+            }
+        });
+
         // Fecha modal com ESC
         document.addEventListener('keydown', (e) => {
-            if (e.key === 'Escape' && document.getElementById('revertModal').style.display === 'flex') {
+            if (e.key !== 'Escape') return;
+            if (document.getElementById('revertModal').style.display === 'flex') {
                 closeRevertModal();
+            }
+            if (document.getElementById('assignClientModal').style.display === 'flex') {
+                closeAssignClientModal();
             }
         });
 

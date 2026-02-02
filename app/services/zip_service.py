@@ -1,7 +1,7 @@
 """
 Serviço de extração de arquivos ZIP.
 
-Processa arquivos ZIP e extrai apenas os PDFs contidos.
+Processa arquivos ZIP e extrai PDFs e OFX contidos.
 """
 
 import io
@@ -24,11 +24,11 @@ class ExtractedFile:
 
 
 class ZIPService:
-    """Serviço para extração de PDFs de arquivos ZIP."""
+    """Serviço para extração de PDFs e OFX de arquivos ZIP."""
     
     def extract_pdfs(self, zip_data: bytes) -> list[ExtractedFile]:
         """
-        Extrai todos os PDFs de um arquivo ZIP.
+        Extrai todos os PDFs e OFX de um arquivo ZIP.
         
         Ignora arquivos que não sejam PDFs e arquivos em pastas
         que comecem com "__" (como __MACOSX).
@@ -63,16 +63,19 @@ class ZIPService:
             if filename.startswith("."):
                 continue
             
-            # Verifica se é PDF pela extensão
-            if not filename.lower().endswith(".pdf"):
-                logger.debug(f"Ignorando arquivo não-PDF: {filename}")
+            # Verifica se é PDF ou OFX pela extensão
+            lower_name = filename.lower()
+            is_pdf = lower_name.endswith(".pdf")
+            is_ofx = lower_name.endswith(".ofx")
+            if not (is_pdf or is_ofx):
+                logger.debug(f"Ignorando arquivo não-PDF/OFX: {filename}")
                 continue
             
             try:
                 data = zip_file.read(file_info.filename)
                 
                 # Validação adicional: verifica magic bytes do PDF
-                if not data.startswith(b"%PDF-"):
+                if is_pdf and not data.startswith(b"%PDF-"):
                     logger.warning(
                         f"Arquivo {filename} tem extensão .pdf mas não é um PDF válido"
                     )
@@ -83,16 +86,16 @@ class ZIPService:
                     data=data
                 ))
                 
-                logger.info(f"PDF extraído do ZIP: {filename}")
+                logger.info(f"Arquivo extraído do ZIP: {filename}")
                 
             except Exception as e:
                 logger.error(f"Erro ao extrair {filename}: {e}")
                 continue
         
         if not extracted_files:
-            raise ValueError("Nenhum arquivo PDF encontrado no ZIP")
+            raise ValueError("Nenhum arquivo PDF ou OFX encontrado no ZIP")
         
-        logger.info(f"Total de PDFs extraídos: {len(extracted_files)}")
+        logger.info(f"Total de arquivos extraídos: {len(extracted_files)}")
         return extracted_files
     
     def is_valid_zip(self, data: bytes) -> bool:

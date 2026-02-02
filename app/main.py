@@ -50,7 +50,7 @@ from app.services.extratos_baixados_reversao_service import get_extratos_baixado
 from app.services.extratos_baixados_simulacao_service import (
     ExtratosBaixadosSimulacaoService,
 )
-from app.utils.hash import compute_hash
+from app.utils.hash import compute_hash, short_hash
 from app.utils.template import render_tech_navbar
 
 # Configuracao de logging
@@ -661,6 +661,11 @@ async def simular_todos_extratos():
 class ExtratosSimulacaoWebhook(BaseModel):
     filename: str | None = None
     todos: bool = False
+
+
+class AssignClientRequest(BaseModel):
+    log_id: int
+    client_cod: str
 
 @app.post("/extratos/webhook/simulacao")
 async def extratos_webhook_simulacao(payload: ExtratosSimulacaoWebhook):
@@ -2308,6 +2313,124 @@ async def get_history():
         logger.error(f"Erro ao buscar histórico: {e}")
         return []
 
+
+@app.get("/monitor/clients")
+async def list_monitor_clients():
+    """Lista clientes disponiveis para selecao manual no Monitor."""
+    try:
+        client_service = get_client_service()
+        clients = client_service.load_clients()
+        return {
+            "total": len(clients),
+            "clients": [
+                {"cod": c.cod, "nome": c.nome, "cnpj": c.cnpj}
+                for c in clients
+            ],
+        }
+    except Exception as e:
+        logger.error(f"Erro ao listar clientes: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/monitor/assign-client")
+async def assign_client_to_unidentified(payload: AssignClientRequest):
+    """Atualiza um log NAO_IDENTIFICADO com o cliente correto e move o arquivo."""
+    from app.database import SessionLocal
+    from app.models.extrato_log import ExtratoLog
+    import shutil
+
+    db = SessionLocal()
+    try:
+        log = db.query(ExtratoLog).filter(ExtratoLog.id == payload.log_id).first()
+        if not log:
+            raise HTTPException(status_code=404, detail="Log nao encontrado")
+        if log.status != "NAO_IDENTIFICADO":
+            raise HTTPException(status_code=400, detail="Log nao esta como NAO_IDENTIFICADO")
+
+        client_service = get_client_service()
+        client = client_service.get_client_by_cod(payload.client_cod)
+        if not client:
+            raise HTTPException(status_code=404, detail="Cliente nao encontrado")
+
+        storage_service = get_storage_service()
+
+        source_path = Path(log.arquivo_salvo) if log.arquivo_salvo else None
+        if not source_path or not source_path.exists():
+            if log.arquivo_original:
+                fallback = storage_service.settings.unidentified_path / log.arquivo_original
+                if fallback.exists():
+                    source_path = fallback
+
+        if not source_path or not source_path.exists():
+            raise HTTPException(status_code=404, detail="Arquivo fisico nao encontrado")
+
+        pdf_data = source_path.read_bytes()
+        client_base_path = storage_service._resolve_client_path(client)
+        if not client_base_path:
+            raise HTTPException(status_code=400, detail="Pasta do cliente nao encontrada")
+
+        ano = log.ano or storage_service._get_previous_month()[0]
+        mes = log.mes or storage_service._get_previous_month()[1]
+        conta = storage_service._select_account(log.banco, log.conta, client.conta)
+
+        target_path = storage_service._build_path_structure(
+            client_base_path,
+            ano,
+            mes,
+            log.banco,
+            conta,
+        )
+        if not target_path.exists():
+            target_path.mkdir(parents=True, exist_ok=True)
+
+        target_filename = storage_service._build_filename(
+            log.banco,
+            log.tipo_documento,
+            pdf_data,
+            target_path,
+            log.arquivo_original or source_path.name,
+        )
+        target_full_path = target_path / target_filename
+        if target_full_path.exists():
+            suffix = target_full_path.suffix or ".pdf"
+            target_full_path = target_path / f"{target_full_path.stem}_{short_hash(pdf_data)}{suffix}"
+
+        try:
+            shutil.move(str(source_path), str(target_full_path))
+        except Exception as e:
+            logger.error(f"Erro ao mover arquivo: {e}")
+            raise HTTPException(status_code=500, detail="Falha ao mover o arquivo")
+
+        log.cliente_nome = client.nome
+        log.cliente_cod = client.cod
+        log.cliente_cnpj = client.cnpj
+        log.status = "SUCESSO"
+        log.metodo_identificacao = "MANUAL"
+        log.arquivo_salvo = str(target_full_path)
+
+        db.commit()
+        db.refresh(log)
+
+        event_manager = get_event_manager()
+        event_manager.stats["nao_identificados"] = max(0, event_manager.stats["nao_identificados"] - 1)
+        event_manager.stats["sucesso"] += 1
+        await event_manager.emit_stats()
+
+        return {
+            "success": True,
+            "log_id": log.id,
+            "cliente": log.cliente_nome,
+            "path": log.arquivo_salvo,
+            "status": log.status,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao atualizar cliente manualmente: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 
 @app.get("/extratos/monitor/history")
