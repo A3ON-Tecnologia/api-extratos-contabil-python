@@ -209,6 +209,7 @@ class MatchingService:
                 # Importante: mesmo cliente pode ter várias contas em bancos diferentes
                 if conta_exata and client.conta:
                     # Match com ou sem verificador
+                    client_conta_exata = self._normalize_conta_exata(str(client.conta))
                     match_conta = (client_conta_exata == conta_exata)
                     if not match_conta:
                         continue  # Pula para próxima linha do mesmo cliente
@@ -626,6 +627,7 @@ class MatchingService:
                         if not client.conta:
                             continue
                             # Match com ou sem verificador
+                        client_conta_exata = self._normalize_conta_exata(str(client.conta))
                         match_conta = (client_conta_exata == conta_exata)
                         if not match_conta:
                             continue
@@ -649,7 +651,11 @@ class MatchingService:
         best_match = find_best_match(require_conta_match=True)
 
         # Se nao encontrou e e Cresol, tenta apenas nome+banco (conta pode estar ausente na planilha)
-        if best_match is None and banco_cresol and conta_numbers:
+        # IMPORTANTE: Banco Cresol frequentemente não possui conta cadastrada na planilha de clientes.
+        # Quando temos conta_exata extraída do documento mas não há match com conta+nome, fazemos
+        # uma segunda tentativa apenas com nome+banco, permitindo identificação mesmo sem conta.
+        # Corrigido: usava 'conta_numbers' (inexistente) -> agora usa 'conta_exata' (correto)
+        if best_match is None and banco_cresol and conta_exata:
             best_match = find_best_match(require_conta_match=False)
 
         if best_match:

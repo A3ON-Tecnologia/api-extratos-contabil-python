@@ -401,6 +401,7 @@ async def _watch_folder_loop():
                         filename=filename,
                         is_zip=is_zip,
                         test_mode=False,
+                        source_path=file_path,
                     )
                 )
 
@@ -473,31 +474,31 @@ async def extratos_watch_debug():
 
 
 @app.get("/extratos/mapear")
-async def mapear_extratos():
-    """Lista todos os arquivos PDF/OFX disponíveis na pasta de extratos."""
+async def mapear_extratos(process: bool = False):
+    """Lista todos os arquivos PDF/OFX/ZIP disponiveis na pasta de extratos."""
     settings = get_settings()
     watch_path = settings.watch_folder_path
 
     if not watch_path.exists():
         raise HTTPException(
             status_code=400,
-            detail=f"Pasta não encontrada: {watch_path}"
+            detail=f"Pasta nao encontrada: {watch_path}"
         )
 
     if not watch_path.is_dir():
         raise HTTPException(
             status_code=400,
-            detail=f"Caminho não é um diretório: {watch_path}"
+            detail=f"Caminho nao e um diretorio: {watch_path}"
         )
 
     try:
-        # Testa permissão de leitura primeiro
+        # Testa permissao de leitura primeiro
         try:
-            test_list = list(watch_path.iterdir())
+            list(watch_path.iterdir())
         except PermissionError:
             raise HTTPException(
                 status_code=403,
-                detail=f"Sem permissão para acessar a pasta: {watch_path}"
+                detail=f"Sem permissao para acessar a pasta: {watch_path}"
             )
         except OSError as e:
             logger.error(f"Erro de sistema ao acessar pasta: {e}")
@@ -511,7 +512,7 @@ async def mapear_extratos():
 
         for file_path in watch_path.iterdir():
             try:
-                if file_path.is_file() and file_path.suffix.lower() in {'.pdf', '.ofx'}:
+                if file_path.is_file() and file_path.suffix.lower() in {'.pdf', '.ofx', '.zip'}:
                     stat = file_path.stat()
                     pdf_files.append({
                         "nome": file_path.name,
@@ -521,20 +522,62 @@ async def mapear_extratos():
                         "caminho_completo": str(file_path),
                     })
             except PermissionError:
-                erros_leitura.append(f"{file_path.name} (sem permissão)")
-                logger.warning(f"Sem permissão para ler: {file_path}")
+                erros_leitura.append(f"{file_path.name} (sem permissao)")
+                logger.warning(f"Sem permissao para ler: {file_path}")
             except Exception as e:
                 erros_leitura.append(f"{file_path.name} ({str(e)})")
                 logger.warning(f"Erro ao ler arquivo {file_path}: {e}")
 
-        # Ordena por data de modificação (mais recente primeiro)
+        # Ordena por data de modificacao (mais recente primeiro)
         pdf_files.sort(key=lambda x: x["modificado_em"], reverse=True)
 
         resultado = {
             "total": len(pdf_files),
             "pasta": str(watch_path),
-            "arquivos": pdf_files
+            "arquivos": pdf_files,
         }
+
+        if process and pdf_files:
+            iniciados = []
+            erros_processamento = []
+
+            for arquivo in pdf_files:
+                try:
+                    file_path = Path(arquivo["caminho_completo"])
+                    content = file_path.read_bytes()
+                    is_zip = file_path.suffix.lower() == ".zip"
+                    job_id = str(uuid.uuid4())[:8]
+
+                    _extratos_jobs[job_id] = {
+                        "job_id": job_id,
+                        "filename": file_path.name,
+                        "status": "processing",
+                        "message": "Arquivo recebido via mapear, processamento iniciado",
+                        "created_at": datetime.now().isoformat(),
+                        "completed_at": None,
+                        "results": None,
+                        "source": "extratos",
+                    }
+
+                    asyncio.create_task(
+                        process_extratos_file_background(
+                            job_id=job_id,
+                            content=content,
+                            filename=file_path.name,
+                            is_zip=is_zip,
+                            test_mode=False,
+                            source_path=file_path,
+                        )
+                    )
+
+                    iniciados.append(file_path.name)
+                except Exception as e:
+                    erros_processamento.append({"arquivo": arquivo["nome"], "erro": str(e)})
+
+            resultado["processamento_iniciado"] = len(iniciados)
+            resultado["arquivos_iniciados"] = iniciados
+            if erros_processamento:
+                resultado["erros_processamento"] = erros_processamento
 
         if erros_leitura:
             resultado["avisos"] = erros_leitura
@@ -1731,13 +1774,11 @@ async def create_failure_result(
             target_path = storage_service.get_unidentified_path("make")
             if not target_path.exists():
                 target_path.mkdir(parents=True, exist_ok=True)
-            filename_final = storage_service._ensure_unique_filename(
+            filename_final, full_path = storage_service._write_bytes_unique(
+                target_path,
                 filename,
                 pdf_data,
-                target_path,
             )
-            full_path = target_path / filename_final
-            full_path.write_bytes(pdf_data)
             saved_path = str(full_path)
             logger.info(f"Arquivo com erro salvo em NAO_IDENTIFICADOS: {saved_path}")
         except Exception as e:
@@ -1773,6 +1814,7 @@ async def process_extratos_file_background(
     filename: str,
     is_zip: bool,
     test_mode: bool = False,
+    source_path: Path | None = None,
 ):
     """Processa arquivo de extratos baixados em background."""
     event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
@@ -1829,6 +1871,14 @@ async def process_extratos_file_background(
             "completed_at": datetime.now().isoformat(),
             "results": result.model_dump(),
         })
+
+        if source_path and not test_mode:
+            try:
+                if source_path.exists():
+                    source_path.unlink()
+                    logger.info(f"Arquivo origem removido apos processamento: {source_path}")
+            except Exception as e:
+                logger.warning(f"Falha ao remover arquivo origem {source_path}: {e}")
     except Exception as e:
         logger.exception(f"Erro no processamento do job {job_id} (extratos baixados)")
         jobs_dict[job_id].update({
@@ -2249,13 +2299,11 @@ async def create_extratos_failure_result(
             target_path = storage_service.get_unidentified_path("extratos")
             if not target_path.exists():
                 target_path.mkdir(parents=True, exist_ok=True)
-            filename_final = storage_service._ensure_unique_filename(
+            filename_final, full_path = storage_service._write_bytes_unique(
+                target_path,
                 filename,
                 pdf_data,
-                target_path,
             )
-            full_path = target_path / filename_final
-            full_path.write_bytes(pdf_data)
             saved_path = str(full_path)
             logger.info(f"Arquivo com erro salvo em NAO_IDENTIFICADOS: {saved_path}")
         except Exception as e:
@@ -2744,12 +2792,12 @@ async def view_log_file(log_id: int):
             # Como hack rápido, vamos instanciar uma busca direta ou assumir que o ID pode ser de teste
             
             # Vamos tentar ler a tabela de testes diretamente
-            from app.services.db_log_teste_service import TesteLog
+            from app.models.extrato_log_teste import ExtratoLogTeste
             from app.database import SessionLocal
             
             db = SessionLocal()
             try:
-                log_teste = db.query(TesteLog).filter(TesteLog.id == log_id).first()
+                log_teste = db.query(ExtratoLogTeste).filter(ExtratoLogTeste.id == log_id).first()
                 if log_teste:
                     file_path = log_teste.arquivo_salvo
                     filename = log_teste.arquivo_original

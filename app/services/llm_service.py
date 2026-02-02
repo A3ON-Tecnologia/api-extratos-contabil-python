@@ -46,6 +46,7 @@ TIPOS PRINCIPAIS:
 - "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO" -> Para faturas de cartão de crédito, maquininhas
 - "REL RECEBIMENTO" -> Para relatórios de títulos por período, recebimentos, títulos cadastrados
 - "CONTA GRÁFICA DETALHADA" -> Para documentos de conta gráfica detalhada
+- "CONTA GRÁFICA SIMPLIFICADA" -> Para documentos de conta gráfica simplificada
 
 CÓDIGOS CURTOS (use quando apropriado):
 - "CC" -> Conta Corrente (alternativa curta)

@@ -11,7 +11,6 @@ from pathlib import Path
 
 from app.config import get_settings
 from app.schemas.client import ClientInfo, MatchResult
-from app.utils.hash import short_hash
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +43,7 @@ DOCUMENT_TYPE_MAPPING = {
     "SALDO DE APLICAÇÃO": "EXTRATO APLICAÇÃO",
     "EXTRATO APLICAÇÃO": "EXTRATO APLICAÇÃO",
     "CONTA GRÁFICA DETALHADA": "CONTA GRÁFICA DETALHADA",
+    "CONTA GRÁFICA SIMPLIFICADA": "CONTA GRÁFICA SIMPLIFICADA",
     "CC": "EXTRATO DE CONTA CORRENTE",
     "POUPANÇA": "EXTRATO CONTA POUPANÇA",
     "CARTÃO": "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO",
@@ -110,11 +110,11 @@ class StorageService:
         Returns:
             Tupla (caminho_salvo, ano, mes)
         """
-        module_norm = (module or "make").lower()
         # Usa automaticamente o mês anterior
         ano, mes = self._get_previous_month()
 
         target_path = None
+        filename = None
 
         if match_result.identificado:
             # Tenta resolver o caminho do cliente validando existência
@@ -142,11 +142,6 @@ class StorageService:
                     target_path,
                     original_filename
                 )
-                if module_norm.startswith("extra"):
-                    filename = self._ensure_unique_filename_incremental(
-                        filename,
-                        target_path
-                    )
             else:
                 logger.warning(
                     f"Estrutura de pastas não encontrada para cliente {match_result.cliente.cod}. "
@@ -162,21 +157,11 @@ class StorageService:
                 logger.warning(f"Pasta NAO_IDENTIFICADOS nao encontrada, criando: {target_path}")
                 target_path.mkdir(parents=True, exist_ok=True)
             
-            if module_norm.startswith("extra"):
-                filename = self._ensure_unique_filename_incremental(
-                    original_filename,
-                    target_path,
-                )
-            else:
-                filename = self._ensure_unique_filename(
-                    original_filename,
-                    pdf_data,
-                    target_path
-                )
+            filename = original_filename
         
-        # Salva o arquivo
-        full_path = target_path / filename
-        full_path.write_bytes(pdf_data)
+        # Salva o arquivo garantindo nome Ãºnico (sequencial)
+        filename = filename or "DOCUMENTO.pdf"
+        filename, full_path = self._write_bytes_unique(target_path, filename, pdf_data)
         
         logger.info(f"Arquivo salvo: {full_path}")
         return (str(full_path), ano, mes)
@@ -307,50 +292,55 @@ class StorageService:
         # Se já existir arquivo com mesmo nome, será sobrescrito
         return filename
     
-    def _ensure_unique_filename(
+    def _write_bytes_unique(
         self,
-        original_filename: str,
-        pdf_data: bytes,
-        target_path: Path
-    ) -> str:
+        target_path: Path,
+        desired_filename: str,
+        data: bytes,
+        max_attempts: int = 1000
+    ) -> tuple[str, Path]:
         """
-        Garante que o nome do arquivo seja único no diretório.
-        
-        Se já existir arquivo com mesmo nome, adiciona sufixo.
-        """
-        # Remove extensão e adiciona de volta .pdf
-        name = Path(original_filename).stem
-        filename = f"{name}.pdf"
-        
-        if (target_path / filename).exists():
-            hash_suffix = short_hash(pdf_data)
-            filename = f"{name}_{hash_suffix}.pdf"
-        
-        return filename
+        Salva bytes garantindo nome único com sufixo incremental (_1, _2, ...).
 
-    def _ensure_unique_filename_incremental(
-        self,
-        original_filename: str,
-        target_path: Path
-    ) -> str:
-        """
-        Garante nome único adicionando sufixo incremental (_1, _2, ...).
-        """
-        original_path = Path(original_filename)
-        stem = original_path.stem or "DOCUMENTO"
-        suffix = original_path.suffix.lower() or ".pdf"
-        filename = f"{stem}{suffix}"
+        Usa criação exclusiva para evitar sobrescrita em execução concorrente.
 
-        if not (target_path / filename).exists():
-            return filename
+        Args:
+            target_path: Diretório de destino
+            desired_filename: Nome desejado para o arquivo
+            data: Dados binários a serem salvos
+            max_attempts: Número máximo de tentativas (padrão: 1000)
 
-        counter = 1
-        while True:
-            candidate = f"{stem}_{counter}{suffix}"
-            if not (target_path / candidate).exists():
-                return candidate
-            counter += 1
-    
+        Returns:
+            Tupla (nome_final, caminho_completo)
+
+        Raises:
+            RuntimeError: Se exceder max_attempts tentativas
+        """
+        target_path.mkdir(parents=True, exist_ok=True)
+        desired_path = Path(desired_filename)
+        stem = desired_path.stem or "DOCUMENTO"
+        suffix = desired_path.suffix or ".pdf"
+
+        counter = 0
+        while counter < max_attempts:
+            name = f"{stem}{suffix}" if counter == 0 else f"{stem}_{counter}{suffix}"
+            full_path = target_path / name
+            try:
+                with full_path.open("xb") as handle:
+                    handle.write(data)
+                return name, full_path
+            except FileExistsError:
+                counter += 1
+
+        # Se chegou aqui, excedeu o limite
+        raise RuntimeError(
+            f"Não foi possível criar arquivo único após {max_attempts} tentativas. "
+            f"Base: {stem}{suffix}"
+        )
+
+    # Métodos obsoletos removidos (_ensure_unique_filename e _ensure_unique_filename_incremental)
+    # A lógica foi consolidada no método _write_bytes_unique() que é thread-safe
+
     def check_folder_exists(self, client: ClientInfo) -> bool:
         """
         Verifica se a pasta do cliente existe.

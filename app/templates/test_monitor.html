@@ -503,6 +503,27 @@
             opacity: 0.5;
         }
 
+        .icon-button {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 32px;
+            height: 32px;
+            border-radius: 10px;
+            border: 1px solid var(--border);
+            background: rgba(99, 102, 241, 0.12);
+            color: var(--accent-secondary);
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .icon-button:hover {
+            border-color: var(--accent-test);
+            color: var(--accent-test);
+            transform: translateY(-1px);
+            box-shadow: 0 6px 16px rgba(168, 85, 247, 0.2);
+        }
+
         /* Connection Status */
         .connection-status {
             position: fixed;
@@ -822,6 +843,9 @@
                     const rows = data.logs.map(log => {
                         const statusClass = log.status === 'SUCESSO' ? 'success' : (log.status === 'FALHA' ? 'error' : 'warning');
                         const statusIcon = log.status === 'SUCESSO' ? '✅' : (log.status === 'FALHA' ? '❌' : '⚠️');
+                        const viewBtn = log.id
+                            ? `<button class="icon-button" title="Ver documento" onclick="viewFile(${log.id})">👁️</button>`
+                            : '<span style="color: var(--text-muted);">-</span>';
 
                         return `
                         <tr>
@@ -833,7 +857,7 @@
                             </td>
                             <td>${log.mes || '-'}/${log.ano || '-'}</td>
                             <td><span class="status ${statusClass}">${statusIcon} ${log.status}</span></td>
-
+                            <td>${viewBtn}</td>
                         </tr>
                     `;
                     }).join('');
@@ -847,7 +871,7 @@
                                 <th>Tipo / Banco</th>
                                 <th>Período</th>
                                 <th>Status</th>
-
+                                <th>Ver</th>
                             </tr>
                         </thead>
                         <tbody>${rows}</tbody>

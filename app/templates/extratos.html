@@ -928,7 +928,7 @@
             filesCard.style.display = 'block';
 
             try {
-                const response = await fetch('/extratos/mapear');
+                const response = await fetch('/extratos/mapear?process=true');
                 const data = await response.json();
 
                 if (!response.ok) {
@@ -948,7 +948,7 @@
                 const avisos = data.avisos || [];
 
                 if (!arquivos.length && !avisos.length) {
-                    filesTableBody.innerHTML = '<tr><td colspan="3" class="empty">Nenhum arquivo PDF/OFX encontrado na pasta</td></tr>';
+                    filesTableBody.innerHTML = '<tr><td colspan="3" class="empty">Nenhum arquivo PDF/OFX/ZIP encontrado na pasta</td></tr>';
                     return;
                 }
 
@@ -978,6 +978,13 @@
                 }).join('');
 
                 filesTableBody.innerHTML = html;
+                if (data.processamento_iniciado) {
+                    showToast(
+                        'Processamento iniciado',
+                        `${data.processamento_iniciado} arquivo(s) em processamento`,
+                        'info'
+                    );
+                }
 
             } catch (e) {
                 console.error(e);
@@ -988,6 +995,56 @@
         function fecharArquivos() {
             filesCard.style.display = 'none';
         }
+
+        let refreshPending = null;
+        function scheduleRefresh() {
+            if (refreshPending) return;
+            refreshPending = setTimeout(async () => {
+                refreshPending = null;
+                await refreshDashboard(false);
+            }, 800);
+        }
+
+        function connectExtratosSocket(path) {
+            const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+            const wsUrl = `${protocol}//${window.location.host}${path}`;
+            const socket = new WebSocket(wsUrl);
+
+            socket.onmessage = (event) => {
+                try {
+                    const data = JSON.parse(event.data);
+                    if (!data || !data.event_type) return;
+                    if (data.event_type === 'processing_completed') {
+                        const status = data.details?.status || 'SUCESSO';
+                        showToast(
+                            'Processamento concluido',
+                            `${data.filename || 'Arquivo'}: ${status}`,
+                            status === 'SUCESSO' ? 'success' : 'info'
+                        );
+                    } else if (data.event_type === 'processing_error') {
+                        showToast(
+                            'Erro no processamento',
+                            `${data.filename || 'Arquivo'}: ${data.message || 'Falha'}`,
+                            'info'
+                        );
+                    }
+                    if (['processing_completed', 'processing_error', 'stats_update'].includes(data.event_type)) {
+                        scheduleRefresh();
+                    }
+                } catch (e) {
+                    console.warn('Erro ao processar evento do websocket:', e);
+                }
+            };
+
+            socket.onclose = () => {
+                setTimeout(() => connectExtratosSocket(path), 2000);
+            };
+
+            return socket;
+        }
+
+        connectExtratosSocket('/ws/extratos');
+        connectExtratosSocket('/ws/extratos/test');
 
         btnStart.addEventListener('click', startWatcher);
         btnStop.addEventListener('click', stopWatcher);
