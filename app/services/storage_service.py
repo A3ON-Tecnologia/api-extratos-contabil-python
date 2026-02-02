@@ -95,6 +95,7 @@ class StorageService:
         tipo_documento: str | None = None,
         banco: str | None = None,
         conta_extrato: str | None = None,
+        module: str = "make",
     ) -> tuple[str, int, int]:
         """
         Salva o arquivo PDF no caminho correto.
@@ -148,7 +149,7 @@ class StorageService:
         
         # Fallback: salva direto na pasta NAO_IDENTIFICADOS (sem subpastas)
         if not target_path:
-            target_path = self.settings.unidentified_path
+            target_path = self.get_unidentified_path(module)
             
             # Verifica se a pasta de não identificados existe
             if not target_path.exists():
@@ -227,14 +228,24 @@ class StorageService:
 
         return base_path
     
-    def _build_unidentified_path(self, ano: int, mes: int) -> Path:
+    def _build_unidentified_path(self, ano: int, mes: int, module: str = "make") -> Path:
         """
         Constrói o caminho para arquivos não identificados.
         
         Estrutura: NAO_IDENTIFICADOS/ANO/MÊS
         """
         mes_nome = MONTH_NAMES.get(mes, f"MES_{mes}")
-        return self.settings.unidentified_path / str(ano) / mes_nome
+        return self.get_unidentified_path(module) / str(ano) / mes_nome
+
+    def get_unidentified_path(self, module: str = "make") -> Path:
+        """
+        Retorna o caminho base de NAO_IDENTIFICADOS conforme o módulo.
+        module: "make" | "extratos"
+        """
+        module_norm = (module or "make").lower()
+        if module_norm.startswith("extra"):
+            return self.settings.unidentified_extratos_path
+        return self.settings.unidentified_make_path
 
     
     def _build_filename(

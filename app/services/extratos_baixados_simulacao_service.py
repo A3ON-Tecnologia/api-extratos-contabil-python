@@ -156,8 +156,8 @@ class ExtratosBaixadosSimulacaoService:
                 )
 
         return (
-            str(self._storage_service.settings.unidentified_path / filename),
-            self._storage_service.settings.unidentified_path.exists(),
+            str(self._storage_service.get_unidentified_path("extratos") / filename),
+            self._storage_service.get_unidentified_path("extratos").exists(),
             "NAO_IDENTIFICADO",
             None,
         )

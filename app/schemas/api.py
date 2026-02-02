@@ -15,7 +15,7 @@ class ProcessingStatus(str, Enum):
     """Status do processamento de um arquivo."""
     
     SUCESSO = "SUCESSO"
-    NAO_IDENTIFICADO = "NÃO IDENTIFICADO"
+    NAO_IDENTIFICADO = "NAO_IDENTIFICADO"
     FALHA = "FALHA"
 
 

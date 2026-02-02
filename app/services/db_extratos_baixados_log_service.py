@@ -120,10 +120,19 @@ class ExtratosBaixadosLogService:
         try:
             total = db.query(ExtratosBaixadosLog).count()
             sucesso = db.query(ExtratosBaixadosLog).filter(ExtratosBaixadosLog.status == "SUCESSO").count()
+
+            nao_identificado_values = [
+                "NAO_IDENTIFICADO",
+                "NAO IDENTIFICADO",
+                "NÃO IDENTIFICADO",
+                "NÃƒO IDENTIFICADO",
+            ]
             nao_identificado = db.query(ExtratosBaixadosLog).filter(
-                ExtratosBaixadosLog.status == "NAO_IDENTIFICADO"
+                ExtratosBaixadosLog.status.in_(nao_identificado_values)
             ).count()
-            falha = db.query(ExtratosBaixadosLog).filter(ExtratosBaixadosLog.status == "FALHA").count()
+
+            falha_values = ["FALHA", "ERRO"]
+            falha = db.query(ExtratosBaixadosLog).filter(ExtratosBaixadosLog.status.in_(falha_values)).count()
 
             return {
                 "total": total,

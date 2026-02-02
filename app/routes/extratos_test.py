@@ -328,9 +328,9 @@ async def _process_test_extrato(content: bytes, filename: str, file_hash: str) -
             )
             caminho_simulado = str(target_path / file_name)
         else:
-            caminho_simulado = str(storage_service.settings.unidentified_path / filename)
+            caminho_simulado = str(storage_service.get_unidentified_path("extratos") / filename)
     else:
-        caminho_simulado = str(storage_service.settings.unidentified_path / filename)
+        caminho_simulado = str(storage_service.get_unidentified_path("extratos") / filename)
 
     status = "SUCESSO" if match_result.identificado else "NAO_IDENTIFICADO"
     cliente_nome = match_result.cliente.nome if match_result.identificado else None

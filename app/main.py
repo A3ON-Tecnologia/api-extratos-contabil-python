@@ -756,7 +756,7 @@ async def extratos_watch_stop():
 async def monitor_stats():
     """Retorna estatísticas do sistema de arquivos."""
     settings = get_settings()
-    unidentified_path = settings.unidentified_path
+    unidentified_path = settings.unidentified_make_path
     
     # Conta arquivos na pasta NAO_IDENTIFICADOS (recursivamente)
     count_unidentified = 0
@@ -775,7 +775,7 @@ async def monitor_stats():
 async def extratos_monitor_stats():
     """Retorna estatisticas do sistema de arquivos para extratos baixados."""
     settings = get_settings()
-    unidentified_path = settings.unidentified_path
+    unidentified_path = settings.unidentified_extratos_path
 
     count_unidentified = 0
     if unidentified_path.exists():
@@ -1526,9 +1526,9 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                     )
                     saved_path = str(target_path / file_name)
                 else:
-                    saved_path = str(storage_service.settings.unidentified_path / filename)
+                    saved_path = str(storage_service.get_unidentified_path("make") / filename)
             else:
-                saved_path = str(storage_service.settings.unidentified_path / filename)
+                saved_path = str(storage_service.get_unidentified_path("make") / filename)
             
             logger.info(f"[TESTE] Arquivo seria salvo em: {saved_path}")
             
@@ -1541,6 +1541,7 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
                 tipo_documento=extraction.tipo_documento,
                 banco=extraction.banco,
                 conta_extrato=extraction.conta,
+                module="make",
             )
         
         await event_manager.emit(ProcessingEvent(
@@ -1701,7 +1702,7 @@ async def create_failure_result(
     if pdf_data:
         try:
             storage_service = get_storage_service()
-            target_path = storage_service.settings.unidentified_path
+            target_path = storage_service.get_unidentified_path("make")
             if not target_path.exists():
                 target_path.mkdir(parents=True, exist_ok=True)
             filename_final = storage_service._ensure_unique_filename(
@@ -2046,9 +2047,9 @@ async def process_extratos_pdf_async(
                     )
                     saved_path = str(target_path / file_name)
                 else:
-                    saved_path = str(storage_service.settings.unidentified_path / filename)
+                    saved_path = str(storage_service.get_unidentified_path("extratos") / filename)
             else:
-                saved_path = str(storage_service.settings.unidentified_path / filename)
+                saved_path = str(storage_service.get_unidentified_path("extratos") / filename)
             logger.info(f"[TESTE EXTRATOS] Arquivo seria salvo em: {saved_path}")
         else:
             saved_path, ano, mes = storage_service.save_file(
@@ -2058,6 +2059,7 @@ async def process_extratos_pdf_async(
                 tipo_documento=extraction.tipo_documento,
                 banco=extraction.banco,
                 conta_extrato=extraction.conta,
+                module="extratos",
             )
 
         await event_manager.emit(ProcessingEvent(
@@ -2216,7 +2218,7 @@ async def create_extratos_failure_result(
     if pdf_data:
         try:
             storage_service = get_storage_service()
-            target_path = storage_service.settings.unidentified_path
+            target_path = storage_service.get_unidentified_path("extratos")
             if not target_path.exists():
                 target_path.mkdir(parents=True, exist_ok=True)
             filename_final = storage_service._ensure_unique_filename(
@@ -2357,7 +2359,7 @@ async def assign_client_to_unidentified(payload: AssignClientRequest):
         source_path = Path(log.arquivo_salvo) if log.arquivo_salvo else None
         if not source_path or not source_path.exists():
             if log.arquivo_original:
-                fallback = storage_service.settings.unidentified_path / log.arquivo_original
+                fallback = storage_service.get_unidentified_path("make") / log.arquivo_original
                 if fallback.exists():
                     source_path = fallback
 
@@ -2731,7 +2733,7 @@ async def view_log_file(log_id: int):
             # (Caso comum em falhas)
             if filename:
                  settings = get_settings()
-                 potential_path = settings.unidentified_path / filename
+                 potential_path = settings.unidentified_make_path / filename
                  if potential_path.exists():
                      file_path = str(potential_path)
         
@@ -2828,7 +2830,7 @@ async def view_extratos_log_file(log_id: int):
 
         if (not file_path or file_path == '-') and filename:
             settings = get_settings()
-            potential_path = settings.unidentified_path / filename
+            potential_path = settings.unidentified_make_path / filename
             if potential_path.exists():
                 file_path = str(potential_path)
 
@@ -3093,11 +3095,11 @@ async def _process_single_test_pdf(
                 )
                 simulated_path = str(target_path / file_name)
             else:
-                simulated_path = str(storage_service.settings.unidentified_path / filename)
+                simulated_path = str(storage_service.get_unidentified_path("make") / filename)
             proc_status = ProcessingStatus.SUCESSO
             cliente_nome = match_result.cliente.nome
         else:
-            simulated_path = str(storage_service.settings.unidentified_path / filename)
+            simulated_path = str(storage_service.get_unidentified_path("make") / filename)
             proc_status = ProcessingStatus.NAO_IDENTIFICADO
             cliente_nome = None
         
