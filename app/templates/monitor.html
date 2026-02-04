@@ -2039,6 +2039,7 @@
                                     status: r.status,
                                     metodo: r.metodo_identificacao || '-',
                                     path: r.nome_arquivo_final || '-',
+                                    logId: r.log_id || null,
                                     statusClass: r.status === 'SUCESSO' ? 'success' :
                                         (r.status === 'FALHA' ? 'error' : 'warning')
                                 });

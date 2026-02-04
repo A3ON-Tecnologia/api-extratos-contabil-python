@@ -830,6 +830,72 @@ async def monitor_stats():
 
 
 
+@app.post("/monitor/reconcile-manual")
+async def monitor_reconcile_manual():
+    """
+    Reconcilia logs NAO_IDENTIFICADO quando o arquivo foi movido manualmente
+    para fora da pasta de NAO IDENTIFICADOS.
+    """
+    from app.database import SessionLocal
+    from app.models.extrato_log import ExtratoLog
+
+    settings = get_settings()
+    unidentified_path = settings.unidentified_make_path
+
+    if not unidentified_path.exists():
+        raise HTTPException(status_code=404, detail="Pasta de NAO IDENTIFICADOS nao encontrada")
+
+    nao_identificado_values = [
+        "NAO_IDENTIFICADO",
+        "NAO IDENTIFICADO",
+        "N??O IDENTIFICADO",
+        "N????O IDENTIFICADO",
+        "N?O IDENTIFICADO",
+    ]
+
+    db = SessionLocal()
+    updated = 0
+    try:
+        logs = db.query(ExtratoLog).filter(ExtratoLog.status.in_(nao_identificado_values)).all()
+
+        for log in logs:
+            candidate_paths: list[Path] = []
+            if log.arquivo_salvo:
+                candidate_paths.append(Path(log.arquivo_salvo))
+            if log.arquivo_original:
+                candidate_paths.append(unidentified_path / log.arquivo_original)
+
+            if any(p.exists() for p in candidate_paths):
+                continue
+
+            log.status = "SUCESSO"
+            log.metodo_identificacao = "MANUAL"
+            if log.erro:
+                if "Atualizado manualmente" not in log.erro:
+                    log.erro = f"{log.erro} | Atualizado manualmente (arquivo movido da pasta de nao identificados)"
+            else:
+                log.erro = "Atualizado manualmente (arquivo movido da pasta de nao identificados)"
+            updated += 1
+
+        if updated:
+            db.commit()
+
+        event_manager = get_event_manager()
+        if updated:
+            event_manager.stats["nao_identificados"] = max(0, event_manager.stats["nao_identificados"] - updated)
+            event_manager.stats["sucesso"] += updated
+            await event_manager.emit_stats()
+
+        return {"updated": updated, "checked": len(logs)}
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao reconciliar manuais: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+
 @app.get("/extratos/monitor/stats")
 async def extratos_monitor_stats():
     """Retorna estatisticas do sistema de arquivos para extratos baixados."""
@@ -1738,6 +1804,7 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
             ano=ano,
             mes=mes,
             hash_arquivo=file_hash,
+            log_id=log_id,
             erro=match_result.motivo_fallback if not match_result.identificado else None,
         )
         
@@ -2265,6 +2332,7 @@ async def process_extratos_pdf_async(
             ano=ano,
             mes=mes,
             hash_arquivo=file_hash,
+            log_id=log_id,
             erro=match_result.motivo_fallback if not match_result.identificado else None,
         )
     except asyncio.CancelledError:

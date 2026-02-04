@@ -67,6 +67,11 @@ class ProcessingResult(BaseModel):
         description="Hash SHA256 do arquivo para idempotência"
     )
 
+    log_id: int | None = Field(
+        default=None,
+        description="ID do log no banco (se registrado)"
+    )
+
 
 class UploadResponse(BaseModel):
     """
