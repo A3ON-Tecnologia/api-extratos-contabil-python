@@ -5,6 +5,7 @@ Carrega e mantém em cache a lista de clientes da planilha Excel.
 """
 
 import logging
+import re
 from datetime import datetime, timedelta
 from pathlib import Path
 from threading import Lock
@@ -221,6 +222,49 @@ class ClientService:
             clients.append(client)
 
         logger.info(f"Carregados {len(clients)} clientes da planilha (override)")
+        return clients
+
+    def list_client_folders(self) -> list[ClientInfo]:
+        """
+        Lista clientes a partir das pastas existentes no BASE_PATH.
+
+        Considera pastas no formato "COD - NOME".
+        """
+        base_path = self.settings.base_path
+        if not base_path.exists() or not base_path.is_dir():
+            raise FileNotFoundError(f"Base path nao encontrado: {base_path}")
+
+        clients: list[ClientInfo] = []
+        pattern = re.compile(r"^\s*(\d{1,3})\s*-\s*(.+)$")
+
+        try:
+            for entry in base_path.iterdir():
+                if not entry.is_dir():
+                    continue
+                name = entry.name.strip()
+                match = pattern.match(name)
+                if not match:
+                    continue
+                cod = match.group(1).zfill(3)
+                nome = match.group(2).strip()
+                if not nome:
+                    continue
+                clients.append(
+                    ClientInfo(
+                        cod=cod,
+                        nome=nome,
+                        cnpj=None,
+                        banco=None,
+                        agencia=None,
+                        conta=None,
+                        tipo_documento=None,
+                    )
+                )
+        except OSError as e:
+            raise OSError(f"Erro ao listar pastas de clientes: {e}")
+
+        # Ordena por codigo e nome para estabilidade
+        clients.sort(key=lambda c: (c.cod, c.nome))
         return clients
 
     def _is_cache_valid(self) -> bool:

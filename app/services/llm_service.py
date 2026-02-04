@@ -47,6 +47,8 @@ TIPOS PRINCIPAIS:
 - "REL RECEBIMENTO" -> Para relatórios de títulos por período, recebimentos, títulos cadastrados
 - "CONTA GRÁFICA DETALHADA" -> Para documentos de conta gráfica detalhada
 - "CONTA GRÁFICA SIMPLIFICADA" -> Para documentos de conta gráfica simplificada
+- "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS LIQUIDADAS" -> Para relatorios PAR do SICOOB com parcelas liquidadas
+- "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS EM ABERTO" -> Para relatorios PAR do SICOOB com parcelas em aberto
 
 CÓDIGOS CURTOS (use quando apropriado):
 - "CC" -> Conta Corrente (alternativa curta)
@@ -137,6 +139,10 @@ EXTRAÇÃO DE CLIENTE (cliente_sugerido):
 - REMOVA prefixos: "ASSOCIADO:", "CLIENTE:", números de matrícula
 - Exemplo: "ASSOCIADO: 123 - EMPRESA X" -> retorne apenas "EMPRESA X"
 - NÃO use o nome do banco como cliente
+- Para documentos "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS ...":
+  - O cliente aparece na tabela sob o rótulo "Cedente"
+  - IGNORE "Sacado" (pode conter muitos nomes diferentes)
+  - Remova códigos numéricos antes do nome (ex: "54544-9 RODAIR TRATORES E" -> "RODAIR TRATORES E")
 
 EXEMPLOS PRÁTICOS DE EXTRAÇÃO:
 
@@ -535,6 +541,13 @@ class LLMService:
                 if result.confianca < 0.8:
                     result.confianca = 0.8
 
+            # Heuristica textual: relatorio PAR do SICOOB (parcelas em aberto/liquidadas)
+            par_tipo = self._detect_par_report_type(analysis_text)
+            if par_tipo:
+                result.tipo_documento = par_tipo
+                if result.confianca < 0.85:
+                    result.confianca = 0.85
+
             # Se o banco não foi identificado, tenta OCR (visão) no PDF
             if (not result.banco or result.banco == "null") and pdf_data:
                 logger.info("Banco não identificado no texto, tentando OCR...")
@@ -790,6 +803,17 @@ class LLMService:
         """Detecta indicio de investimento pelo termo RENDE FACIL."""
         normalized = self._normalize_text_for_hint(text)
         return "RENDE FACIL" in normalized
+
+    def _detect_par_report_type(self, text: str) -> str | None:
+        """Detecta relatorio PAR do SICOOB e classifica o tipo."""
+        normalized = self._normalize_text_for_hint(text)
+        if "PAR RELATORIO SELECAO DE OPERACOES PARCELAS" not in normalized:
+            return None
+        if "LIQUIDADAS" in normalized:
+            return "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS LIQUIDADAS"
+        if "EM ABERTO" in normalized or "PARCELAS EM ABERTO" in normalized:
+            return "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS EM ABERTO"
+        return None
 
     def _is_conta_capital(self, text: str, tipo_documento: str | None) -> bool:
         """Detecta extrato de conta capital pelo tipo ou pelo texto."""

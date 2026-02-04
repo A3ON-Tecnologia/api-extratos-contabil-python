@@ -13,6 +13,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Annotated, List
 from concurrent.futures import ThreadPoolExecutor
+import mimetypes
 
 from fastapi import (
     BackgroundTasks,
@@ -40,7 +41,7 @@ from app.events import (
     get_extratos_test_event_manager,
 )
 from app.schemas.api import ProcessingResult, ProcessingStatus, UploadResponse
-from app.schemas.client import MatchMethod
+from app.schemas.client import ClientInfo, MatchMethod
 from app.services import (
     ClientService,
     LLMService,
@@ -105,6 +106,10 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Garante MIME types corretos para ES modules e .lottie
+mimetypes.add_type("text/javascript", ".mjs")
+mimetypes.add_type("application/zip", ".lottie")
 
 # Servir arquivos estáticos (CSS, JS)
 from fastapi.staticfiles import StaticFiles
@@ -718,7 +723,8 @@ class ExtratosSimulacaoWebhook(BaseModel):
 
 class AssignClientRequest(BaseModel):
     log_id: int
-    client_cod: str
+    client_cod: str | None = None
+    client_folder: str | None = None
 
 @app.post("/extratos/webhook/simulacao")
 async def extratos_webhook_simulacao(payload: ExtratosSimulacaoWebhook):
@@ -2397,11 +2403,11 @@ async def list_monitor_clients():
     """Lista clientes disponiveis para selecao manual no Monitor."""
     try:
         client_service = get_client_service()
-        clients = client_service.load_clients()
+        clients = client_service.list_client_folders()
         return {
             "total": len(clients),
             "clients": [
-                {"cod": c.cod, "nome": c.nome, "cnpj": c.cnpj}
+                {"cod": c.cod, "nome": c.nome, "cnpj": c.cnpj, "folder": c.folder_name}
                 for c in clients
             ],
         }
@@ -2426,9 +2432,31 @@ async def assign_client_to_unidentified(payload: AssignClientRequest):
             raise HTTPException(status_code=400, detail="Log nao esta como NAO_IDENTIFICADO")
 
         client_service = get_client_service()
-        client = client_service.get_client_by_cod(payload.client_cod)
-        if not client:
-            raise HTTPException(status_code=404, detail="Cliente nao encontrado")
+        client_folder = payload.client_folder.strip() if payload.client_folder else None
+        client = None
+        client_base_path = None
+
+        if client_folder:
+            base_path = get_settings().base_path
+            client_base_path = base_path / client_folder
+            if not client_base_path.exists() or not client_base_path.is_dir():
+                raise HTTPException(status_code=404, detail="Pasta do cliente nao encontrada")
+
+            match = re.match(r"^\s*(\d{1,3})\s*-\s*(.+)$", client_folder)
+            if match:
+                cod = match.group(1).zfill(3)
+                client = client_service.get_client_by_cod(cod)
+            # Se não encontrou na planilha, cria cliente mínimo a partir do nome da pasta
+            if not client:
+                nome = match.group(2).strip() if match else client_folder
+                cod = match.group(1).zfill(3) if match else None
+                client = ClientInfo(cod=cod or "000", nome=nome)
+        else:
+            if not payload.client_cod:
+                raise HTTPException(status_code=400, detail="Cliente nao informado")
+            client = client_service.get_client_by_cod(payload.client_cod)
+            if not client:
+                raise HTTPException(status_code=404, detail="Cliente nao encontrado")
 
         storage_service = get_storage_service()
 
@@ -2443,7 +2471,9 @@ async def assign_client_to_unidentified(payload: AssignClientRequest):
             raise HTTPException(status_code=404, detail="Arquivo fisico nao encontrado")
 
         pdf_data = source_path.read_bytes()
-        client_base_path = storage_service._resolve_client_path(client)
+        # Resolve caminho do cliente com base na pasta informada ou planilha
+        if not client_base_path:
+            client_base_path = storage_service._resolve_client_path(client)
         if not client_base_path:
             raise HTTPException(status_code=400, detail="Pasta do cliente nao encontrada")
 

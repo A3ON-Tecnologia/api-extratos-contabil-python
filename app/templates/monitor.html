@@ -1682,6 +1682,7 @@
         let pendingAssign = { logId: null, index: null };
         let cachedClients = null;
         let cachedClientsByCod = {};
+        let cachedClientsByFolder = {};
 
         async function loadClientsForAssign() {
             if (cachedClients) return cachedClients;
@@ -1690,14 +1691,20 @@
             const data = await response.json();
             cachedClients = data.clients || [];
             cachedClientsByCod = {};
+            cachedClientsByFolder = {};
 
             const datalist = document.getElementById('assignClientDatalist');
             if (datalist) {
                 datalist.innerHTML = '';
                 cachedClients.forEach(client => {
-                    cachedClientsByCod[client.cod] = client;
+                    if (client.cod) {
+                        cachedClientsByCod[client.cod] = client;
+                    }
+                    if (client.folder) {
+                        cachedClientsByFolder[client.folder] = client;
+                    }
                     const option = document.createElement('option');
-                    option.value = `${client.cod} - ${client.nome}`;
+                    option.value = client.folder || `${client.cod} - ${client.nome}`;
                     datalist.appendChild(option);
                 });
             }
@@ -1734,13 +1741,34 @@
 
             const input = document.getElementById('assignClientInput');
             const rawValue = input.value.trim();
-            const match = rawValue.match(/(\\d{1,3})/);
-            if (!match) {
+            if (!rawValue) {
                 alert('Informe um cliente valido (codigo ou nome).');
                 return;
             }
 
-            const clientCod = match[1].padStart(3, '0');
+            let selectedClient = null;
+            if (cachedClientsByFolder[rawValue]) {
+                selectedClient = cachedClientsByFolder[rawValue];
+            } else {
+                const codMatch = rawValue.match(/^(\d{1,3})\\b/);
+                if (codMatch) {
+                    const cod = codMatch[1].padStart(3, '0');
+                    selectedClient = cachedClientsByCod[cod] || null;
+                }
+            }
+
+            if (!selectedClient) {
+                const rawUpper = rawValue.toUpperCase();
+                selectedClient = cachedClients.find(c =>
+                    (c.nome && c.nome.toUpperCase().includes(rawUpper)) ||
+                    (c.folder && c.folder.toUpperCase().includes(rawUpper))
+                ) || null;
+            }
+
+            if (!selectedClient) {
+                alert('Informe um cliente valido (codigo ou nome).');
+                return;
+            }
             const confirmBtn = document.getElementById('assignConfirmBtn');
             const originalText = confirmBtn.innerHTML;
             confirmBtn.innerHTML = 'Processando...';
@@ -1750,7 +1778,11 @@
                 const response = await fetch('/monitor/assign-client', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ log_id: logId, client_cod: clientCod })
+                    body: JSON.stringify({
+                        log_id: logId,
+                        client_cod: selectedClient.cod,
+                        client_folder: selectedClient.folder
+                    })
                 });
                 const data = await response.json();
 
@@ -1771,7 +1803,7 @@
                 const statWarning = document.getElementById('statWarning');
                 if (statWarning) statWarning.textContent = String(Math.max(0, parseInt(statWarning.textContent) - 1));
 
-                addEvent('success', `Cliente atualizado: ${data.cliente || clientCod}`);
+                addEvent('success', `Cliente atualizado: ${data.cliente || selectedClient.folder || selectedClient.cod}`);
                 closeAssignClientModal();
                 renderExtratosTable();
                 fetchFolderStats();

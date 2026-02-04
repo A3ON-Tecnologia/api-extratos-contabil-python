@@ -496,6 +496,7 @@ class MatchingService:
         
         # Remove apenas números e traços do início se sobraram
         cleaned = re.sub(r'^[\d\.\-\/]+\s*-\s*', '', cleaned)
+        cleaned = re.sub(r'^[\d\.\-\/]+\s+', '', cleaned)
         
         return cleaned.strip()
 
