@@ -50,7 +50,10 @@ class ExtratosBaixadosSimulacaoService:
             executor, self._llm_service.extract_info_with_fallback, text, pdf_data
         )
 
-        match_result = self._matching_service.match(extraction)
+        match_result = self._matching_service.match(
+            extraction,
+            prefer_extratos_planilha=True,
+        )
         ano, mes = self._storage_service._get_previous_month()
 
         caminho_destino, pasta_destino_existe, status, cliente_nome = (

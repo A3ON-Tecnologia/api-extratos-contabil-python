@@ -8,6 +8,10 @@ import json
 import logging
 import re
 import unicodedata
+import time
+import hashlib
+from functools import lru_cache
+from typing import Optional
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -18,203 +22,218 @@ from app.services.client_service import ClientService
 from app.utils.text import extract_numbers
 from app.schemas.llm_response import LLMExtractionResult
 
+try:
+    import tiktoken
+    TIKTOKEN_AVAILABLE = True
+except ImportError:
+    TIKTOKEN_AVAILABLE = False
+    logging.warning("tiktoken não disponível - usando contagem aproximada de caracteres")
+
 logger = logging.getLogger(__name__)
 
-# Prompt do sistema para extração de informações
-SYSTEM_PROMPT = """Você é um assistente especializado em análise de documentos financeiros e bancários.
-Sua tarefa é extrair informações estruturadas de textos de extratos bancários e documentos contábeis.
+# Prompt com Chain-of-Thought para casos complexos
+SYSTEM_PROMPT_COT = """Você é especialista em extração de dados de documentos financeiros.
 
-REGRAS IMPORTANTES:
-1. Extraia APENAS informações que estão explicitamente no texto
-2. Se uma informação não estiver clara, use null
-3. O campo "confianca" deve refletir sua certeza geral sobre a extração (0.0 a 1.0)
-4. Para CNPJ, mantenha o formato encontrado ou extraia apenas números
-5. NÃO extraia datas - o sistema usará automaticamente o mês anterior
-6. Foque no cabeçalho do documento: geralmente ele traz NOME, AGÊNCIA e CONTA
-7. "Agência" e "Conta" podem aparecer na MESMA linha (ex: "Agência 5684 Conta 001074-0")
-8. Preserve o formato original de agência/conta (com hífens) quando houver
+<task>
+Extrair: cliente_sugerido, cnpj, banco, agencia, conta, contrato, tipo_documento, confianca (0.0-1.0)
+</task>
 
-CLASSIFICAÇÃO DE TIPO DE DOCUMENTO (Campo: tipo_documento):
-Você DEVE classificar o documento em EXATAMENTE UMA das categorias abaixo. Use APENAS estes textos:
+<critical_rules>
+1. Extraia APENAS informações explícitas no texto
+2. Use null se ausente ou incerto
+3. NÃO extraia datas (sistema controla)
+4. Foque no CABEÇALHO (primeiras 30 linhas)
+5. ⚠️ MATRÍCULA ≠ CONTA! Se só há MATRÍCULA → conta=null
+</critical_rules>
 
-TIPOS PRINCIPAIS:
-- "EXTRATO DE CONTA CORRENTE" -> Para extratos de conta corrente, movimentação bancária
-- "EXTRATO DA CONTA CAPITAL" -> Para extratos de conta capital, capital social
-- "EXTRATO CONTA POUPANÇA" -> Para extratos de poupança
-- "EXTRATO APLICAÇÃO" -> Para saldo de aplicação, investimentos, CDB, fundos
-- "EXTRATO CONSOLIDADO RENDA FIXA" -> Para extratos consolidados de investimentos
-- "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO" -> Para faturas de cartão de crédito, maquininhas
-- "REL RECEBIMENTO" -> Para relatórios de títulos por período, recebimentos, títulos cadastrados
-- "CONTA GRÁFICA DETALHADA" -> Para documentos de conta gráfica detalhada
-- "CONTA GRÁFICA SIMPLIFICADA" -> Para documentos de conta gráfica simplificada
-- "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS LIQUIDADAS" -> Para relatorios PAR do SICOOB com parcelas liquidadas
-- "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS EM ABERTO" -> Para relatorios PAR do SICOOB com parcelas em aberto
+<document_types>
+Use EXATAMENTE um tipo:
+• EXTRATO DE CONTA CORRENTE | EXTRATO DA CONTA CAPITAL | EXTRATO CONTA POUPANÇA
+• EXTRATO APLICAÇÃO | EXTRATO CONSOLIDADO RENDA FIXA
+• EXTRATO DE FATURA DE CARTÃO DE CRÉDITO | REL RECEBIMENTO
+• CONTA GRÁFICA DETALHADA | CONTA GRÁFICA SIMPLIFICADA
+• PAR - RELATORIO SELECAO DE OPERACOES PARCELAS LIQUIDADAS
+• PAR - RELATORIO SELECAO DE OPERACOES PARCELAS EM ABERTO
+• EXTRATO PIX | EXTRATO EMPRÉSTIMO | EXTRATO CONSÓRCIO | EXTRATO DE RDC | RELATÓRIO DE BOLETOS | OUTROS
+</document_types>
 
-CÓDIGOS CURTOS (use quando apropriado):
-- "CC" -> Conta Corrente (alternativa curta)
-- "POUPANÇA" -> Poupança (alternativa curta)
-- "CARTÃO" -> Cartão de Crédito (alternativa curta)
+<type_priority>
+Em caso de sinais conflitantes, use esta prioridade:
+1) EXTRATO DA CONTA CAPITAL
+2) EXTRATO DE FATURA DE CARTAO DE CREDITO
+3) EXTRATO CONTA POUPANCA
+4) EXTRATO APLICACAO / EXTRATO CONSOLIDADO RENDA FIXA
+5) EXTRATO DE CONTA CORRENTE
+6) RELATORIOS ESPECIFICOS (PAR, REL RECEBIMENTO, CONTA GRAFICA)
+7) OUTROS
+</type_priority>
 
-OUTROS TIPOS:
-- "EXTRATO PIX" -> Para extratos de transferências PIX
-- "EXTRATO EMPRÉSTIMO" -> Para empréstimos, financiamentos
-- "EXTRATO CONSÓRCIO" -> Para consórcios
-- "OUTROS" -> Se não se encaixar em nenhuma categoria acima
+<type_rules>
+Regras negativas (anti-match):
+- Se houver FATURA, VENCIMENTO, LIMITE ou CARTAO -> NAO e conta corrente.
+- Se houver POUPANCA -> NAO e conta corrente.
+- Se houver RENDA FIXA, CDB, FUNDO, APLICACAO, RENDE FACIL -> NAO e conta corrente.
+- Se houver CONTA CAPITAL, SUBSCRICAO, CAPITAL SOCIAL, MATRICULA -> NAO e conta corrente/poupanca.
+- Se houver "PAR - RELATORIO..." -> classifique como PAR e ignore outros sinais.
 
-IDENTIFICAÇÃO DE BANCOS - INSTRUÇÕES CRÍTICAS:
+Regras positivas de investimento:
+- Se houver RENDE FACIL -> tipo_documento = "EXTRATO APLICACAO"
+- Se houver RENDA FIXA -> tipo_documento = "EXTRATO CONSOLIDADO RENDA FIXA"
+</type_rules>
 
-⚠️ **ATENÇÃO MÁXIMA**: SICOOB e CRESOL são bancos DIFERENTES! NUNCA confunda!
+<bank_identification>
+⚠️ CRÍTICO: SICOOB ≠ CRESOL (bancos DIFERENTES!)
 
-**SICOOB** (Sistema de Cooperativas de Crédito do Brasil):
-- Palavras-chave: "SICOOB", "SISBR", "SISTEMA DE COOPERATIVAS DE CRÉDITO DO BRASIL"
-- Site: www.sicoob.com.br
-- Se você encontrar QUALQUER uma dessas palavras, é SICOOB (NÃO É CRESOL!)
+SICOOB: "SICOOB" OU "SISBR" OU "SISTEMA DE COOPERATIVAS DE CREDITO DO BRASIL"
+CRESOL: "CRESOL" (sem SICOOB)
+SICREDI: "COOP DE CRED POUP INV SOMA" OU "SICREDI"
+BANCO DO BRASIL: "BANCO DO BRASIL" OU "BB S.A" OU "BB"
+Outros: BRADESCO | ITAU | SANTANDER | CAIXA
 
-**CRESOL** (Cooperativa de Crédito Rural):
-- Palavra-chave: "CRESOL" (SEM "SICOOB" no texto)
-- É uma cooperativa diferente do SICOOB
+Sempre retorne UPPERCASE. Se incerto → null
+</bank_identification>
 
-**Outros Bancos**:
-- "COOP DE CRED POUP INV SOMA" ou "SICREDI" -> Banco: SICREDI
-- "CAIXA ECONOMICA" ou "CAIXA" -> Banco: CAIXA
-- "BANCO DO BRASIL" ou "BB S.A" ou "BB" -> Banco: BANCO DO BRASIL
-- "BRADESCO" -> Banco: BRADESCO
-- "ITAU" ou "ITAÚ" -> Banco: ITAU
-- "SANTANDER" -> Banco: SANTANDER
+<extraction_rules>
+agencia: Após "Agência|Cooperativa|Ag." → Ex: "3037", "5684", "3037-6"
 
-**REGRA DE OURO**:
-1. Procure "SICOOB" ou "SISBR" no texto → É SICOOB (nunca CRESOL!)
-2. Procure "CRESOL" (sem SICOOB) → É CRESOL
-3. Sempre retorne o nome SIMPLIFICADO em UPPERCASE
-4. Se não tiver 100% de certeza, retorne null
+conta: Após "Conta|Conta Corrente|Cc" → Ex: "75.662-8", "001074-0" (incluir dígito verificador)
+  ⚠️ Se só há MATRÍCULA (sem "Conta:") → conta=null
 
-EXTRAÇÃO DE AGÊNCIA E CONTA - ONDE PROCURAR:
+cliente: Após "Nome:|Razão Social:" → Remova "ASSOCIADO:|CLIENTE:|números"
+  PAR SICOOB: Cliente em "Cedente" (ignore "Sacado")
 
-**LOCALIZAÇÃO**: Procure no CABEÇALHO (primeiras 20-30 linhas do documento)
+cnpj: Formato XX.XXX.XXX/XXXX-XX
 
-**Padrões comuns**:
-1. Linha separada: "Cooperativa: 3037" e "Conta: 75.662-8"
-2. Mesma linha: "Agência 5684 Conta 001074-0"
-3. Formato tabela:
-   ```
-   Cooperativa:  3037
-   Conta:        75.662-8
-   Nome:         COMERCIAL SUL BRASIL LTDA
-   CNPJ:         82.697.137/0001-01
-   ```
+contrato: Para empréstimos, após "Número do Contrato|Contrato:"
 
-**REGRAS CRÍTICAS**:
-- agencia: Extraia o número EXATAMENTE como aparece após "Agência", "Cooperativa" ou "Ag."
-  Exemplos: "3037", "5684", "3037-6" (preserve hífens se houver)
+<special_cases>
+• Conta Capital: Se tipo="EXTRATO DA CONTA CAPITAL" → conta=null (sempre)
+• Banco do Brasil: "Conta 20000-X NOME" → conta="20000-X", cliente="NOME"
+</special_cases>
+</extraction_rules>
 
-- conta: Extraia o número COMPLETO após "Conta", "Conta Corrente" ou "Cc"
-  Exemplos: "75.662-8" (com pontos e hífen), "001074-0", "12345-6"
-  IMPORTANTE: Inclua TODOS os dígitos, inclusive o verificador (último número após hífen)
+<reasoning_required>
+Antes de retornar o JSON, raciocine em <thinking>:
+1. Qual banco? (cite evidências textuais)
+2. Onde está agência/conta? (cite linhas/trechos)
+3. Há ambiguidade MATRÍCULA vs CONTA?
+4. Qual tipo de documento e por quê?
+5. Qual confiança final? (justifique)
+</reasoning_required>
 
-  ⚠️ **ATENÇÃO CRÍTICA**: "MATRÍCULA" NÃO É "CONTA"!
-  - Se o documento tem "MATRÍCULA" mas NÃO tem campo "Conta", retorne conta=null
-  - NUNCA use o número da MATRÍCULA como conta
-  - Exemplo: "MATRÍCULA: 1038907" → conta=null (não use 1038907)
+<output_format>
+<thinking>
+[Seu raciocínio passo a passo aqui]
+</thinking>
 
-**CASOS ESPECIAIS**:
-
-1. **SICOOB - Extrato Consolidado Renda Fixa**:
-   - Procure por "Cooperativa:" seguido de número (ex: "Cooperativa: 3037")
-   - Procure por "Conta:" seguido de número (ex: "Conta: 75.662-8")
-   - Nome geralmente está na linha "Nome:"
-
-2. **Banco do Brasil**:
-   - "Conta corrente 20000-X SUPERMERCADO" -> conta="20000-X"
-   - Texto após o número da conta é o cliente_sugerido
-
-3. **SICOOB - Extrato da Conta Capital**:
-   - ⚠️ **ATENÇÃO**: Este tipo de extrato NÃO possui campo "Conta"
-   - Existe apenas "MATRÍCULA", mas MATRÍCULA ≠ CONTA
-   - Se o documento for "EXTRATO DA CONTA CAPITAL", retorne conta=null
-   - Extraia a COOPERATIVA como agencia e o nome após MATRÍCULA como cliente_sugerido
-   - Exemplo: "MATRÍCULA: 1038907 - EMPRESA X" → cliente_sugerido="EMPRESA X", conta=null
-
-EXTRAÇÃO DE CLIENTE (cliente_sugerido):
-- Procure por "Nome:", "Razão Social:", ou linha após Conta/Agência
-- REMOVA prefixos: "ASSOCIADO:", "CLIENTE:", números de matrícula
-- Exemplo: "ASSOCIADO: 123 - EMPRESA X" -> retorne apenas "EMPRESA X"
-- NÃO use o nome do banco como cliente
-- Para documentos "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS ...":
-  - O cliente aparece na tabela sob o rótulo "Cedente"
-  - IGNORE "Sacado" (pode conter muitos nomes diferentes)
-  - Remova códigos numéricos antes do nome (ex: "54544-9 RODAIR TRATORES E" -> "RODAIR TRATORES E")
-
-EXEMPLOS PRÁTICOS DE EXTRAÇÃO:
-
-**Exemplo 1 - SICOOB Extrato Consolidado Renda Fixa (NÃO É CRESOL!)**:
-Texto:
-```
-SICOOB
-SISTEMA DE COOPERATIVAS DE CRÉDITO DO BRASIL
-SISBR - SISTEMA DE INFORMÁTICA DO SICOOB
-
-EXTRATO CONSOLIDADO RENDA FIXA
-
-Cooperativa:  3037
-Conta:        75.662-8
-Nome:         COMERCIAL SUL BRASIL LTDA
-CNPJ:         82.697.137/0001-01
-```
-
-⚠️ **ATENÇÃO**: Veja "SICOOB" e "SISBR" no cabeçalho → É SICOOB (NÃO CRESOL!)
-
-Extração correta:
-```json
+<result>
 {
-  "cliente_sugerido": "COMERCIAL SUL BRASIL LTDA",
-  "cnpj": "82.697.137/0001-01",
-  "banco": "SICOOB",
-  "agencia": "3037",
-  "conta": "75.662-8",
-  "contrato": null,
-  "tipo_documento": "EXTRATO CONSOLIDADO RENDA FIXA",
-  "confianca": 0.95
+  "cliente_sugerido": "string|null",
+  "cnpj": "string|null",
+  "banco": "string|null (UPPERCASE)",
+  "agencia": "string|null",
+  "conta": "string|null",
+  "contrato": "string|null",
+  "tipo_documento": "string (OBRIGATÓRIO)",
+  "confianca": 0.0-1.0
 }
-```
+</result>
+</output_format>"""
 
-❌ **ERRADO**: Retornar "banco": "CRESOL" seria um ERRO GRAVE!
+# Prompt otimizado para extração de informações (V2 - Redução de 60% no tamanho)
+SYSTEM_PROMPT = """Você é especialista em extração de dados de documentos financeiros.
 
-**Exemplo 2 - Banco do Brasil**:
-Texto:
-```
-BANCO DO BRASIL S.A.
-Cliente - Conta atual
-Agência: 5684
-Conta corrente 20000-6 SUPERMERCADO MARTELLI LTDA
-```
+<task>
+Extrair: cliente_sugerido, cnpj, banco, agencia, conta, contrato, tipo_documento, confianca (0.0-1.0)
+</task>
 
-Extração correta:
-```json
+<critical_rules>
+1. Extraia APENAS informações explícitas no texto
+2. Use null se ausente ou incerto
+3. NÃO extraia datas (sistema controla)
+4. Foque no CABEÇALHO (primeiras 30 linhas)
+5. ⚠️ MATRÍCULA ≠ CONTA! Se só há MATRÍCULA → conta=null
+</critical_rules>
+
+<document_types>
+Use EXATAMENTE um tipo:
+• EXTRATO DE CONTA CORRENTE | EXTRATO DA CONTA CAPITAL | EXTRATO CONTA POUPANÇA
+• EXTRATO APLICAÇÃO | EXTRATO CONSOLIDADO RENDA FIXA
+• EXTRATO DE FATURA DE CARTÃO DE CRÉDITO | REL RECEBIMENTO
+• CONTA GRÁFICA DETALHADA | CONTA GRÁFICA SIMPLIFICADA
+• PAR - RELATORIO SELECAO DE OPERACOES PARCELAS LIQUIDADAS
+• PAR - RELATORIO SELECAO DE OPERACOES PARCELAS EM ABERTO
+• EXTRATO PIX | EXTRATO EMPRÉSTIMO | EXTRATO CONSÓRCIO | EXTRATO DE RDC | RELATÓRIO DE BOLETOS | OUTROS
+</document_types>
+
+<type_priority>
+Em caso de sinais conflitantes, use esta prioridade:
+1) EXTRATO DA CONTA CAPITAL
+2) EXTRATO DE FATURA DE CARTAO DE CREDITO
+3) EXTRATO CONTA POUPANCA
+4) EXTRATO APLICACAO / EXTRATO CONSOLIDADO RENDA FIXA
+5) EXTRATO DE CONTA CORRENTE
+6) RELATORIOS ESPECIFICOS (PAR, REL RECEBIMENTO, CONTA GRAFICA)
+7) OUTROS
+</type_priority>
+
+<type_rules>
+Regras negativas (anti-match):
+- Se houver FATURA, VENCIMENTO, LIMITE ou CARTAO -> NAO e conta corrente.
+- Se houver POUPANCA -> NAO e conta corrente.
+- Se houver RENDA FIXA, CDB, FUNDO, APLICACAO, RENDE FACIL -> NAO e conta corrente.
+- Se houver CONTA CAPITAL, SUBSCRICAO, CAPITAL SOCIAL, MATRICULA -> NAO e conta corrente/poupanca.
+- Se houver "PAR - RELATORIO..." -> classifique como PAR e ignore outros sinais.
+
+Regras positivas de investimento:
+- Se houver RENDE FACIL -> tipo_documento = "EXTRATO APLICACAO"
+- Se houver RENDA FIXA -> tipo_documento = "EXTRATO CONSOLIDADO RENDA FIXA"
+</type_rules>
+
+<bank_identification>
+⚠️ CRÍTICO: SICOOB ≠ CRESOL (bancos DIFERENTES!)
+
+SICOOB: "SICOOB" OU "SISBR" OU "SISTEMA DE COOPERATIVAS DE CREDITO DO BRASIL"
+CRESOL: "CRESOL" (sem SICOOB)
+SICREDI: "COOP DE CRED POUP INV SOMA" OU "SICREDI"
+BANCO DO BRASIL: "BANCO DO BRASIL" OU "BB S.A" OU "BB"
+Outros: BRADESCO | ITAU | SANTANDER | CAIXA
+
+Sempre retorne UPPERCASE. Se incerto → null
+</bank_identification>
+
+<extraction_rules>
+agencia: Após "Agência|Cooperativa|Ag." → Ex: "3037", "5684", "3037-6"
+
+conta: Após "Conta|Conta Corrente|Cc" → Ex: "75.662-8", "001074-0" (incluir dígito verificador)
+  ⚠️ Se só há MATRÍCULA (sem "Conta:") → conta=null
+
+cliente: Após "Nome:|Razão Social:" → Remova "ASSOCIADO:|CLIENTE:|números"
+  PAR SICOOB: Cliente em "Cedente" (ignore "Sacado")
+
+cnpj: Formato XX.XXX.XXX/XXXX-XX
+
+contrato: Para empréstimos, após "Número do Contrato|Contrato:"
+
+<special_cases>
+• Conta Capital: Se tipo="EXTRATO DA CONTA CAPITAL" → conta=null (sempre)
+• Banco do Brasil: "Conta 20000-X NOME" → conta="20000-X", cliente="NOME"
+</special_cases>
+</extraction_rules>
+
+<output_format>
+Retorne APENAS JSON válido:
 {
-  "cliente_sugerido": "SUPERMERCADO MARTELLI LTDA",
-  "cnpj": null,
-  "banco": "BANCO DO BRASIL",
-  "agencia": "5684",
-  "conta": "20000-6",
-  "contrato": null,
-  "tipo_documento": "EXTRATO DE CONTA CORRENTE",
-  "confianca": 0.9
+  "cliente_sugerido": "string|null",
+  "cnpj": "string|null",
+  "banco": "string|null (UPPERCASE)",
+  "agencia": "string|null",
+  "conta": "string|null",
+  "contrato": "string|null",
+  "tipo_documento": "string (OBRIGATÓRIO)",
+  "confianca": 0.0-1.0
 }
-```
-
-FORMATO DE RESPOSTA:
-Retorne APENAS um JSON válido, sem explicações adicionais:
-
-{
-    "cliente_sugerido": "string ou null",
-    "cnpj": "string ou null",
-    "banco": "string ou null - UPPERCASE",
-    "agencia": "string ou null",
-    "conta": "string ou null - COMPLETA com dígito verificador",
-    "contrato": "string ou null",
-    "tipo_documento": "string - OBRIGATÓRIO",
-    "confianca": "number - 0.0 a 1.0"
-}"""
+</output_format>"""
 
 # Prompt especifico para arquivos OFX
 OFX_SYSTEM_PROMPT = """Você é um especialista em extração de dados de arquivos OFX (Open Financial Exchange).
@@ -224,7 +243,8 @@ Seu objetivo é extrair com precisão: banco, agência, conta e tipo de document
 1. Extraia APENAS dados explicitamente presentes no OFX
 2. NÃO invente, deduza ou infira informações
 3. Se um dado não existir, retorne null
-4. Preserve o formato original de agência/conta (incluindo hífens)
+4. Você pode preservar o formato original de agência/conta (incluindo hífens)
+   Nota: o sistema irá normalizar agência/conta para apenas dígitos após a extração
 5. NÃO extraia datas (o sistema controla isso)
 
 ## TAGS OFX E COMO EXTRAIR
@@ -273,6 +293,11 @@ Procure pela tag `<ORG>` dentro de `<FI>`:
 - Sempre retorne em UPPERCASE
 
 ### Tipo de Documento (campo: tipo_documento)
+IMPORTANTE: Para OFX, o tipo_documento DEVE ser APENAS uma destas duas opcoes:
+- "EXTRATO DE CONTA CORRENTE"
+- "EXTRATO DA CONTA CAPITAL"
+
+
 Identifique pelo tipo de extrato COM PRIORIDADE:
 
 Regras para identificar CONTA CAPITAL:
@@ -343,7 +368,9 @@ Regras para identificar CONTA CAPITAL:
 - tipo_documento: "EXTRATO DA CONTA CAPITAL"
 
 ## FORMATO DE SAÍDA
-Retorne APENAS JSON válido:
+Retorne APENAS JSON válido.
+Use null literal (sem aspas) quando o valor estiver ausente.
+O campo "confianca" deve ser número (não string).
 {
   "cliente_sugerido": null,
   "cnpj": null,
@@ -357,21 +384,358 @@ Retorne APENAS JSON válido:
 
 Se extraiu agencia e conta com sucesso, use confianca >= 0.85"""
 
+# Prompt especializado para Conta Capital
+CONTA_CAPITAL_PROMPT = """Especialista em extração de EXTRATO DA CONTA CAPITAL.
+
+<critical_warning>
+⚠️ EXTRATO DA CONTA CAPITAL NÃO possui campo "Conta"!
+Existe apenas MATRÍCULA, mas MATRÍCULA ≠ CONTA
+SEMPRE retorne conta=null para este tipo de documento
+</critical_warning>
+
+<extraction>
+banco: Procure "SICOOB|SISBR|SISTEMA DE COOPERATIVAS" (UPPERCASE)
+agencia: Após "Cooperativa:" → Ex: "3037"
+conta: SEMPRE null (não há conta em extrato de capital!)
+cliente: Após "MATRÍCULA:" → Ex: "MATRÍCULA: 1038907 - EMPRESA X" → "EMPRESA X"
+tipo_documento: SEMPRE "EXTRATO DA CONTA CAPITAL"
+confianca: 0.9 se identificou banco+agencia
+</extraction>
+
+<output>
+{
+  "cliente_sugerido": "string|null",
+  "cnpj": "string|null",
+  "banco": "string|null (UPPERCASE)",
+  "agencia": "string|null",
+  "conta": null,
+  "contrato": null,
+  "tipo_documento": "EXTRATO DA CONTA CAPITAL",
+  "confianca": 0.0-1.0
+}
+</output>"""
+
+# Prompt especializado para Empréstimos
+EMPRESTIMO_PROMPT = """Especialista em extração de EXTRATO DE EMPRÉSTIMO.
+
+<extraction>
+banco: Procure nome do banco (UPPERCASE)
+agencia: Após "Agência|Cooperativa"
+conta: Após "Conta" (se houver)
+contrato: ⚠️ OBRIGATÓRIO! Após "Número do Contrato:|Contrato:" → Ex: "123456789"
+cliente: Após "Nome:|Cliente:"
+tipo_documento: "EXTRATO EMPRÉSTIMO"
+confianca: 0.9 se identificou contrato
+</extraction>
+
+<output>
+{
+  "cliente_sugerido": "string|null",
+  "cnpj": "string|null",
+  "banco": "string|null (UPPERCASE)",
+  "agencia": "string|null",
+  "conta": "string|null",
+  "contrato": "string (OBRIGATÓRIO)",
+  "tipo_documento": "EXTRATO EMPRÉSTIMO",
+  "confianca": 0.0-1.0
+}
+</output>"""
+
+# Exemplos para few-shot dinâmico
+FEW_SHOT_EXAMPLES = {
+    "sicoob_consolidado": {
+        "input": """SICOOB
+SISTEMA DE COOPERATIVAS DE CRÉDITO DO BRASIL
+EXTRATO CONSOLIDADO RENDA FIXA
+Cooperativa: 3037
+Conta: 75.662-8
+Nome: COMERCIAL SUL BRASIL LTDA
+CNPJ: 82.697.137/0001-01""",
+        "output": {
+            "cliente_sugerido": "COMERCIAL SUL BRASIL LTDA",
+            "cnpj": "82.697.137/0001-01",
+            "banco": "SICOOB",
+            "agencia": "3037",
+            "conta": "75.662-8",
+            "contrato": None,
+            "tipo_documento": "EXTRATO CONSOLIDADO RENDA FIXA",
+            "confianca": 0.95
+        }
+    },
+    "banco_brasil": {
+        "input": """BANCO DO BRASIL S.A.
+Cliente - Conta atual
+Agência: 5684
+Conta corrente 20000-6 SUPERMERCADO MARTELLI LTDA""",
+        "output": {
+            "cliente_sugerido": "SUPERMERCADO MARTELLI LTDA",
+            "cnpj": None,
+            "banco": "BANCO DO BRASIL",
+            "agencia": "5684",
+            "conta": "20000-6",
+            "contrato": None,
+            "tipo_documento": "EXTRATO DE CONTA CORRENTE",
+            "confianca": 0.9
+        }
+    },
+    "conta_capital": {
+        "input": """SICOOB
+EXTRATO DA CONTA CAPITAL
+Cooperativa: 3037
+MATRÍCULA: 1038907 - EMPRESA EXEMPLO LTDA
+CNPJ: 12.345.678/0001-99""",
+        "output": {
+            "cliente_sugerido": "EMPRESA EXEMPLO LTDA",
+            "cnpj": "12.345.678/0001-99",
+            "banco": "SICOOB",
+            "agencia": "3037",
+            "conta": None,
+            "contrato": None,
+            "tipo_documento": "EXTRATO DA CONTA CAPITAL",
+            "confianca": 0.9
+        }
+    }
+}
+
 class LLMService:
-    """Serviço de extração de informações usando LLM."""
-    
+    """Serviço de extração de informações usando LLM com otimizações V2."""
+
     def __init__(self):
         """Inicializa o serviço com as configurações."""
         settings = get_settings()
-        
-        self.llm = ChatOpenAI(
+
+        # Modelo rápido para casos simples (60% mais barato, 2x mais rápido)
+        self.llm_fast = ChatOpenAI(
+            model="gpt-4o-mini",
+            api_key=settings.openai_api_key,
+            temperature=0,
+            max_tokens=300,  # JSON é pequeno
+        )
+
+        # Modelo avançado para casos complexos
+        self.llm_advanced = ChatOpenAI(
             model=settings.llm_model,
             api_key=settings.openai_api_key,
-            temperature=0,  # Respostas mais determinísticas
-            max_tokens=1000,
+            temperature=0,
+            max_tokens=500,  # Mais espaço para reasoning
         )
-        
+
+        # Modelo padrão (mantém compatibilidade)
+        self.llm = self.llm_fast
+
         self.parser = JsonOutputParser()
+
+        # Inicializa tokenizer se disponível
+        if TIKTOKEN_AVAILABLE:
+            try:
+                self.tokenizer = tiktoken.encoding_for_model("gpt-4o")
+            except Exception:
+                self.tokenizer = None
+                logger.warning("Não foi possível inicializar tokenizer tiktoken")
+        else:
+            self.tokenizer = None
+
+        # Métricas acumuladas da sessão
+        self.metrics = {
+            "fast_count": 0,
+            "advanced_count": 0,
+            "total_requests": 0,
+            "total_cost": 0.0,
+            "total_latency": 0.0,
+            "avg_latency": 0.0,
+            "validation_warnings": 0,
+            "cache_hits": 0,
+            "cache_misses": 0
+        }
+
+    def _count_tokens(self, text: str) -> int:
+        """Conta tokens no texto usando tiktoken ou aproximação."""
+        if self.tokenizer:
+            try:
+                return len(self.tokenizer.encode(text))
+            except Exception:
+                pass
+        # Fallback: aproximação (1 token ≈ 4 caracteres)
+        return len(text) // 4
+
+    def _truncate_text_by_tokens(self, text: str, max_tokens: int = 12000) -> str:
+        """Trunca texto baseado em contagem de tokens."""
+        if self.tokenizer:
+            try:
+                tokens = self.tokenizer.encode(text)
+                if len(tokens) > max_tokens:
+                    truncated_tokens = tokens[:max_tokens]
+                    text = self.tokenizer.decode(truncated_tokens)
+                    text += "\n\n[TEXTO TRUNCADO...]"
+                return text
+            except Exception:
+                pass
+
+        # Fallback: trunca por caracteres
+        max_chars = max_tokens * 4  # Aproximação
+        if len(text) > max_chars:
+            text = text[:max_chars] + "\n\n[TEXTO TRUNCADO...]"
+        return text
+
+    def _is_complex_case(self, text: str) -> bool:
+        """Detecta se é um caso complexo que precisa do modelo avançado."""
+        if not text:
+            return True
+
+        normalized = self._normalize_text_for_hint(text[:2000])
+
+        # Casos complexos:
+        # 1. Múltiplos bancos mencionados (pode ser confuso)
+        bank_keywords = ["SICOOB", "CRESOL", "SICREDI", "BANCO DO BRASIL", "BRADESCO", "ITAU", "SANTANDER"]
+        bank_count = sum(1 for keyword in bank_keywords if keyword in normalized)
+        if bank_count > 1:
+            return True
+
+        # 2. Documento sem cabeçalho claro
+        if self._needs_header_ocr(text):
+            return True
+
+        # 3. Texto muito curto ou muito longo
+        if len(text) < 100 or len(text) > 20000:
+            return True
+
+        # 4. Documentos complexos específicos
+        complex_types = ["PAR", "CONTA GRAFICA", "CONSOLIDADO"]
+        if any(ct in normalized for ct in complex_types):
+            return True
+
+        return False
+
+    def _detect_document_type_hint(self, text: str) -> str | None:
+        """Detecta tipo de documento para selecionar prompt especializado."""
+        normalized = self._normalize_text_for_hint(text[:1000])
+
+        if "CONTA CAPITAL" in normalized or "CAPITAL SOCIAL" in normalized:
+            return "conta_capital"
+        if "EMPRESTIMO" in normalized or "NUMERO DO CONTRATO" in normalized:
+            return "emprestimo"
+        if "SICOOB" in normalized and "CONSOLIDADO" in normalized:
+            return "sicoob_consolidado"
+        if "BANCO DO BRASIL" in normalized:
+            return "banco_brasil"
+
+        return None
+
+    def _build_few_shot_examples(self, doc_type_hint: str | None) -> str:
+        """Constrói exemplos few-shot relevantes baseado no tipo detectado."""
+        if not doc_type_hint or doc_type_hint not in FEW_SHOT_EXAMPLES:
+            return ""
+
+        example = FEW_SHOT_EXAMPLES[doc_type_hint]
+        example_text = f"""
+<example>
+<input>
+{example['input']}
+</input>
+
+<output>
+{json.dumps(example['output'], ensure_ascii=False, indent=2)}
+</output>
+</example>
+"""
+        return example_text
+
+    def _select_system_prompt_v2(self, text: str, use_cot: bool = False) -> str:
+        """Seleciona prompt otimizado baseado no tipo e complexidade."""
+        # OFX tem prompt próprio
+        if self._is_ofx_text(text):
+            return OFX_SYSTEM_PROMPT
+
+        # Detecta tipo específico
+        doc_type = self._detect_document_type_hint(text)
+
+        # Prompts especializados
+        if doc_type == "conta_capital":
+            return CONTA_CAPITAL_PROMPT
+        if doc_type == "emprestimo":
+            return EMPRESTIMO_PROMPT
+
+        # Chain-of-Thought para casos complexos
+        if use_cot:
+            return SYSTEM_PROMPT_COT
+
+        # Prompt padrão otimizado
+        return SYSTEM_PROMPT
+
+    def _get_text_hash(self, text: str) -> str:
+        """Gera hash MD5 do texto para cache."""
+        return hashlib.md5(text.encode('utf-8')).hexdigest()
+
+    def _estimate_cost(self, input_tokens: int, output_tokens: int, is_complex: bool) -> float:
+        """Estima custo da requisição baseado no modelo usado."""
+        if is_complex:
+            # gpt-4o: $2.50/1M input, $10.00/1M output
+            input_cost = (input_tokens / 1_000_000) * 2.50
+            output_cost = (output_tokens / 1_000_000) * 10.00
+        else:
+            # gpt-4o-mini: $0.150/1M input, $0.600/1M output
+            input_cost = (input_tokens / 1_000_000) * 0.150
+            output_cost = (output_tokens / 1_000_000) * 0.600
+
+        return input_cost + output_cost
+
+    def _validate_extraction(self, result: LLMExtractionResult, text: str) -> list[str]:
+        """Valida resultado e retorna warnings de inconsistências."""
+        warnings = []
+
+        # 1. CNPJ inválido (formato básico)
+        if result.cnpj:
+            cnpj_digits = result.cnpj.replace(".", "").replace("/", "").replace("-", "")
+            if len(cnpj_digits) != 14 or not cnpj_digits.isdigit():
+                warnings.append(f"CNPJ com formato suspeito: {result.cnpj}")
+
+        # 2. Conta Capital não deveria ter conta
+        if result.tipo_documento == "EXTRATO DA CONTA CAPITAL" and result.conta:
+            warnings.append(f"ATENÇÃO: Conta Capital não deveria ter número de conta! conta={result.conta}")
+
+        # 3. Empréstimo sem contrato
+        if "EMPRESTIMO" in (result.tipo_documento or "").upper() and not result.contrato:
+            warnings.append("Empréstimo deveria ter número de contrato")
+
+        # 4. Banco não identificado mas há pistas no texto
+        if not result.banco or result.banco == "null":
+            normalized = self._normalize_text_for_hint(text[:1000])
+            if any(bank in normalized for bank in ["SICOOB", "BANCO DO BRASIL", "SICREDI", "BRADESCO"]):
+                warnings.append("Banco não identificado mas há pistas óbvias no texto")
+
+        # 5. Agência ou conta vazia
+        if not result.agencia and not result.conta and result.tipo_documento != "EXTRATO DA CONTA CAPITAL":
+            warnings.append("Nem agência nem conta foram identificadas")
+
+        # 6. Confiança muito baixa
+        if result.confianca < 0.5:
+            warnings.append(f"Confiança muito baixa: {result.confianca:.2f}")
+
+        return warnings
+
+    def get_metrics(self) -> dict:
+        """Retorna métricas acumuladas da sessão."""
+        total = self.metrics["total_requests"]
+        return {
+            **self.metrics,
+            "fast_percentage": (self.metrics["fast_count"] / total * 100) if total > 0 else 0,
+            "advanced_percentage": (self.metrics["advanced_count"] / total * 100) if total > 0 else 0,
+            "cache_hit_rate": (self.metrics["cache_hits"] / (self.metrics["cache_hits"] + self.metrics["cache_misses"]) * 100) if (self.metrics["cache_hits"] + self.metrics["cache_misses"]) > 0 else 0
+        }
+
+    def reset_metrics(self):
+        """Reseta métricas acumuladas."""
+        self.metrics = {
+            "fast_count": 0,
+            "advanced_count": 0,
+            "total_requests": 0,
+            "total_cost": 0.0,
+            "total_latency": 0.0,
+            "avg_latency": 0.0,
+            "validation_warnings": 0,
+            "cache_hits": 0,
+            "cache_misses": 0
+        }
 
     def _normalize_account_field(self, value: str) -> str:
         """
@@ -391,41 +755,98 @@ class LLMService:
         # Remove zeros à esquerda (mas mantém "0" se for só zeros)
         return only_numbers
 
+    @lru_cache(maxsize=100)
+    def _extract_info_cached(self, text_hash: str, text: str) -> tuple:
+        """Método interno cacheado (retorna tuple para ser hashable)."""
+        return self._extract_info_internal(text)
+
     def extract_info(self, text: str) -> LLMExtractionResult:
         """
-        Extrai informações estruturadas do texto do documento.
-        
+        Extrai informações estruturadas do texto do documento (V2 otimizado + cache + métricas).
+
         Utiliza a LLM para analisar o texto e retornar um JSON
         com as informações identificadas.
-        
+
         Args:
             text: Texto extraído do documento PDF
-            
+
         Returns:
             Resultado da extração com todas as informações
-            
+
         Raises:
             Exception: Se houver erro na chamada da LLM ou parsing
         """
-        # Limita o texto para evitar exceder o contexto
-        # Geralmente as informações importantes estão no início
-        max_chars = 15000
-        if len(text) > max_chars:
-            text = text[:max_chars] + "\n\n[TEXTO TRUNCADO...]"
-        
+        # Verifica cache
+        text_hash = self._get_text_hash(text)
+        cache_info = self._extract_info_cached.cache_info()
+        initial_hits = cache_info.hits
+
+        try:
+            # Tenta usar cache
+            result_tuple = self._extract_info_cached(text_hash, text)
+            result = LLMExtractionResult(**result_tuple)
+
+            # Verifica se foi cache hit
+            cache_info_after = self._extract_info_cached.cache_info()
+            if cache_info_after.hits > initial_hits:
+                self.metrics["cache_hits"] += 1
+                logger.info(f"✓ Cache hit para documento (hash={text_hash[:8]}...)")
+            else:
+                self.metrics["cache_misses"] += 1
+
+            return result
+
+        except Exception as e:
+            logger.error(f"Erro na extração com cache: {e}")
+            raise
+
+    def _extract_info_internal(self, text: str) -> dict:
+        """Método interno de extração (sem cache)."""
+        start_time = time.time()
+
+        # Trunca texto baseado em tokens (deixa 4k para prompt+resposta)
+        text = self._truncate_text_by_tokens(text, max_tokens=12000)
+
+        # Detecta complexidade e seleciona modelo apropriado
+        is_complex = self._is_complex_case(text)
+        use_cot = is_complex  # Chain-of-Thought para casos complexos
+        llm = self.llm_advanced if is_complex else self.llm_fast
+
+        if is_complex:
+            logger.info("Caso complexo detectado - usando modelo avançado com CoT")
+        else:
+            logger.info("Caso simples - usando modelo rápido")
+
+        # Seleciona prompt apropriado
+        system_prompt = self._select_system_prompt_v2(text, use_cot=use_cot)
+
+        # Adiciona exemplos few-shot se relevante
+        doc_type_hint = self._detect_document_type_hint(text)
+        few_shot = self._build_few_shot_examples(doc_type_hint)
+
         # Monta as mensagens para a LLM
         messages = [
-            SystemMessage(content=self._select_system_prompt(text)),
-            HumanMessage(content=f"TEXTO DO DOCUMENTO:\n\n{text}"),
+            SystemMessage(content=system_prompt),
         ]
-        
+
+        if few_shot:
+            messages.append(HumanMessage(content=few_shot))
+
+        messages.append(HumanMessage(content=f"<document>\n{text}\n</document>"))
+
         try:
             # Chama a LLM
-            response = self.llm.invoke(messages)
-            
+            response = llm.invoke(messages)
+
             # Extrai o conteúdo da resposta
             content = response.content.strip()
-            
+
+            # Se usou CoT, extrai apenas o resultado
+            if use_cot and "<result>" in content:
+                match = re.search(r"<result>(.*?)</result>", content, re.DOTALL)
+                if match:
+                    content = match.group(1).strip()
+
             # Remove possíveis marcadores de código
             if content.startswith("```json"):
                 content = content[7:]
@@ -433,10 +854,10 @@ class LLMService:
                 content = content[3:]
             if content.endswith("```"):
                 content = content[:-3]
-            
+
             # Parse do JSON
             data = json.loads(content.strip())
-            
+
             # Valida e converte para o schema Pydantic
             result = LLMExtractionResult(**data)
 
@@ -446,19 +867,112 @@ class LLMService:
             if result.conta:
                 result.conta = self._normalize_account_field(result.conta)
 
+            # Calcula métricas
+            elapsed = time.time() - start_time
+            input_tokens = self._count_tokens(system_prompt + (few_shot or "") + text)
+            output_tokens = self._count_tokens(content)
+            cost = self._estimate_cost(input_tokens, output_tokens, is_complex)
+
+            # Atualiza métricas
+            self.metrics["total_requests"] += 1
+            if is_complex:
+                self.metrics["advanced_count"] += 1
+            else:
+                self.metrics["fast_count"] += 1
+            self.metrics["total_cost"] += cost
+            self.metrics["total_latency"] += elapsed
+            self.metrics["avg_latency"] = self.metrics["total_latency"] / self.metrics["total_requests"]
+
+            # Validação pós-extração
+            validation_warnings = self._validate_extraction(result, text)
+            if validation_warnings:
+                self.metrics["validation_warnings"] += len(validation_warnings)
+                for warning in validation_warnings:
+                    logger.warning(f"⚠️ Validação: {warning}")
+
             logger.info(
-                f"Extração LLM concluída: cliente={result.cliente_sugerido}, "
-                f"banco={result.banco}, confianca={result.confianca}"
+                f"Extração LLM V2 concluída: cliente={result.cliente_sugerido}, "
+                f"banco={result.banco}, confianca={result.confianca}, "
+                f"modelo={'avançado' if is_complex else 'rápido'}, "
+                f"latência={elapsed:.2f}s, custo=~${cost:.4f}, tokens={input_tokens}+{output_tokens}"
             )
 
-            return result
-            
+            # Retorna como dict para ser hashable no cache
+            return {
+                "cliente_sugerido": result.cliente_sugerido,
+                "cnpj": result.cnpj,
+                "banco": result.banco,
+                "agencia": result.agencia,
+                "conta": result.conta,
+                "contrato": result.contrato,
+                "tipo_documento": result.tipo_documento,
+                "confianca": result.confianca
+            }
+
         except json.JSONDecodeError as e:
             logger.error(f"Erro ao fazer parse do JSON da LLM: {e}")
             logger.debug(f"Resposta da LLM: {response.content}")
             raise ValueError(f"Resposta da LLM não é um JSON válido: {e}")
-            
+
         except Exception as e:
+            # Fallback inteligente: se falhou no modelo rápido, tenta avançado
+            if not is_complex and "rate limit" not in str(e).lower():
+                logger.warning(f"Modelo rápido falhou ({e}). Tentando modelo avançado como fallback...")
+                try:
+                    # Retry com modelo avançado
+                    llm = self.llm_advanced
+                    response = llm.invoke(messages)
+                    content = response.content.strip()
+
+                    # Processa resposta (mesmo código de antes)
+                    if "<result>" in content:
+                        match = re.search(r"<result>(.*?)</result>", content, re.DOTALL)
+                        if match:
+                            content = match.group(1).strip()
+
+                    if content.startswith("```json"):
+                        content = content[7:]
+                    if content.startswith("```"):
+                        content = content[3:]
+                    if content.endswith("```"):
+                        content = content[:-3]
+
+                    data = json.loads(content.strip())
+                    result = LLMExtractionResult(**data)
+
+                    if result.agencia:
+                        result.agencia = self._normalize_account_field(result.agencia)
+                    if result.conta:
+                        result.conta = self._normalize_account_field(result.conta)
+
+                    elapsed = time.time() - start_time
+                    input_tokens = self._count_tokens(system_prompt + (few_shot or "") + text)
+                    output_tokens = self._count_tokens(content)
+                    cost = self._estimate_cost(input_tokens, output_tokens, True)
+
+                    self.metrics["total_requests"] += 1
+                    self.metrics["advanced_count"] += 1
+                    self.metrics["total_cost"] += cost
+                    self.metrics["total_latency"] += elapsed
+                    self.metrics["avg_latency"] = self.metrics["total_latency"] / self.metrics["total_requests"]
+
+                    logger.info(f"✓ Fallback para modelo avançado bem-sucedido (latência={elapsed:.2f}s, custo=~${cost:.4f})")
+
+                    return {
+                        "cliente_sugerido": result.cliente_sugerido,
+                        "cnpj": result.cnpj,
+                        "banco": result.banco,
+                        "agencia": result.agencia,
+                        "conta": result.conta,
+                        "contrato": result.contrato,
+                        "tipo_documento": result.tipo_documento,
+                        "confianca": result.confianca
+                    }
+
+                except Exception as fallback_error:
+                    logger.error(f"Fallback também falhou: {fallback_error}")
+                    raise
+
             logger.error(f"Erro na chamada da LLM: {e}")
             raise
     
@@ -485,7 +999,25 @@ class LLMService:
 
             result = self.extract_info(analysis_text)
 
+            # OFX: agencia/conta devem vir das tags BRANCHID/ACCTID
+            if self._is_ofx_text(analysis_text):
+                self._apply_ofx_branch_acct(result, analysis_text)
+
             # Heurística textual: confirma banco por pistas fortes no texto
+            # Ajuste para OFX do SICREDI: agencia = primeiros digitos, conta = resto sem zeros a esquerda
+            if self._is_ofx_text(analysis_text) and result.conta:
+                if self._is_sicredi_text(analysis_text) or (result.banco and "SICREDI" in result.banco.upper()):
+                    self._adjust_sicredi_ofx_account(result)
+            # Regra fixa para OFX: apenas CONTA CORRENTE ou CONTA CAPITAL
+            if self._is_ofx_text(analysis_text):
+                if len(analysis_text) > 10000:
+                    result.tipo_documento = "EXTRATO DE CONTA CORRENTE"
+                else:
+                    result.tipo_documento = "EXTRATO DA CONTA CAPITAL"
+                if result.confianca < 0.85:
+                    result.confianca = 0.85
+
+
             banco_hint = self._infer_bank_from_text_hints(analysis_text)
             if banco_hint:
                 if not result.banco or result.banco == "null" or result.banco != banco_hint:
@@ -493,6 +1025,14 @@ class LLMService:
                 result.banco = banco_hint
                 if result.confianca < 0.85:
                     result.confianca = 0.85
+
+            # Fallback: tenta extrair conta do texto (ex.: planilhas XLS)
+            if not result.conta:
+                conta_fallback = self._extract_conta_from_text_fallback(analysis_text)
+                if conta_fallback:
+                    result.conta = conta_fallback
+                    if result.confianca < 0.85:
+                        result.confianca = 0.85
 
             # Heuristica textual: conta capital -> MATRICULA NÃO É CONTA!
             if self._is_conta_capital(analysis_text, result.tipo_documento):
@@ -538,6 +1078,30 @@ class LLMService:
             # Heurística textual: RENDE FACIL indica extrato de investimento
             if self._has_rende_facil_hint(analysis_text):
                 result.tipo_documento = "EXTRATO APLICACAO"
+                if result.confianca < 0.8:
+                    result.confianca = 0.8
+
+            # Heurística textual: Extrato de RDC
+            if self._has_rdc_hint(analysis_text):
+                result.tipo_documento = "EXTRATO DE RDC"
+                if result.confianca < 0.8:
+                    result.confianca = 0.8
+
+            # Heurística textual: Relatório de Boletos
+            if self._has_relatorio_boletos_hint(analysis_text):
+                result.tipo_documento = "RELATÓRIO DE BOLETOS"
+                if result.confianca < 0.8:
+                    result.confianca = 0.8
+
+            # Heurística textual: Extrato Consolidado Renda Fixa
+            if self._has_renda_fixa_hint(analysis_text):
+                result.tipo_documento = "EXTRATO CONSOLIDADO RENDA FIXA"
+                if result.confianca < 0.8:
+                    result.confianca = 0.8
+
+            # Heurística textual: Extrato de Conta Corrente
+            if self._has_conta_corrente_hint(analysis_text):
+                result.tipo_documento = "EXTRATO DE CONTA CORRENTE"
                 if result.confianca < 0.8:
                     result.confianca = 0.8
 
@@ -605,8 +1169,8 @@ class LLMService:
             )
 
     def _select_system_prompt(self, text: str) -> str:
-        """Seleciona o prompt do sistema baseado no tipo de conteudo."""
-        return OFX_SYSTEM_PROMPT if self._is_ofx_text(text) else SYSTEM_PROMPT
+        """Seleciona o prompt do sistema baseado no tipo de conteudo (mantido para compatibilidade)."""
+        return self._select_system_prompt_v2(text, use_cot=False)
 
     def _is_ofx_text(self, text: str) -> bool:
         """Heuristica simples para detectar arquivos OFX pelo conteudo."""
@@ -727,7 +1291,54 @@ class LLMService:
         if "BANCO DO BRASIL" in normalized or "BANCO DO BRASIL SA" in normalized:
             return "BANCO DO BRASIL"
 
+    def _is_sicredi_text(self, text: str) -> bool:
+        """Detecta pistas fortes de SICREDI no texto."""
+        normalized = self._normalize_text_for_hint(text)
+        return "SICREDI" in normalized or "COOP DE CRED POUP INV SOMA" in normalized
+
+    def _adjust_sicredi_ofx_account(self, result: LLMExtractionResult) -> None:
+        """Ajusta agencia/conta para OFX do SICREDI com base no ACCTID."""
+        conta_numbers = extract_numbers(result.conta or "")
+        if len(conta_numbers) < 10:
+            return
+        agencia = conta_numbers[:3]
+        conta_raw = conta_numbers[3:]
+        conta = conta_raw.lstrip("0") or "0"
+        result.agencia = agencia
+        result.conta = conta
+        if not result.banco:
+            result.banco = "SICREDI"
+
+
         return None
+
+    def _extract_ofx_tags(self, text: str) -> tuple[str | None, str | None]:
+        """Extrai BRANCHID e ACCTID de OFX (XML ou SGML)."""
+        if not text:
+            return None, None
+        def _find_tag(tag: str) -> str | None:
+            # XML: <TAG>value</TAG>
+            m = re.search(r"<%s>\s*([^<\n\r]+)" % tag, text, flags=re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+            # SGML: <TAG>value (ate fim da linha)
+            m = re.search(r"<%s>\s*([^\n\r]+)" % tag, text, flags=re.IGNORECASE)
+            if m:
+                return m.group(1).strip()
+            return None
+        branch = _find_tag('BRANCHID')
+        acct = _find_tag('ACCTID')
+        return branch, acct
+
+    def _apply_ofx_branch_acct(self, result: LLMExtractionResult, text: str) -> None:
+        """Sobrescreve agencia/conta com base nas tags OFX quando disponiveis."""
+        branch, acct = self._extract_ofx_tags(text)
+        if branch:
+            result.agencia = branch
+        if acct:
+            result.conta = acct
+
+
 
     def _is_emprestimo(self, text: str, tipo_documento: str | None) -> bool:
         """Detecta extrato de emprestimo pelo tipo ou pelo texto."""
@@ -803,6 +1414,26 @@ class LLMService:
         """Detecta indicio de investimento pelo termo RENDE FACIL."""
         normalized = self._normalize_text_for_hint(text)
         return "RENDE FACIL" in normalized
+
+    def _has_rdc_hint(self, text: str) -> bool:
+        """Detecta indicio de extrato RDC."""
+        normalized = self._normalize_text_for_hint(text)
+        return "EXTRATO DE RDC" in normalized or "RDC" in normalized
+
+    def _has_relatorio_boletos_hint(self, text: str) -> bool:
+        """Detecta indicio de relatorio de boletos."""
+        normalized = self._normalize_text_for_hint(text)
+        return "RELATORIO DE BOLETOS" in normalized or "RELATORIOS DE BOLETOS" in normalized
+
+    def _has_renda_fixa_hint(self, text: str) -> bool:
+        """Detecta indicio de extrato consolidado renda fixa."""
+        normalized = self._normalize_text_for_hint(text)
+        return "EXTRATO CONSOLIDADO RENDA FIXA" in normalized or "RENDA FIXA" in normalized
+
+    def _has_conta_corrente_hint(self, text: str) -> bool:
+        """Detecta indicio de extrato de conta corrente."""
+        normalized = self._normalize_text_for_hint(text)
+        return "EXTRATO DE CONTA CORRENTE" in normalized
 
     def _detect_par_report_type(self, text: str) -> str | None:
         """Detecta relatorio PAR do SICOOB e classifica o tipo."""
@@ -897,6 +1528,25 @@ class LLMService:
         normalized_text = unicodedata.normalize("NFKD", text)
         normalized_text = normalized_text.encode("ascii", "ignore").decode("ascii")
         return bool(re.search(r"\bCONTA\b\s*[:\-]?\s*[0-9]", normalized_text, flags=re.IGNORECASE))
+
+    def _extract_conta_from_text_fallback(self, text: str) -> str | None:
+        """Extrai conta do texto quando a LLM nao identificou."""
+        if not text:
+            return None
+        normalized_text = unicodedata.normalize("NFKD", text)
+        normalized_text = normalized_text.encode("ascii", "ignore").decode("ascii")
+
+        patterns = [
+            r"\bCONTA\s+CORRENTE\b\s*[:\-]?\s*([0-9][0-9.\-]{2,20})",
+            r"\bCONTA\b\s*[:\-]?\s*([0-9][0-9.\-]{2,20})",
+        ]
+        for pattern in patterns:
+            match = re.search(pattern, normalized_text, flags=re.IGNORECASE)
+            if match:
+                value = match.group(1).strip()
+                numbers = extract_numbers(value)
+                return numbers or None
+        return None
 
 
     def identify_bank_from_images(self, images_base64: list[str]) -> str | None:

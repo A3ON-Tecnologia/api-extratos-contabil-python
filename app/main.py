@@ -214,6 +214,7 @@ _watch_task: asyncio.Task | None = None
 _watch_running: bool = False
 _watch_seen: dict[str, int] = {}
 _watch_processed: dict[str, float] = {}
+_simulation_active: bool = False  # Flag para pausar watcher durante simulação
 
 
 # Instancias dos servicos (singleton pattern simples)
@@ -326,7 +327,7 @@ async def extratos_page():
 
 async def _watch_folder_loop():
     """Loop de observacao da pasta de entrada de extratos."""
-    global _watch_running, _watch_seen, _watch_processed
+    global _watch_running, _watch_seen, _watch_processed, _simulation_active
     settings = get_settings()
     watch_path = settings.watch_folder_path
 
@@ -343,13 +344,21 @@ async def _watch_folder_loop():
         iteration = 0
         while _watch_running:
             iteration += 1
+
+            # PAUSA: Não processar arquivos durante simulação
+            if _simulation_active:
+                if iteration % 12 == 1:  # Log a cada 1 minuto
+                    logger.info(f"Watcher pausado - modo SIMULAÇÃO ativo")
+                await asyncio.sleep(5)
+                continue
+
             if iteration % 12 == 1:  # Log a cada 1 minuto (12 * 5seg)
                 logger.info(f"Watcher ativo - iteracao {iteration} - arquivos pendentes: {len(_watch_seen)}")
             for file_path in watch_path.iterdir():
                 if not file_path.is_file():
                     continue
 
-                if file_path.suffix.lower() not in {".pdf", ".zip", ".ofx"}:
+                if file_path.suffix.lower() not in {".pdf", ".zip", ".ofx", ".xlsx", ".xls", ".csv", ".ods"}:
                     continue
 
                 file_key = str(file_path.resolve())
@@ -427,6 +436,7 @@ async def extratos_watch_status():
 
     return {
         "running": _watch_running,
+        "paused_for_simulation": _simulation_active,
         "watch_path": str(watch_path),
         "pending_files": len(_watch_seen),
         "path_exists": watch_path.exists(),
@@ -459,6 +469,7 @@ async def extratos_watch_debug():
     return {
         "watcher": {
             "running": _watch_running,
+            "paused_for_simulation": _simulation_active,
             "task_exists": _watch_task is not None,
             "pending_files": len(_watch_seen),
             "processed_files": len(_watch_processed),
@@ -517,7 +528,7 @@ async def mapear_extratos(process: bool = False):
 
         for file_path in watch_path.iterdir():
             try:
-                if file_path.is_file() and file_path.suffix.lower() in {'.pdf', '.ofx', '.zip'}:
+                if file_path.is_file() and file_path.suffix.lower() in {'.pdf', '.ofx', '.zip', '.xlsx', '.xls', '.csv', '.ods'}:
                     stat = file_path.stat()
                     pdf_files.append({
                         "nome": file_path.name,
@@ -615,6 +626,8 @@ async def simular_processamento_arquivo(request: dict):
 
     NÃO salva o arquivo, apenas retorna onde seria salvo e as informações extraídas.
     """
+    global _simulation_active
+
     filename = request.get("filename")
     if not filename:
         raise HTTPException(status_code=400, detail="Campo 'filename' é obrigatório")
@@ -630,6 +643,10 @@ async def simular_processamento_arquivo(request: dict):
         raise HTTPException(status_code=400, detail=f"Caminho não é um arquivo: {filename}")
 
     try:
+        # PAUSA o watcher durante simulação
+        _simulation_active = True
+        logger.info(f"[SIMULACAO] Watcher pausado para simular: {filename}")
+
         pdf_data = file_path.read_bytes()
         sim_service = get_extratos_sim_service()
         result = await sim_service.simular_arquivo(
@@ -652,6 +669,11 @@ async def simular_processamento_arquivo(request: dict):
         logger.exception(f"Erro ao simular processamento de {filename}")
         raise HTTPException(status_code=500, detail=f"Erro ao processar: {str(e)}")
 
+    finally:
+        # RETOMA o watcher após simulação
+        _simulation_active = False
+        logger.info("[SIMULACAO] Watcher retomado")
+
 
 @app.post("/extratos/simular-todos")
 async def simular_todos_extratos():
@@ -660,61 +682,73 @@ async def simular_todos_extratos():
 
     Retorna uma lista com a simulação de cada arquivo.
     """
+    global _simulation_active
+
     settings = get_settings()
     watch_path = settings.watch_folder_path
 
     if not watch_path.exists():
         raise HTTPException(status_code=400, detail=f"Pasta não encontrada: {watch_path}")
 
-    resultados = []
-    erros = []
+    try:
+        # PAUSA o watcher durante simulação em lote
+        _simulation_active = True
+        logger.info("[SIMULACAO EM LOTE] Watcher pausado")
 
-    # Lista todos os PDFs
-    pdf_files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() in {'.pdf', '.ofx'}]
+        resultados = []
+        erros = []
 
-    logger.info(f"[SIMULACAO EM LOTE] Processando {len(pdf_files)} arquivos")
+        # Lista todos os arquivos suportados
+        pdf_files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() in {'.pdf', '.ofx', '.xlsx', '.xls', '.csv', '.ods'}]
 
-    sim_service = get_extratos_sim_service()
+        logger.info(f"[SIMULACAO EM LOTE] Processando {len(pdf_files)} arquivos")
 
-    for file_path in pdf_files:
-        try:
-            filename = file_path.name
-            pdf_data = file_path.read_bytes()
+        sim_service = get_extratos_sim_service()
 
-            resultado = await sim_service.simular_arquivo(
-                pdf_data=pdf_data,
-                filename=filename,
-                executor=_executor,
-                caminho_origem=file_path,
-            )
+        for file_path in pdf_files:
+            try:
+                filename = file_path.name
+                pdf_data = file_path.read_bytes()
 
-            resultados.append(resultado)
-            logger.info("[SIMULACAO] %s -> %s", filename, resultado.get("status"))
+                resultado = await sim_service.simular_arquivo(
+                    pdf_data=pdf_data,
+                    filename=filename,
+                    executor=_executor,
+                    caminho_origem=file_path,
+                )
 
-        except Exception as e:
-            logger.error(f"[SIMULACAO] Erro ao processar {file_path.name}: {e}")
-            erros.append({
-                "arquivo": file_path.name,
-                "erro": str(e)
-            })
+                resultados.append(resultado)
+                logger.info("[SIMULACAO] %s -> %s", filename, resultado.get("status"))
 
-    # Estatísticas
-    total = len(resultados)
-    sucesso = sum(1 for r in resultados if r["status"] == "SUCESSO")
-    nao_identificado = sum(1 for r in resultados if r["status"] == "NAO_IDENTIFICADO")
+            except Exception as e:
+                logger.error(f"[SIMULACAO] Erro ao processar {file_path.name}: {e}")
+                erros.append({
+                    "arquivo": file_path.name,
+                    "erro": str(e)
+                })
 
-    return {
-        "total_arquivos": len(pdf_files),
-        "processados": total,
-        "erros": len(erros),
-        "estatisticas": {
-            "sucesso": sucesso,
-            "nao_identificado": nao_identificado,
-            "falha": len(erros),
-        },
-        "resultados": resultados,
-        "erros_detalhes": erros if erros else None,
-    }
+        # Estatísticas
+        total = len(resultados)
+        sucesso = sum(1 for r in resultados if r["status"] == "SUCESSO")
+        nao_identificado = sum(1 for r in resultados if r["status"] == "NAO_IDENTIFICADO")
+
+        return {
+            "total_arquivos": len(pdf_files),
+            "processados": total,
+            "erros": len(erros),
+            "estatisticas": {
+                "sucesso": sucesso,
+                "nao_identificado": nao_identificado,
+                "falha": len(erros),
+            },
+            "resultados": resultados,
+            "erros_detalhes": erros if erros else None,
+        }
+
+    finally:
+        # RETOMA o watcher após simulação em lote
+        _simulation_active = False
+        logger.info("[SIMULACAO EM LOTE] Watcher retomado")
 
 class ExtratosSimulacaoWebhook(BaseModel):
     filename: str | None = None
@@ -2073,6 +2107,8 @@ async def process_extratos_pdf_async(
     filename_lower = filename.lower()
     is_pdf = pdf_data.startswith(b"%PDF-") or filename_lower.endswith(".pdf")
     is_ofx = filename_lower.endswith(".ofx")
+    is_excel = filename_lower.endswith((".xls", ".xlsx", ".ods"))
+
     if not is_pdf:
         logger.info(f"Processando arquivo nao-PDF: {filename}")
 
@@ -2080,47 +2116,101 @@ async def process_extratos_pdf_async(
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
             raise asyncio.CancelledError("Cancelado pelo usuario")
 
-        await event_manager.emit(ProcessingEvent(
-            event_type=EventType.PDF_TEXT_EXTRACTING,
-            filename=filename,
-            message=f"Extraindo conteudo de {filename}...",
-            progress=10
-        ))
+        # NOVA LÓGICA: Tenta extração estruturada de Excel primeiro (SEM LLM)
+        extraction = None
+        if is_excel:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.PDF_TEXT_EXTRACTING,
+                filename=filename,
+                message=f"Extraindo dados estruturados de {filename}...",
+                progress=10
+            ))
 
-        pdf_service = get_pdf_service()
-        try:
+            from app.services.excel_extractor_service import get_excel_extractor_service
+            excel_service = get_excel_extractor_service()
+
+            try:
+                loop = asyncio.get_event_loop()
+                structured_data = await loop.run_in_executor(_executor, excel_service.extract_structured_data, pdf_data)
+
+                if structured_data:
+                    logger.info(f"✅ Dados estruturados extraídos de Excel: {structured_data.get('cliente_nome', 'N/A')}")
+
+                    # Converte dados estruturados para o formato LLMResponse
+                    from app.schemas.llm_response import LLMResponse
+                    extraction = LLMResponse(
+                        cliente_sugerido=structured_data.get("cliente_nome"),
+                        cnpj=structured_data.get("cnpj"),
+                        banco=structured_data.get("banco"),
+                        agencia=structured_data.get("agencia"),
+                        conta=structured_data.get("conta"),
+                        tipo_documento=structured_data.get("tipo_documento"),
+                        ano=structured_data.get("ano"),
+                        mes=structured_data.get("mes"),
+                        confianca=structured_data.get("confianca", 0.95),
+                    )
+
+                    await event_manager.emit(ProcessingEvent(
+                        event_type=EventType.LLM_COMPLETED,
+                        filename=filename,
+                        message=f"Dados extraídos (Excel direto): {extraction.cliente_sugerido or 'N/A'}",
+                        details={
+                            "cliente": extraction.cliente_sugerido,
+                            "banco": extraction.banco,
+                            "tipo": extraction.tipo_documento,
+                            "confianca": extraction.confianca,
+                            "metodo": "EXCEL_DIRETO",
+                        },
+                        progress=50
+                    ))
+                else:
+                    logger.warning("Não foi possível extrair dados estruturados do Excel, usando LLM...")
+            except Exception as e:
+                logger.warning(f"Falha na extração estruturada de Excel: {e}, usando LLM...")
+
+        # Se não conseguiu extração estruturada, usa fluxo normal (texto + LLM)
+        if extraction is None:
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.PDF_TEXT_EXTRACTING,
+                filename=filename,
+                message=f"Extraindo conteudo de {filename}...",
+                progress=10
+            ))
+
+            pdf_service = get_pdf_service()
+            try:
+                loop = asyncio.get_event_loop()
+                text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
+            except ValueError as e:
+                return await create_extratos_failure_result(
+                    filename,
+                    file_hash,
+                    f"Erro ao extrair conteudo: {e}",
+                    pdf_data=pdf_data,
+                    test_mode=test_mode,
+                )
+
+            if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
+                raise asyncio.CancelledError("Cancelado pelo usuario")
+
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.PDF_TEXT_EXTRACTED,
+                filename=filename,
+                message=f"Conteudo extraido: {len(text)} caracteres",
+                details={"chars": len(text)},
+                progress=25
+            ))
+
+            await event_manager.emit(ProcessingEvent(
+                event_type=EventType.LLM_ANALYZING,
+                filename=filename,
+                message="Analisando documento com IA...",
+                progress=30
+            ))
+
+            llm_service = get_llm_service()
             loop = asyncio.get_event_loop()
-            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
-        except ValueError as e:
-            return await create_extratos_failure_result(
-                filename,
-                file_hash,
-                f"Erro ao extrair conteudo: {e}",
-                pdf_data=pdf_data,
-                test_mode=test_mode,
-            )
-
-        if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
-            raise asyncio.CancelledError("Cancelado pelo usuario")
-
-        await event_manager.emit(ProcessingEvent(
-            event_type=EventType.PDF_TEXT_EXTRACTED,
-            filename=filename,
-            message=f"Conteudo extraido: {len(text)} caracteres",
-            details={"chars": len(text)},
-            progress=25
-        ))
-
-        await event_manager.emit(ProcessingEvent(
-            event_type=EventType.LLM_ANALYZING,
-            filename=filename,
-            message="Analisando documento com IA...",
-            progress=30
-        ))
-
-        llm_service = get_llm_service()
-        loop = asyncio.get_event_loop()
-        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+            extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
 
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
             raise asyncio.CancelledError("Cancelado pelo usuario")
@@ -2149,7 +2239,11 @@ async def process_extratos_pdf_async(
             raise asyncio.CancelledError("Cancelado pelo usuario")
 
         matching_service = get_matching_service()
-        match_result = matching_service.match(extraction, is_ofx=is_ofx)
+        match_result = matching_service.match(
+            extraction,
+            is_ofx=is_ofx,
+            prefer_extratos_planilha=True,
+        )
 
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.MATCHING_COMPLETED,

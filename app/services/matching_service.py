@@ -33,7 +33,12 @@ class MatchingService:
         self.client_service = client_service or ClientService()
         self.settings = get_settings()
     
-    def match(self, extraction: LLMExtractionResult, is_ofx: bool = False) -> MatchResult:
+    def match(
+        self,
+        extraction: LLMExtractionResult,
+        is_ofx: bool = False,
+        prefer_extratos_planilha: bool = False,
+    ) -> MatchResult:
         """
         Tenta identificar o cliente com base nas informações extraídas.
 
@@ -79,6 +84,38 @@ class MatchingService:
             except Exception as e:
                 logger.warning("[CONTA] Falha ao carregar planilha de extratos: %s", e)
                 clients_extratos = None
+
+        if prefer_extratos_planilha and extraction.conta:
+            if clients_extratos:
+                # Prioriza BRANCHID (agencia) + ACCTID (conta) quando disponivel
+                if extraction.agencia:
+                    result = self._match_by_conta(
+                        extraction.banco,
+                        extraction.agencia,
+                        extraction.conta,
+                        clients_extratos,
+                    )
+                    if result.identificado:
+                        logger.info("Match por AGENCIA+CONTA (planilha extratos): %s", result.cliente.nome)
+                        return result
+
+                # Fallback: match exato por conta (ACCTID)
+                result = self._match_by_conta_exata(
+                    extraction.conta,
+                    extraction.tipo_documento,
+                    clients_extratos,
+                )
+                if result.identificado:
+                    logger.info("Match por CONTA (planilha extratos): %s", result.cliente.nome)
+                    return result
+
+                return MatchResult(
+                    motivo_fallback=(
+                        f"Conta/Agencia nao encontradas na planilha de extratos: "
+                        f"Ag {extraction.agencia or '-'} / Cc {extraction.conta}"
+                    )
+                )
+            logger.warning("[CONTA] Planilha de extratos indisponivel; seguindo fallback padrao.")
 
         if extraction.conta:
             base_clients = clients_extratos or clients

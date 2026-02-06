@@ -928,7 +928,7 @@
             filesCard.style.display = 'block';
 
             try {
-                const response = await fetch('/extratos/mapear?process=true');
+                const response = await fetch('/extratos/mapear?process=false');
                 const data = await response.json();
 
                 if (!response.ok) {
@@ -978,10 +978,12 @@
                 }).join('');
 
                 filesTableBody.innerHTML = html;
-                if (data.processamento_iniciado) {
+
+                // Mostra toast informativo sobre arquivos encontrados
+                if (arquivos.length > 0) {
                     showToast(
-                        'Processamento iniciado',
-                        `${data.processamento_iniciado} arquivo(s) em processamento`,
+                        'Arquivos Mapeados',
+                        `${arquivos.length} arquivo(s) encontrado(s). Clique em "Iniciar watcher" para processar.`,
                         'info'
                     );
                 }
@@ -1008,39 +1010,58 @@
         function connectExtratosSocket(path) {
             const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
             const wsUrl = `${protocol}//${window.location.host}${path}`;
-            const socket = new WebSocket(wsUrl);
 
-            socket.onmessage = (event) => {
-                try {
-                    const data = JSON.parse(event.data);
-                    if (!data || !data.event_type) return;
-                    if (data.event_type === 'processing_completed') {
-                        const status = data.details?.status || 'SUCESSO';
-                        showToast(
-                            'Processamento concluido',
-                            `${data.filename || 'Arquivo'}: ${status}`,
-                            status === 'SUCESSO' ? 'success' : 'info'
-                        );
-                    } else if (data.event_type === 'processing_error') {
-                        showToast(
-                            'Erro no processamento',
-                            `${data.filename || 'Arquivo'}: ${data.message || 'Falha'}`,
-                            'info'
-                        );
+            try {
+                const socket = new WebSocket(wsUrl);
+
+                socket.onopen = () => {
+                    console.log(`✓ WebSocket conectado: ${path}`);
+                };
+
+                socket.onerror = (error) => {
+                    console.warn(`⚠️ WebSocket erro (${path}):`, error);
+                    // Não é crítico - sistema funciona sem WebSocket
+                };
+
+                socket.onmessage = (event) => {
+                    try {
+                        const data = JSON.parse(event.data);
+                        if (!data || !data.event_type) return;
+                        if (data.event_type === 'processing_completed') {
+                            const status = data.details?.status || 'SUCESSO';
+                            showToast(
+                                'Processamento concluido',
+                                `${data.filename || 'Arquivo'}: ${status}`,
+                                status === 'SUCESSO' ? 'success' : 'info'
+                            );
+                        } else if (data.event_type === 'processing_error') {
+                            showToast(
+                                'Erro no processamento',
+                                `${data.filename || 'Arquivo'}: ${data.message || 'Falha'}`,
+                                'info'
+                            );
+                        }
+                        if (['processing_completed', 'processing_error', 'stats_update'].includes(data.event_type)) {
+                            scheduleRefresh();
+                        }
+                    } catch (e) {
+                        console.warn('Erro ao processar evento do websocket:', e);
                     }
-                    if (['processing_completed', 'processing_error', 'stats_update'].includes(data.event_type)) {
-                        scheduleRefresh();
-                    }
-                } catch (e) {
-                    console.warn('Erro ao processar evento do websocket:', e);
-                }
-            };
+                };
 
-            socket.onclose = () => {
-                setTimeout(() => connectExtratosSocket(path), 2000);
-            };
+                socket.onclose = () => {
+                    console.log(`⚠️ WebSocket desconectado (${path}). Reconectando em 5s...`);
+                    // Tenta reconectar após 5 segundos (ao invés de 2)
+                    setTimeout(() => connectExtratosSocket(path), 5000);
+                };
 
-            return socket;
+                return socket;
+            } catch (error) {
+                console.warn(`⚠️ Falha ao criar WebSocket (${path}):`, error);
+                // Tenta novamente após 10 segundos
+                setTimeout(() => connectExtratosSocket(path), 10000);
+                return null;
+            }
         }
 
         connectExtratosSocket('/ws/extratos');
