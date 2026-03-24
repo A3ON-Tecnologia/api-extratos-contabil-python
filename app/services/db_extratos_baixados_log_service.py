@@ -5,6 +5,7 @@ Servico para gerenciar logs de extratos baixados no banco de dados.
 import logging
 from datetime import datetime
 from typing import Optional
+from sqlalchemy import extract
 
 from app.database import SessionLocal
 from app.models.extratos_baixados_log import ExtratosBaixadosLog
@@ -114,12 +115,18 @@ class ExtratosBaixadosLogService:
         finally:
             db.close()
 
-    def get_stats(self) -> dict:
+    def get_stats(self, ano: Optional[int] = None, mes: Optional[int] = None) -> dict:
         """Retorna estatisticas gerais dos logs."""
         db = SessionLocal()
         try:
-            total = db.query(ExtratosBaixadosLog).count()
-            sucesso = db.query(ExtratosBaixadosLog).filter(ExtratosBaixadosLog.status == "SUCESSO").count()
+            base_query = db.query(ExtratosBaixadosLog)
+            if ano:
+                base_query = base_query.filter(extract("year", ExtratosBaixadosLog.processado_em) == ano)
+            if mes:
+                base_query = base_query.filter(extract("month", ExtratosBaixadosLog.processado_em) == mes)
+
+            total = base_query.count()
+            sucesso = base_query.filter(ExtratosBaixadosLog.status == "SUCESSO").count()
 
             nao_identificado_values = [
                 "NAO_IDENTIFICADO",
@@ -127,12 +134,12 @@ class ExtratosBaixadosLogService:
                 "NÃO IDENTIFICADO",
                 "NÃƒO IDENTIFICADO",
             ]
-            nao_identificado = db.query(ExtratosBaixadosLog).filter(
+            nao_identificado = base_query.filter(
                 ExtratosBaixadosLog.status.in_(nao_identificado_values)
             ).count()
 
             falha_values = ["FALHA", "ERRO"]
-            falha = db.query(ExtratosBaixadosLog).filter(ExtratosBaixadosLog.status.in_(falha_values)).count()
+            falha = base_query.filter(ExtratosBaixadosLog.status.in_(falha_values)).count()
 
             return {
                 "total": total,

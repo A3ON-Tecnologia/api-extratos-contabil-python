@@ -182,7 +182,7 @@ Edite o arquivo `.env`:
 OPENAI_API_KEY=sk-...
 
 # Modelo LLM
-LLM_MODEL=gpt-4o-mini
+LLM_MODEL=gpt-5-mini
 
 # Porta do servidor
 PORT=8888

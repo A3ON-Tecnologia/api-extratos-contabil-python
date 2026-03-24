@@ -191,6 +191,9 @@ app.include_router(extratos_test_router)
 # Cache de hashes processados para idempotencia
 _processed_hashes: set[str] = set()
 
+# Cache de hashes processados por escopo (job) para evitar falsos duplicados globais
+_processed_hashes_by_scope: dict[str, set[str]] = {}
+
 # Cache de hashes processados para extratos baixados (idempotencia)
 _extratos_processed_hashes: set[str] = set()
 
@@ -205,6 +208,9 @@ _extratos_jobs: dict[str, dict] = {}
 
 # Armazenamento de jobs de EXTRATOS BAIXADOS (TESTE)
 _extratos_test_jobs: dict[str, dict] = {}
+
+# Armazenamento de jobs de REVERSAO disparados via MAKE
+_make_reversao_jobs: dict[str, dict] = {}
 
 # Executor para tarefas em background
 _executor = ThreadPoolExecutor(max_workers=4)
@@ -224,6 +230,12 @@ _client_service: ClientService | None = None
 _matching_service: MatchingService | None = None
 _storage_service: StorageService | None = None
 _extratos_sim_service: ExtratosBaixadosSimulacaoService | None = None
+
+
+def _make_hash_scope_key(job_id: str | None, test_mode: bool) -> str:
+    """Gera chave de escopo para deduplicacao por job no modulo MAKE."""
+    prefix = "make_test" if test_mode else "make_prod"
+    return f"{prefix}:{job_id or 'standalone'}"
 
 
 def get_pdf_service() -> PDFService:
@@ -1357,7 +1369,7 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
     # Usa o event manager correto baseado no modo
     event_manager = get_test_event_manager() if test_mode else get_event_manager()
     jobs_dict = _test_jobs if test_mode else _jobs
-    
+
     try:
         # Emitir evento de arquivo recebido
         await event_manager.emit(ProcessingEvent(
@@ -1366,7 +1378,7 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
             message=f"Arquivo recebido: {filename}",
             details={"size": len(content), "job_id": job_id, "test_mode": test_mode}
         ))
-        
+
         if is_zip:
             result = await process_zip_async(content, filename, job_id, test_mode)
         else:
@@ -1379,16 +1391,17 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
                 arquivos_falha=1 if result.status == ProcessingStatus.FALHA else 0,
                 resultados=[result],
             )
-        
-        # Se for ZIP, precisamos emitir um evento de conclusão para o arquivo ZIP principal
+
+        # Se for ZIP, precisamos emitir um evento de conclusao para o arquivo ZIP principal
         # para que o frontend remova o card de processamento
         if is_zip:
+            zip_auditoria = result.auditoria or {}
             await event_manager.emit(ProcessingEvent(
                 event_type=EventType.PROCESSING_COMPLETED,
                 filename=filename,
                 message=f"ZIP processado: {result.total_arquivos} arquivos.",
                 details={
-                    "status": "SUCESSO",
+                    "status": "SUCESSO" if zip_auditoria.get("consistente", True) else "INCONSISTENTE",
                     "cliente": "LOTE ZIP COMPLETO",
                     "path": "-",
                     "banco": "-",
@@ -1396,11 +1409,12 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
                     "ano": "-",
                     "mes": "-",
                     "metodo": "-",
-                    "log_id": None
+                    "log_id": None,
+                    "auditoria": zip_auditoria,
                 },
                 progress=100
             ))
-        
+
         # Atualiza o job com sucesso
         jobs_dict[job_id].update({
             "status": "completed",
@@ -1408,10 +1422,10 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
             "completed_at": datetime.now().isoformat(),
             "results": result.model_dump(),
         })
-        
+
     except Exception as e:
         logger.exception(f"Erro no processamento do job {job_id}")
-        
+
         # Atualiza o job com erro
         jobs_dict[job_id].update({
             "status": "error",
@@ -1419,12 +1433,15 @@ async def process_file_background(job_id: str, content: bytes, filename: str, is
             "completed_at": datetime.now().isoformat(),
             "results": None,
         })
-        
+
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.PROCESSING_ERROR,
             filename=filename,
             message=str(e)
         ))
+    finally:
+        # Libera cache de hashes do job ao finalizar o processamento
+        _processed_hashes_by_scope.pop(_make_hash_scope_key(job_id, test_mode), None)
 
 
 async def process_zip_async(zip_data: bytes, filename: str, job_id: str | None = None, test_mode: bool = False) -> UploadResponse:
@@ -1433,31 +1450,35 @@ async def process_zip_async(zip_data: bytes, filename: str, job_id: str | None =
     event_manager = get_test_event_manager() if test_mode else get_event_manager()
     zip_service = get_zip_service()
     jobs_dict = _test_jobs if test_mode else _jobs
-    
+
     # Check Cancelamento
     if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
-             raise asyncio.CancelledError("Cancelado pelo usuário")
+             raise asyncio.CancelledError("Cancelado pelo usuario")
 
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.ZIP_EXTRACTING,
         filename=filename,
         message="Extraindo arquivos do ZIP..."
     ))
-    
+
     try:
-        extracted_files = zip_service.extract_pdfs(zip_data)
+        extraction_result = zip_service.extract_with_report(zip_data)
+        extracted_files = extraction_result.extracted_files
     except ValueError as e:
         raise ValueError(f"Erro ao extrair ZIP: {e}")
-    
+
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.ZIP_EXTRACTED,
         filename=filename,
-        message=f"{len(extracted_files)} PDFs extraidos",
-        details={"count": len(extracted_files)}
+        message=f"{len(extracted_files)} arquivos extraidos do ZIP",
+        details={
+            "count": len(extracted_files),
+            "auditoria": extraction_result.report.to_dict(),
+        }
     ))
-    
+
     results: list[ProcessingResult] = []
-    
+
     for extracted_file in extracted_files:
         # Check Cancelamento entre arquivos
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
@@ -1466,11 +1487,20 @@ async def process_zip_async(zip_data: bytes, filename: str, job_id: str | None =
 
         result = await process_pdf_async(extracted_file.data, extracted_file.filename, job_id, test_mode)
         results.append(result)
-    
+
     sucesso = sum(1 for r in results if r.status == ProcessingStatus.SUCESSO)
     nao_identificado = sum(1 for r in results if r.status == ProcessingStatus.NAO_IDENTIFICADO)
     falha = sum(1 for r in results if r.status == ProcessingStatus.FALHA)
-    
+
+    auditoria = extraction_result.report.to_dict()
+    auditoria.update(
+        {
+            "processados": len(results),
+            "cancelado": bool(job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled"),
+            "consistente": len(results) == extraction_result.report.extraidos,
+        }
+    )
+
     return UploadResponse(
         sucesso=sucesso > 0,
         total_arquivos=len(results),
@@ -1478,6 +1508,7 @@ async def process_zip_async(zip_data: bytes, filename: str, job_id: str | None =
         arquivos_nao_identificados=nao_identificado,
         arquivos_falha=falha,
         resultados=results,
+        auditoria=auditoria,
     )
 
 
@@ -1507,19 +1538,70 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         message="Iniciando processamento do PDF",
         progress=0
     ))
-    
-    # Verifica idempotencia
-    if file_hash in _processed_hashes:
+
+    # Verifica idempotencia no escopo do job (nao global)
+    hash_scope = _make_hash_scope_key(job_id, test_mode)
+    scoped_hashes = _processed_hashes_by_scope.setdefault(hash_scope, set())
+
+    if file_hash in scoped_hashes:
         logger.info(f"Arquivo ja processado (hash: {file_hash[:8]}): {filename}")
+
+        log_id = None
+        if not test_mode:
+            try:
+                db_log_service = get_db_log_service()
+                log_entry = db_log_service.log_extrato(
+                    arquivo_original=filename,
+                    status=ProcessingStatus.DUPLICADO.value,
+                    arquivo_salvo="",
+                    hash_arquivo=file_hash,
+                    erro="Arquivo ja processado anteriormente no mesmo lote (duplicado)",
+                )
+                log_id = log_entry.id
+            except Exception as e:
+                logger.error(f"Erro ao salvar log DUPLICADO no banco: {e}")
+        else:
+            try:
+                db_teste_service = get_db_log_teste_service()
+                db_teste_service.log_extrato_teste(
+                    arquivo_original=filename,
+                    status=ProcessingStatus.DUPLICADO.value,
+                    arquivo_salvo="",
+                    hash_arquivo=file_hash,
+                    erro="Arquivo ja processado anteriormente no mesmo lote (duplicado)",
+                )
+            except Exception as e:
+                logger.error(f"Erro ao salvar log DUPLICADO (teste): {e}")
+
+        await event_manager.emit(ProcessingEvent(
+            event_type=EventType.PROCESSING_COMPLETED,
+            filename=filename,
+            message="Processamento concluido: DUPLICADO",
+            details={
+                "status": ProcessingStatus.DUPLICADO.value,
+                "cliente": "DUPLICADO",
+                "path": "-",
+                "banco": "-",
+                "tipo": "-",
+                "ano": "-",
+                "mes": "-",
+                "metodo": "HASH",
+                "log_id": log_id,
+            },
+            progress=100
+        ))
+
         event_manager.end_processing()
+        await event_manager.emit_stats()
         return ProcessingResult(
             nome_arquivo_original=filename,
-            status=ProcessingStatus.SUCESSO,
+            status=ProcessingStatus.DUPLICADO,
             hash_arquivo=file_hash,
             erro="Arquivo ja processado anteriormente (duplicado)",
+            log_id=log_id,
         )
-    
-    _processed_hashes.add(file_hash)
+
+    scoped_hashes.add(file_hash)
     
     # Verifica se é realmente um PDF (apenas para log, não bloqueia)
     is_pdf = pdf_data.startswith(b"%PDF-") or filename.lower().endswith(".pdf")
@@ -1839,6 +1921,7 @@ async def create_failure_result(
 ) -> ProcessingResult:
     """Cria um resultado de falha e registra no log."""
     event_manager = get_test_event_manager() if test_mode else get_event_manager()
+    log_id = None
 
     saved_path = ""
     if pdf_data:
@@ -1857,11 +1940,37 @@ async def create_failure_result(
         except Exception as e:
             logger.warning(f"Falha ao salvar arquivo com erro em NAO_IDENTIFICADOS: {e}")
 
+    if not test_mode:
+        try:
+            db_log_service = get_db_log_service()
+            log_entry = db_log_service.log_extrato(
+                arquivo_original=filename,
+                status=ProcessingStatus.FALHA.value,
+                arquivo_salvo=saved_path or None,
+                hash_arquivo=file_hash,
+                erro=error,
+            )
+            log_id = log_entry.id
+        except Exception as e:
+            logger.error(f"Erro ao salvar log de falha no banco de dados: {e}")
+    else:
+        try:
+            db_teste_service = get_db_log_teste_service()
+            db_teste_service.log_extrato_teste(
+                arquivo_original=filename,
+                status=ProcessingStatus.FALHA.value,
+                arquivo_salvo=saved_path or None,
+                hash_arquivo=file_hash,
+                erro=error,
+            )
+        except Exception as e:
+            logger.error(f"Erro ao salvar log de falha (teste): {e}")
+
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.PROCESSING_ERROR,
         filename=filename,
         message=error,
-        details={"path": saved_path} if saved_path else None,
+        details={"path": saved_path, "log_id": log_id} if (saved_path or log_id) else None,
     ))
 
     event_manager.update_stats(falha=True)
@@ -1874,6 +1983,7 @@ async def create_failure_result(
         status=ProcessingStatus.FALHA,
         hash_arquivo=file_hash,
         erro=error,
+        log_id=log_id,
     )
 
 
@@ -1988,15 +2098,19 @@ async def process_extratos_zip_async(
     ))
 
     try:
-        extracted_files = zip_service.extract_pdfs(zip_data)
+        extraction_result = zip_service.extract_with_report(zip_data)
+        extracted_files = extraction_result.extracted_files
     except ValueError as e:
         raise ValueError(f"Erro ao extrair ZIP: {e}")
 
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.ZIP_EXTRACTED,
         filename=filename,
-        message=f"{len(extracted_files)} PDFs extraidos",
-        details={"count": len(extracted_files)}
+        message=f"{len(extracted_files)} arquivos extraidos do ZIP",
+        details={
+            "count": len(extracted_files),
+            "auditoria": extraction_result.report.to_dict(),
+        }
     ))
 
     results: list[ProcessingResult] = []
@@ -2018,6 +2132,15 @@ async def process_extratos_zip_async(
     nao_identificado = sum(1 for r in results if r.status == ProcessingStatus.NAO_IDENTIFICADO)
     falha = sum(1 for r in results if r.status == ProcessingStatus.FALHA)
 
+    auditoria = extraction_result.report.to_dict()
+    auditoria.update(
+        {
+            "processados": len(results),
+            "cancelado": bool(job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled"),
+            "consistente": len(results) == extraction_result.report.extraidos,
+        }
+    )
+
     return UploadResponse(
         sucesso=sucesso > 0,
         total_arquivos=len(results),
@@ -2025,6 +2148,7 @@ async def process_extratos_zip_async(
         arquivos_nao_identificados=nao_identificado,
         arquivos_falha=falha,
         resultados=results,
+        auditoria=auditoria,
     )
 
 
@@ -2443,13 +2567,17 @@ async def get_history():
     try:
         db_log_service = get_db_log_service()
         logs = db_log_service.get_logs(limit=100)
+        now = datetime.now()
         
         # Mapeia para o formato esperado pelo frontend
         result = []
         for log in logs:
+            processed_at = log.processado_em
+            if not processed_at or processed_at.month != now.month or processed_at.year != now.year:
+                continue
             result.append({
-                "timestamp": log.processado_em.isoformat() if log.processado_em else None,
-                "data_hora_formatada": log.processado_em.strftime("%d/%m/%Y, %H:%M:%S") if log.processado_em else "-",
+                "timestamp": processed_at.isoformat() if processed_at else None,
+                "data_hora_formatada": processed_at.strftime("%d/%m/%Y, %H:%M:%S") if processed_at else "-",
                 "cliente": log.cliente_nome or "NÃO IDENTIFICADO",
                 "tipo": log.tipo_documento or "-",
                 "banco": log.banco or "-",
@@ -2464,6 +2592,55 @@ async def get_history():
     except Exception as e:
         logger.error(f"Erro ao buscar histórico: {e}")
         return []
+
+
+@app.delete("/monitor/history/{log_id}")
+async def delete_history_item(log_id: int):
+    """Remove um item específico do histórico do monitor (somente banco/memória)."""
+    from app.database import SessionLocal
+    from app.models.extrato_log import ExtratoLog
+    from types import SimpleNamespace
+
+    db = SessionLocal()
+    status_original = None
+    log_obj = None
+    try:
+        log = db.query(ExtratoLog).filter(ExtratoLog.id == log_id).first()
+        if not log:
+            raise HTTPException(status_code=404, detail="Log nao encontrado")
+
+        status_original = log.status
+        log_obj = SimpleNamespace(
+            hash_arquivo=log.hash_arquivo,
+            arquivo_original=log.arquivo_original,
+        )
+
+        db.delete(log)
+        db.commit()
+
+        _remove_logs_from_memory([log_obj])
+
+        event_manager = get_event_manager()
+        event_manager.decrement_stats(
+            sucesso=1 if status_original == "SUCESSO" else 0,
+            nao_identificado=1 if status_original == "NAO_IDENTIFICADO" else 0,
+            falha=1 if status_original == "FALHA" else 0,
+        )
+        await event_manager.emit_stats()
+
+        return {
+            "success": True,
+            "message": f"Linha {log_id} excluida com sucesso",
+            "log_id": log_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao excluir linha do histórico {log_id}: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
 
 
 @app.get("/monitor/clients")
@@ -2486,7 +2663,7 @@ async def list_monitor_clients():
 
 @app.post("/monitor/assign-client")
 async def assign_client_to_unidentified(payload: AssignClientRequest):
-    """Atualiza um log NAO_IDENTIFICADO com o cliente correto e move o arquivo."""
+    """Atualiza cliente de um log e move o arquivo para a pasta selecionada."""
     from app.database import SessionLocal
     from app.models.extrato_log import ExtratoLog
     import shutil
@@ -2496,8 +2673,9 @@ async def assign_client_to_unidentified(payload: AssignClientRequest):
         log = db.query(ExtratoLog).filter(ExtratoLog.id == payload.log_id).first()
         if not log:
             raise HTTPException(status_code=404, detail="Log nao encontrado")
-        if log.status != "NAO_IDENTIFICADO":
-            raise HTTPException(status_code=400, detail="Log nao esta como NAO_IDENTIFICADO")
+        if log.status not in {"NAO_IDENTIFICADO", "SUCESSO"}:
+            raise HTTPException(status_code=400, detail="Log nao permite troca manual de cliente")
+        old_status = log.status
 
         client_service = get_client_service()
         client_folder = payload.client_folder.strip() if payload.client_folder else None
@@ -2588,8 +2766,9 @@ async def assign_client_to_unidentified(payload: AssignClientRequest):
         db.refresh(log)
 
         event_manager = get_event_manager()
-        event_manager.stats["nao_identificados"] = max(0, event_manager.stats["nao_identificados"] - 1)
-        event_manager.stats["sucesso"] += 1
+        if old_status == "NAO_IDENTIFICADO":
+            event_manager.stats["nao_identificados"] = max(0, event_manager.stats["nao_identificados"] - 1)
+            event_manager.stats["sucesso"] += 1
         await event_manager.emit_stats()
 
         return {
@@ -2759,7 +2938,7 @@ async def reset_processing():
             count += 1
     
     # Força reset do contador interno do event manager
-    if count > 0 or event_manager.is_processing:
+    if count > 0 or event_manager.stats.get("em_processamento", 0) > 0:
         event_manager.end_processing()
         await event_manager.emit_stats()
         
@@ -2835,11 +3014,11 @@ async def get_logs(
 
 
 @app.get("/logs/stats")
-async def get_logs_stats():
+async def get_logs_stats(ano: int = None, mes: int = None):
     """Retorna estatísticas gerais dos logs."""
     try:
         db_service = get_db_log_service()
-        return db_service.get_stats()
+        return db_service.get_stats(ano=ano, mes=mes)
     except Exception as e:
         logger.error(f"Erro ao obter estatísticas: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -2962,11 +3141,11 @@ async def get_extratos_logs(
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.get("/extratos/logs/stats")
-async def get_extratos_logs_stats():
+async def get_extratos_logs_stats(ano: int = None, mes: int = None):
     """Retorna estatisticas gerais dos logs de extratos baixados."""
     try:
         db_service = get_extratos_baixados_log_service()
-        return db_service.get_stats()
+        return db_service.get_stats(ano=ano, mes=mes)
     except Exception as e:
         logger.error(f"Erro ao obter estatisticas de extratos baixados: {e}")
         raise HTTPException(status_code=500, detail=str(e))
@@ -3880,12 +4059,81 @@ async def reverter_lote(ids: List[int], deletar_arquivos: bool = True):
         raise HTTPException(status_code=500, detail=str(e))
 
 @app.post("/make/webhook/reversao")
-async def make_webhook_reversao(payload: MakeReversaoWebhook):
+async def make_webhook_reversao(payload: MakeReversaoWebhook, background_tasks: BackgroundTasks):
     """
     Webhook específico do Módulo MAKE para a view Reversão.
     Mesmo fluxo do /reversao/lote, mas com rota dedicada.
     """
-    return await reverter_lote(ids=payload.ids, deletar_arquivos=payload.deletar_arquivos)
+    if not payload.ids:
+        raise HTTPException(status_code=400, detail="Lista de IDs vazia")
+
+    job_id = f"rev_{uuid.uuid4().hex[:10]}"
+    _make_reversao_jobs[job_id] = {
+        "job_id": job_id,
+        "status": "queued",
+        "message": "Reversao recebida via Make. Aguardando processamento.",
+        "created_at": datetime.now().isoformat(),
+        "started_at": None,
+        "completed_at": None,
+        "total_ids": len(payload.ids),
+        "deletar_arquivos": payload.deletar_arquivos,
+        "resultado": None,
+        "erro": None,
+    }
+
+    background_tasks.add_task(
+        _process_make_reversao_job,
+        job_id,
+        payload.ids,
+        payload.deletar_arquivos,
+    )
+
+    return {
+        "success": True,
+        "accepted": True,
+        "processing_async": True,
+        "job_id": job_id,
+        "message": "Webhook recebido. Reversao iniciada em background.",
+        "status_url": f"/make/webhook/reversao/{job_id}",
+        "revertidos": 0,
+        "erros": 0,
+        "arquivos_deletados": 0,
+    }
+
+
+async def _process_make_reversao_job(job_id: str, ids: list[int], deletar_arquivos: bool):
+    job = _make_reversao_jobs.get(job_id)
+    if not job:
+        return
+
+    job["status"] = "processing"
+    job["started_at"] = datetime.now().isoformat()
+    job["message"] = "Processando reversao em lote."
+
+    try:
+        resultado = await reverter_lote(ids=ids, deletar_arquivos=deletar_arquivos)
+        job["resultado"] = resultado
+        if resultado.get("success"):
+            job["status"] = "completed"
+            job["message"] = "Reversao concluida com sucesso."
+        else:
+            job["status"] = "failed"
+            job["message"] = resultado.get("message", "Falha na reversao.")
+    except Exception as e:
+        logger.error(f"Erro no job MAKE de reversao {job_id}: {e}")
+        job["status"] = "failed"
+        job["erro"] = str(e)
+        job["message"] = "Erro inesperado ao processar reversao."
+    finally:
+        job["completed_at"] = datetime.now().isoformat()
+
+
+@app.get("/make/webhook/reversao/{job_id}")
+async def get_make_reversao_job_status(job_id: str):
+    job = _make_reversao_jobs.get(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job nao encontrado")
+    return job
 
 
 @app.post("/reversao/ultimos/{quantidade}")
@@ -3968,3 +4216,5 @@ if __name__ == "__main__":
     import uvicorn
     settings = get_settings()
     uvicorn.run("app.main:app", host="0.0.0.0", port=settings.port, reload=True)
+
+

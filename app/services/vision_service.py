@@ -83,7 +83,7 @@ class VisionService:
         """Inicializa o serviço."""
         settings = get_settings()
         self.client = OpenAI(api_key=settings.openai_api_key)
-        self.model = "gpt-4o-mini"  # Modelo com suporte a visão
+        self.model = settings.llm_model
 
     def identify_bank_from_pdf(self, pdf_data: bytes, max_pages: int = 3) -> str | None:
         """

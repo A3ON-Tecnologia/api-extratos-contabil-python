@@ -414,6 +414,45 @@
             color: var(--text-muted);
         }
 
+        .insights-toolbar {
+            display: inline-flex;
+            align-items: center;
+            gap: 0.55rem;
+            flex-wrap: wrap;
+            justify-content: flex-end;
+        }
+
+        .insights-filter-label {
+            font-size: 0.78rem;
+            color: var(--text-muted);
+            text-transform: uppercase;
+            letter-spacing: 0.08em;
+        }
+
+        .insights-month-input {
+            background: var(--bg-panel-strong);
+            border: 1px solid var(--stroke);
+            color: var(--text-main);
+            border-radius: 10px;
+            padding: 0.35rem 0.55rem;
+            font-size: 0.84rem;
+        }
+
+        .insights-reset-btn {
+            background: transparent;
+            border: 1px solid var(--stroke);
+            color: var(--text-muted);
+            border-radius: 10px;
+            padding: 0.35rem 0.6rem;
+            font-size: 0.78rem;
+            cursor: pointer;
+        }
+
+        .insights-reset-btn:hover {
+            border-color: var(--accent-cyan);
+            color: var(--accent-cyan);
+        }
+
         .insights-grid {
             display: grid;
             grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -575,7 +614,12 @@
             <section class="insights fade-up fade-delay-2">
                 <div class="insights-header">
                     <div class="insights-title">Dashboard Operacional</div>
-                    <div class="insights-note" id="insightsNote">Atualizando dados...</div>
+                    <div class="insights-toolbar">
+                        <span class="insights-filter-label">Mes Processamento</span>
+                        <input type="month" id="processingMonthFilter" class="insights-month-input">
+                        <button type="button" id="clearMonthFilter" class="insights-reset-btn">Totais</button>
+                        <div class="insights-note" id="insightsNote">Atualizando dados...</div>
+                    </div>
                 </div>
                 <div class="insights-grid">
                     <div class="insight-card">
@@ -651,6 +695,7 @@
 
     <script>
         async function fetchStats() {
+            const monthFilter = document.getElementById('processingMonthFilter');
             const note = document.getElementById('insightsNote');
             const statProcessed = document.getElementById('statProcessed');
             const statUnidentified = document.getElementById('statUnidentified');
@@ -664,11 +709,21 @@
             const statUnidentifiedBar = document.getElementById('statUnidentifiedBar');
             const statFailuresBar = document.getElementById('statFailuresBar');
             const statSuccessBar = document.getElementById('statSuccessBar');
+            const selectedMonth = monthFilter ? monthFilter.value : '';
+            const validMonth = /^\d{4}-\d{2}$/.test(selectedMonth);
+            let queryString = '';
+            let filterLabel = 'Logs consolidados';
+
+            if (validMonth) {
+                const [ano, mes] = selectedMonth.split('-');
+                queryString = `?ano=${Number(ano)}&mes=${Number(mes)}`;
+                filterLabel = `Filtro ${mes}/${ano}`;
+            }
 
             try {
                 const [mainRes, extratosRes] = await Promise.all([
-                    fetch('/logs/stats'),
-                    fetch('/extratos/logs/stats'),
+                    fetch(`/logs/stats${queryString}`),
+                    fetch(`/extratos/logs/stats${queryString}`),
                 ]);
 
                 if (!mainRes.ok || !extratosRes.ok) {
@@ -701,10 +756,22 @@
                 statSuccessBar.style.width = `${pct(sucesso)}%`;
 
                 const now = new Date();
-                note.textContent = `Atualizado em ${now.toLocaleTimeString('pt-BR')} - Logs consolidados`;
+                note.textContent = `Atualizado em ${now.toLocaleTimeString('pt-BR')} - ${filterLabel}`;
             } catch (error) {
                 note.textContent = 'Erro ao carregar estatisticas';
             }
+        }
+
+        const monthFilterInput = document.getElementById('processingMonthFilter');
+        const clearMonthFilterBtn = document.getElementById('clearMonthFilter');
+        if (monthFilterInput) {
+            monthFilterInput.addEventListener('change', fetchStats);
+        }
+        if (clearMonthFilterBtn && monthFilterInput) {
+            clearMonthFilterBtn.addEventListener('click', () => {
+                monthFilterInput.value = '';
+                fetchStats();
+            });
         }
 
         fetchStats();

@@ -6,6 +6,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Session
+from sqlalchemy import extract
 
 from app.database import SessionLocal
 from app.models.extrato_log import ExtratoLog
@@ -135,12 +136,18 @@ class DatabaseLogService:
         finally:
             db.close()
     
-    def get_stats(self) -> dict:
+    def get_stats(self, ano: Optional[int] = None, mes: Optional[int] = None) -> dict:
         """Retorna estatísticas gerais dos logs."""
         db = SessionLocal()
         try:
-            total = db.query(ExtratoLog).count()
-            sucesso = db.query(ExtratoLog).filter(ExtratoLog.status == "SUCESSO").count()
+            base_query = db.query(ExtratoLog)
+            if ano:
+                base_query = base_query.filter(extract("year", ExtratoLog.processado_em) == ano)
+            if mes:
+                base_query = base_query.filter(extract("month", ExtratoLog.processado_em) == mes)
+
+            total = base_query.count()
+            sucesso = base_query.filter(ExtratoLog.status == "SUCESSO").count()
 
             nao_identificado_values = [
                 "NAO_IDENTIFICADO",
@@ -148,10 +155,10 @@ class DatabaseLogService:
                 "NÃO IDENTIFICADO",
                 "NÃƒO IDENTIFICADO",
             ]
-            nao_identificado = db.query(ExtratoLog).filter(ExtratoLog.status.in_(nao_identificado_values)).count()
+            nao_identificado = base_query.filter(ExtratoLog.status.in_(nao_identificado_values)).count()
 
             falha_values = ["FALHA", "ERRO"]
-            falha = db.query(ExtratoLog).filter(ExtratoLog.status.in_(falha_values)).count()
+            falha = base_query.filter(ExtratoLog.status.in_(falha_values)).count()
             
             return {
                 "total": total,
