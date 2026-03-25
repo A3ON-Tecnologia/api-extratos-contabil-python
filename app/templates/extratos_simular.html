@@ -581,7 +581,7 @@
                         <div class="file-meta">${arquivo.tamanho_mb} MB</div>
                     </div>
                     <div class="file-actions">
-                        <button class="btn primary" onclick="simularArquivo('${arquivo.nome}')">
+                        <button class="btn primary" data-filename="${encodeURIComponent(arquivo.nome)}" onclick="simularArquivo(this)">
                             Simular
                         </button>
                     </div>
@@ -595,12 +595,13 @@
             document.getElementById('btnPrevPage').disabled = paginaAtual === 1;
             document.getElementById('btnNextPage').disabled = paginaAtual === totalPaginas;
         }
+        async function simularArquivo(button) {
+            const btn = button;
+            const filename = decodeURIComponent(btn.dataset.filename || '');
 
-        async function simularArquivo(filename) {
             try {
-                const btn = event.target;
                 btn.disabled = true;
-                btn.textContent = '⏳ Processando...';
+                btn.textContent = 'Processando...';
 
                 const response = await fetch('/extratos/simular-arquivo', {
                     method: 'POST',
@@ -611,12 +612,16 @@
                 });
 
                 if (!response.ok) {
-                    throw new Error(`Erro ${response.status}: ${response.statusText}`);
+                    let detail = response.statusText;
+                    try {
+                        const errorData = await response.json();
+                        detail = errorData.detail || detail;
+                    } catch (_) {}
+                    throw new Error(`Erro ${response.status}: ${detail}`);
                 }
 
                 const resultado = await response.json();
 
-                // Adiciona ou atualiza o resultado
                 const idx = resultadosSimulacao.findIndex(r => r.arquivo_original === filename);
                 if (idx >= 0) {
                     resultadosSimulacao[idx] = resultado;
@@ -625,17 +630,17 @@
                 }
 
                 renderizarResultados();
-                btn.textContent = '✅ Concluído';
+                btn.textContent = 'Concluido';
                 setTimeout(() => {
-                    btn.textContent = '🔍 Simular';
+                    btn.textContent = 'Simular';
                     btn.disabled = false;
                 }, 2000);
 
             } catch (error) {
                 console.error('Erro ao simular:', error);
                 alert('Erro ao simular arquivo: ' + error.message);
-                event.target.disabled = false;
-                event.target.textContent = '🔍 Simular';
+                btn.disabled = false;
+                btn.textContent = 'Simular';
             }
         }
 

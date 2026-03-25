@@ -6,6 +6,7 @@ O Make recebe resposta imediata e o arquivo e processado em background.
 """
 
 import asyncio
+import json
 import logging
 import re
 import uuid
@@ -208,6 +209,19 @@ _extratos_jobs: dict[str, dict] = {}
 
 # Armazenamento de jobs de EXTRATOS BAIXADOS (TESTE)
 _extratos_test_jobs: dict[str, dict] = {}
+EXTRATOS_ALLOWED_EXTENSIONS = {".pdf", ".zip", ".ofx"}
+EXTRATOS_INPUT_BANK_FOLDERS = (
+    "BANCO DO BRASIL",
+    "BRADESCO",
+    "CAIXA",
+    "CRESOL",
+    "ITAU",
+    "SANTANDER",
+    "SICREDI",
+    "SICOOB",
+    "OUTROS",
+)
+EXTRATOS_TRACE_FOLDER = "_LLM_TRACE"
 
 # Armazenamento de jobs de REVERSAO disparados via MAKE
 _make_reversao_jobs: dict[str, dict] = {}
@@ -288,6 +302,87 @@ def get_extratos_sim_service() -> ExtratosBaixadosSimulacaoService:
     return _extratos_sim_service
 
 
+
+def _sanitize_trace_component(value: str) -> str:
+    """Normaliza um componente para nome de arquivo seguro."""
+    sanitized = re.sub(r"[^A-Za-z0-9._-]+", "_", value.strip())
+    return sanitized.strip("._") or "arquivo"
+
+
+def _ensure_extratos_bank_folders(watch_path: Path) -> list[str]:
+    """Garante as subpastas padrao de bancos na pasta de extratos."""
+    created: list[str] = []
+    if not watch_path.exists() or not watch_path.is_dir():
+        return created
+
+    for folder_name in EXTRATOS_INPUT_BANK_FOLDERS:
+        folder_path = watch_path / folder_name
+        if folder_path.exists():
+            continue
+        folder_path.mkdir(parents=True, exist_ok=True)
+        created.append(folder_name)
+
+    (watch_path / EXTRATOS_TRACE_FOLDER).mkdir(parents=True, exist_ok=True)
+    return created
+
+
+def _iter_extratos_input_files(watch_path: Path) -> list[Path]:
+    """
+    Lista apenas arquivos dentro das subpastas da pasta de extratos.
+
+    Arquivos soltos na raiz do watch_path deixam de participar do fluxo.
+    """
+    if not watch_path.exists() or not watch_path.is_dir():
+        return []
+
+    files: list[Path] = []
+    for file_path in watch_path.rglob("*"):
+        if not file_path.is_file():
+            continue
+        if file_path.parent == watch_path:
+            continue
+        if EXTRATOS_TRACE_FOLDER in file_path.parts:
+            continue
+        if file_path.suffix.lower() not in EXTRATOS_ALLOWED_EXTENSIONS:
+            continue
+        files.append(file_path)
+
+    files.sort(key=lambda path: path.stat().st_mtime, reverse=True)
+    return files
+
+
+def _resolve_extratos_input_file(watch_path: Path, filename: str) -> Path | None:
+    """Resolve um arquivo de extratos por caminho relativo ou nome unico."""
+    try:
+        candidate = (watch_path / filename).resolve(strict=False)
+        watch_root = watch_path.resolve()
+        if watch_root != candidate and watch_root in candidate.parents and candidate.parent != watch_root and candidate.exists() and candidate.is_file():
+            return candidate
+    except Exception:
+        pass
+
+    matches = [path for path in _iter_extratos_input_files(watch_path) if path.name == filename]
+    if len(matches) == 1:
+        return matches[0]
+    return None
+
+
+def _write_extratos_llm_trace(processing_trace: dict, filename: str, file_hash: str) -> str:
+    """Grava um JSON de rastreio do processamento de extratos."""
+    settings = get_settings()
+    trace_dir = settings.watch_folder_path / EXTRATOS_TRACE_FOLDER
+    trace_dir.mkdir(parents=True, exist_ok=True)
+
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    base_name = _sanitize_trace_component(Path(filename).name)
+    trace_name = f"{timestamp}_{base_name}_{short_hash(file_hash)}.json"
+    trace_path = trace_dir / trace_name
+    trace_path.write_text(
+        json.dumps(processing_trace, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return str(trace_path)
+
 def _render_template_with_navbar(
     template_path: Path,
     *,
@@ -349,6 +444,10 @@ async def _watch_folder_loop():
         _watch_running = False
         return
 
+    created_folders = _ensure_extratos_bank_folders(watch_path)
+    if created_folders:
+        logger.info("Subpastas de bancos criadas em extratos: %s", ", ".join(created_folders))
+
     logger.info(f"Watcher ativo! Monitorando: {watch_path}")
 
     try:
@@ -357,7 +456,7 @@ async def _watch_folder_loop():
             iteration += 1
             if iteration % 12 == 1:  # Log a cada 1 minuto (12 * 5seg)
                 logger.info(f"Watcher ativo - iteracao {iteration} - arquivos pendentes: {len(_watch_seen)}")
-            for file_path in watch_path.iterdir():
+            for file_path in _iter_extratos_input_files(watch_path):
                 if not file_path.is_file():
                     continue
 
@@ -392,7 +491,7 @@ async def _watch_folder_loop():
                     logger.error(f"Erro ao ler arquivo {file_path}: {e}")
                     continue
 
-                filename = file_path.name
+                filename = str(file_path.relative_to(watch_path))
                 is_zip = file_path.suffix.lower() == ".zip"
                 job_id = str(uuid.uuid4())[:8]
 
@@ -443,6 +542,7 @@ async def extratos_watch_status():
         "pending_files": len(_watch_seen),
         "path_exists": watch_path.exists(),
         "is_directory": watch_path.is_dir() if watch_path.exists() else False,
+        "bank_folders": list(EXTRATOS_INPUT_BANK_FOLDERS),
     }
 
 
@@ -451,6 +551,7 @@ async def extratos_watch_debug():
     """Debug detalhado do watcher e configurações."""
     settings = get_settings()
     watch_path = settings.watch_folder_path
+    _ensure_extratos_bank_folders(watch_path)
 
     # Tenta listar arquivos se a pasta existir
     files_in_folder = []
@@ -458,12 +559,13 @@ async def extratos_watch_debug():
         if watch_path.exists() and watch_path.is_dir():
             files_in_folder = [
                 {
-                    "name": f.name,
+                    "name": str(f.relative_to(watch_path)),
                     "is_file": f.is_file(),
                     "size": f.stat().st_size if f.is_file() else None,
-                    "extension": f.suffix.lower()
+                    "extension": f.suffix.lower(),
+                    "parent": str(f.parent.relative_to(watch_path)) if f.parent != watch_path else ".",
                 }
-                for f in watch_path.iterdir()
+                for f in _iter_extratos_input_files(watch_path)
             ]
     except Exception as e:
         files_in_folder = [{"error": str(e)}]
@@ -492,7 +594,7 @@ async def extratos_watch_debug():
 
 @app.get("/extratos/mapear")
 async def mapear_extratos(process: bool = False):
-    """Lista todos os arquivos PDF/OFX/ZIP disponiveis na pasta de extratos."""
+    """Lista todos os arquivos PDF/OFX/ZIP dentro das subpastas da pasta de extratos."""
     settings = get_settings()
     watch_path = settings.watch_folder_path
 
@@ -509,6 +611,8 @@ async def mapear_extratos(process: bool = False):
         )
 
     try:
+        created_folders = _ensure_extratos_bank_folders(watch_path)
+
         # Testa permissao de leitura primeiro
         try:
             list(watch_path.iterdir())
@@ -527,16 +631,17 @@ async def mapear_extratos(process: bool = False):
         pdf_files = []
         erros_leitura = []
 
-        for file_path in watch_path.iterdir():
+        for file_path in _iter_extratos_input_files(watch_path):
             try:
-                if file_path.is_file() and file_path.suffix.lower() in {'.pdf', '.ofx', '.zip'}:
+                if file_path.suffix.lower() in EXTRATOS_ALLOWED_EXTENSIONS:
                     stat = file_path.stat()
                     pdf_files.append({
-                        "nome": file_path.name,
+                        "nome": str(file_path.relative_to(watch_path)),
                         "tamanho": stat.st_size,
                         "tamanho_mb": round(stat.st_size / (1024 * 1024), 2),
                         "modificado_em": stat.st_mtime,
                         "caminho_completo": str(file_path),
+                        "subpasta": str(file_path.parent.relative_to(watch_path)),
                     })
             except PermissionError:
                 erros_leitura.append(f"{file_path.name} (sem permissao)")
@@ -552,7 +657,10 @@ async def mapear_extratos(process: bool = False):
             "total": len(pdf_files),
             "pasta": str(watch_path),
             "arquivos": pdf_files,
+            "subpastas_bancos": list(EXTRATOS_INPUT_BANK_FOLDERS),
         }
+        if created_folders:
+            resultado["subpastas_criadas"] = created_folders
 
         if process and pdf_files:
             iniciados = []
@@ -567,7 +675,7 @@ async def mapear_extratos(process: bool = False):
 
                     _extratos_jobs[job_id] = {
                         "job_id": job_id,
-                        "filename": file_path.name,
+                        "filename": arquivo["nome"],
                         "status": "processing",
                         "message": "Arquivo recebido via mapear, processamento iniciado",
                         "created_at": datetime.now().isoformat(),
@@ -580,7 +688,7 @@ async def mapear_extratos(process: bool = False):
                         process_extratos_file_background(
                             job_id=job_id,
                             content=content,
-                            filename=file_path.name,
+                            filename=arquivo["nome"],
                             is_zip=is_zip,
                             test_mode=False,
                             source_path=file_path,
@@ -633,9 +741,10 @@ async def simular_processamento_arquivo(request: dict):
 
     settings = get_settings()
     watch_path = settings.watch_folder_path
-    file_path = watch_path / filename
+    _ensure_extratos_bank_folders(watch_path)
+    file_path = _resolve_extratos_input_file(watch_path, filename)
 
-    if not file_path.exists():
+    if not file_path or not file_path.exists():
         raise HTTPException(status_code=404, detail=f"Arquivo não encontrado: {filename}")
 
     if not file_path.is_file():
@@ -644,9 +753,10 @@ async def simular_processamento_arquivo(request: dict):
     try:
         pdf_data = file_path.read_bytes()
         sim_service = get_extratos_sim_service()
+        relative_filename = str(file_path.relative_to(watch_path))
         result = await sim_service.simular_arquivo(
             pdf_data=pdf_data,
-            filename=filename,
+            filename=relative_filename,
             executor=_executor,
             caminho_origem=file_path,
         )
@@ -674,6 +784,7 @@ async def simular_todos_extratos():
     """
     settings = get_settings()
     watch_path = settings.watch_folder_path
+    _ensure_extratos_bank_folders(watch_path)
 
     if not watch_path.exists():
         raise HTTPException(status_code=400, detail=f"Pasta não encontrada: {watch_path}")
@@ -681,8 +792,8 @@ async def simular_todos_extratos():
     resultados = []
     erros = []
 
-    # Lista todos os PDFs
-    pdf_files = [f for f in watch_path.iterdir() if f.is_file() and f.suffix.lower() in {'.pdf', '.ofx'}]
+    # Lista todos os arquivos de entrada dentro das subpastas
+    pdf_files = [f for f in _iter_extratos_input_files(watch_path) if f.suffix.lower() in {'.pdf', '.ofx'}]
 
     logger.info(f"[SIMULACAO EM LOTE] Processando {len(pdf_files)} arquivos")
 
@@ -690,7 +801,7 @@ async def simular_todos_extratos():
 
     for file_path in pdf_files:
         try:
-            filename = file_path.name
+            filename = str(file_path.relative_to(watch_path))
             pdf_data = file_path.read_bytes()
 
             resultado = await sim_service.simular_arquivo(
@@ -798,11 +909,14 @@ async def extratos_watch_start():
     _watch_running = True
     _watch_task = asyncio.create_task(_watch_folder_loop())
     logger.info(f"Watcher iniciado com sucesso em: {watch_path}")
+    created_folders = _ensure_extratos_bank_folders(watch_path)
 
     return {
         "running": True,
         "message": "Watcher iniciado com sucesso",
         "watch_path": str(watch_path),
+        "subpastas_criadas": created_folders,
+        "subpastas_bancos": list(EXTRATOS_INPUT_BANK_FOLDERS),
         "path_exists": True,
         "is_directory": True
     }
@@ -2162,6 +2276,19 @@ async def process_extratos_pdf_async(
     event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
     file_hash = compute_hash(pdf_data)
     jobs_dict = _extratos_test_jobs if test_mode else _extratos_jobs
+    processing_trace: dict = {
+        "arquivo": {
+            "nome": filename,
+            "hash": file_hash,
+            "extensao": Path(filename).suffix.lower(),
+            "tamanho_bytes": len(pdf_data),
+        },
+        "contexto": {
+            "modulo": "extratos_baixados",
+            "modo_teste": test_mode,
+        },
+        "pipeline": {},
+    }
 
     if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
         logger.warning(f"Job {job_id} cancelado antes do inicio.")
@@ -2222,6 +2349,7 @@ async def process_extratos_pdf_async(
                 f"Erro ao extrair conteudo: {e}",
                 pdf_data=pdf_data,
                 test_mode=test_mode,
+                processing_trace=processing_trace,
             )
 
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
@@ -2245,6 +2373,24 @@ async def process_extratos_pdf_async(
         llm_service = get_llm_service()
         loop = asyncio.get_event_loop()
         extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+        processing_trace["pipeline"]["extracao_texto"] = {
+            "caracteres_extraidos": len(text),
+            "amostra": text[:1000],
+        }
+        processing_trace["pipeline"]["llm"] = {
+            "metodo": "extract_info_with_fallback",
+            "resultado": {
+                "cliente_sugerido": extraction.cliente_sugerido,
+                "cnpj": extraction.cnpj,
+                "banco": extraction.banco,
+                "agencia": extraction.agencia,
+                "conta": extraction.conta,
+                "contrato": extraction.contrato,
+                "tipo_documento": extraction.tipo_documento,
+                "confianca": extraction.confianca,
+            },
+            "observacao": "Trace estruturado do fluxo. Nao representa pensamentos internos da LLM.",
+        }
 
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
             raise asyncio.CancelledError("Cancelado pelo usuario")
@@ -2274,6 +2420,14 @@ async def process_extratos_pdf_async(
 
         matching_service = get_matching_service()
         match_result = matching_service.match(extraction, is_ofx=is_ofx)
+        processing_trace["pipeline"]["matching"] = {
+            "identificado": match_result.identificado,
+            "cliente": match_result.cliente.nome if match_result.identificado else None,
+            "cliente_cod": match_result.cliente.cod if match_result.identificado else None,
+            "metodo": match_result.metodo.value,
+            "score": match_result.score,
+            "motivo_fallback": match_result.motivo_fallback,
+        }
 
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.MATCHING_COMPLETED,
@@ -2336,6 +2490,13 @@ async def process_extratos_pdf_async(
                 conta_extrato=extraction.conta,
                 module="extratos",
             )
+        processing_trace["pipeline"]["armazenamento"] = {
+            "path": saved_path,
+            "ano": ano,
+            "mes": mes,
+            "banco": extraction.banco,
+            "tipo_documento": extraction.tipo_documento,
+        }
 
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.FILE_SAVED,
@@ -2351,6 +2512,11 @@ async def process_extratos_pdf_async(
         else:
             proc_status = ProcessingStatus.NAO_IDENTIFICADO
             cliente_nome = None
+
+        processing_trace["pipeline"]["resultado"] = {
+            "status": proc_status.value,
+            "cliente_identificado": cliente_nome,
+        }
 
         log_id = None
         if not test_mode:
@@ -2414,6 +2580,8 @@ async def process_extratos_pdf_async(
             except Exception as e:
                 logger.error(f"Erro ao salvar log de teste extratos baixados: {e}")
 
+        trace_path = _write_extratos_llm_trace(processing_trace, filename, file_hash)
+
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.PROCESSING_COMPLETED,
             filename=filename,
@@ -2428,6 +2596,7 @@ async def process_extratos_pdf_async(
                 "mes": mes,
                 "metodo": match_result.metodo.value,
                 "log_id": log_id,
+                "trace_json": trace_path,
             },
             progress=100
         ))
@@ -2477,6 +2646,7 @@ async def process_extratos_pdf_async(
             str(e),
             pdf_data=pdf_data,
             test_mode=test_mode,
+            processing_trace=processing_trace,
         )
 
 
@@ -2486,6 +2656,7 @@ async def create_extratos_failure_result(
     error: str,
     pdf_data: bytes | None = None,
     test_mode: bool = False,
+    processing_trace: dict | None = None,
 ) -> ProcessingResult:
     """Cria um resultado de falha para extratos baixados."""
     event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
@@ -2507,11 +2678,20 @@ async def create_extratos_failure_result(
         except Exception as e:
             logger.warning(f"Falha ao salvar arquivo com erro em NAO_IDENTIFICADOS: {e}")
 
+    trace_path = None
+    if processing_trace is not None:
+        processing_trace["pipeline"]["resultado"] = {
+            "status": ProcessingStatus.FALHA.value,
+            "erro": error,
+            "path_falha": saved_path,
+        }
+        trace_path = _write_extratos_llm_trace(processing_trace, filename, file_hash)
+
     await event_manager.emit(ProcessingEvent(
         event_type=EventType.PROCESSING_ERROR,
         filename=filename,
         message=error,
-        details={"path": saved_path} if saved_path else None,
+        details={"path": saved_path, "trace_json": trace_path} if saved_path or trace_path else None,
     ))
 
     event_manager.update_stats(falha=True)
@@ -2783,6 +2963,139 @@ async def assign_client_to_unidentified(payload: AssignClientRequest):
     except Exception as e:
         db.rollback()
         logger.error(f"Erro ao atualizar cliente manualmente: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        db.close()
+
+
+@app.post("/extratos/assign-client")
+async def assign_extratos_client_to_unidentified(payload: AssignClientRequest):
+    """Atualiza cliente de um log de extratos baixados e move o arquivo para a pasta selecionada."""
+    from app.database import SessionLocal
+    from app.models.extratos_baixados_log import ExtratosBaixadosLog
+    import shutil
+
+    db = SessionLocal()
+    try:
+        log = db.query(ExtratosBaixadosLog).filter(ExtratosBaixadosLog.id == payload.log_id).first()
+        if not log:
+            raise HTTPException(status_code=404, detail="Log nao encontrado")
+        if log.status not in {"NAO_IDENTIFICADO", "SUCESSO"}:
+            raise HTTPException(status_code=400, detail="Log nao permite troca manual de cliente")
+        old_status = log.status
+
+        client_service = get_client_service()
+        client_folder = payload.client_folder.strip() if payload.client_folder else None
+        client = None
+        client_base_path = None
+
+        if client_folder:
+            base_path = get_settings().base_path
+            client_base_path = base_path / client_folder
+            if not client_base_path.exists() or not client_base_path.is_dir():
+                raise HTTPException(status_code=404, detail="Pasta do cliente nao encontrada")
+            match = re.match(r"^\s*(\d{1,3})\s*-\s*(.+)$", client_folder)
+            cod = match.group(1).zfill(3) if match else None
+            nome = match.group(2).strip() if match else client_folder
+            client = ClientInfo(
+                cod=cod or (payload.client_cod or '').zfill(3),
+                nome=nome,
+                cnpj=log.cliente_cnpj,
+                folder_name=client_folder,
+                banco=log.banco,
+                agencia=log.agencia,
+                conta=log.conta,
+            )
+        else:
+            if not payload.client_cod:
+                raise HTTPException(status_code=400, detail="Cliente nao informado")
+            client = client_service.get_client_by_cod(payload.client_cod)
+            if not client:
+                raise HTTPException(status_code=404, detail="Cliente nao encontrado")
+
+        storage_service = get_storage_service()
+
+        source_path = Path(log.arquivo_salvo) if log.arquivo_salvo else None
+        if not source_path or not source_path.exists():
+            if log.arquivo_original:
+                fallback = storage_service.get_unidentified_path("extratos") / Path(log.arquivo_original).name
+                if fallback.exists():
+                    source_path = fallback
+
+        if not source_path or not source_path.exists():
+            raise HTTPException(status_code=404, detail="Arquivo fisico nao encontrado")
+
+        pdf_data = source_path.read_bytes()
+        if not client_base_path:
+            client_base_path = storage_service._resolve_client_path(client)
+        if not client_base_path:
+            raise HTTPException(status_code=400, detail="Pasta do cliente nao encontrada")
+
+        ano = log.ano or storage_service._get_previous_month()[0]
+        mes = log.mes or storage_service._get_previous_month()[1]
+        conta = storage_service._select_account(log.banco, log.conta, client.conta)
+
+        target_path = storage_service._build_path_structure(
+            client_base_path,
+            ano,
+            mes,
+            log.banco,
+            conta,
+        )
+        if not target_path.exists():
+            target_path.mkdir(parents=True, exist_ok=True)
+
+        target_filename = storage_service._build_filename(
+            log.banco,
+            log.tipo_documento,
+            pdf_data,
+            target_path,
+            log.arquivo_original or source_path.name,
+        )
+        target_full_path = target_path / target_filename
+        if target_full_path.exists():
+            suffix = target_full_path.suffix or ".pdf"
+            target_full_path = target_path / f"{target_full_path.stem}_{short_hash(pdf_data)}{suffix}"
+
+        try:
+            shutil.move(str(source_path), str(target_full_path))
+        except Exception as e:
+            logger.error(f"Erro ao mover arquivo de extratos baixados: {e}")
+            raise HTTPException(status_code=500, detail="Falha ao mover o arquivo")
+
+        log.cliente_nome = client.nome
+        log.cliente_cod = client.cod
+        log.cliente_cnpj = client.cnpj
+        log.status = "SUCESSO"
+        log.metodo_identificacao = "MANUAL"
+        log.arquivo_salvo = str(target_full_path)
+        if old_status == "NAO_IDENTIFICADO":
+            if log.erro:
+                log.erro = f"{log.erro} | Atualizado manualmente"
+            else:
+                log.erro = "Atualizado manualmente"
+
+        db.commit()
+        db.refresh(log)
+
+        event_manager = get_extratos_event_manager()
+        if old_status == "NAO_IDENTIFICADO":
+            event_manager.stats["nao_identificados"] = max(0, event_manager.stats["nao_identificados"] - 1)
+            event_manager.stats["sucesso"] += 1
+        await event_manager.emit_stats()
+
+        return {
+            "success": True,
+            "log_id": log.id,
+            "cliente": log.cliente_nome,
+            "path": log.arquivo_salvo,
+            "status": log.status,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        db.rollback()
+        logger.error(f"Erro ao atualizar cliente manualmente em extratos baixados: {e}")
         raise HTTPException(status_code=500, detail=str(e))
     finally:
         db.close()
@@ -4216,5 +4529,11 @@ if __name__ == "__main__":
     import uvicorn
     settings = get_settings()
     uvicorn.run("app.main:app", host="0.0.0.0", port=settings.port, reload=True)
+
+
+
+
+
+
 
 
