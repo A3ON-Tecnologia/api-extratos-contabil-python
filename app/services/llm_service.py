@@ -4,14 +4,24 @@ Serviço de integração com LLM via LangChain.
 Utiliza OpenAI para extrair informações estruturadas de documentos.
 """
 
+import hashlib
 import json
 import logging
 import re
+import threading
 import unicodedata
 
+try:
+    from langchain.text_splitter import RecursiveCharacterTextSplitter
+except ImportError:
+    try:
+        from langchain_text_splitters import RecursiveCharacterTextSplitter
+    except ImportError:
+        RecursiveCharacterTextSplitter = None
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import JsonOutputParser
+from rapidfuzz import fuzz, process
 
 from app.config import get_settings
 from app.services.client_service import ClientService
@@ -19,6 +29,122 @@ from app.utils.text import extract_numbers
 from app.schemas.llm_response import LLMExtractionResult
 
 logger = logging.getLogger(__name__)
+
+TIPO_KEYWORDS: list[tuple[str, list[str]]] = [
+    (
+        "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS LIQUIDADAS",
+        ["PAR RELATORIO SELECAO DE OPERACOES PARCELAS LIQUIDADAS"],
+    ),
+    (
+        "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS EM ABERTO",
+        ["PAR RELATORIO SELECAO DE OPERACOES PARCELAS EM ABERTO"],
+    ),
+    (
+        "EXTRATO DA CONTA CAPITAL",
+        [
+            "EXTRATO DA CONTA CAPITAL",
+            "EXTRATO DE CONTA CAPITAL",
+            "CONTA CAPITAL",
+            "CAPITAL SOCIAL",
+        ],
+    ),
+    (
+        "EXTRATO CONSOLIDADO RENDA FIXA",
+        [
+            "EXTRATO CONSOLIDADO RENDA FIXA",
+            "CONSOLIDADO RENDA FIXA",
+            "RENDA FIXA CONSOLIDADA",
+        ],
+    ),
+    (
+        "EXTRATO APLICACAO",
+        [
+            "RENDE FACIL",
+            "EXTRATO DE APLICACAO",
+            "EXTRATO APLICACAO",
+            "APLICACAO FINANCEIRA",
+            "CDB",
+            "LCI",
+            "LCA",
+            "FUNDO DE INVESTIMENTO",
+            "EXTRATO DE INVESTIMENTO",
+        ],
+    ),
+    (
+        "EXTRATO CONTA POUPANCA",
+        [
+            "EXTRATO DE POUPANCA",
+            "EXTRATO CONTA POUPANCA",
+            "CADERNETA DE POUPANCA",
+            "CONTA POUPANCA",
+            "EXTRATO DE CADERNETA",
+        ],
+    ),
+    (
+        "EXTRATO EMPRESTIMO",
+        [
+            "EXTRATO DE OPERACAO DE CREDITO",
+            "EXTRATO DE EMPRESTIMO",
+            "NUMERO DO CONTRATO",
+            "OPERACAO DE CREDITO",
+            "CONTRATO DE EMPRESTIMO",
+            "CREDITO RURAL",
+            "FINANCIAMENTO",
+        ],
+    ),
+    (
+        "EXTRATO CONSORCIO",
+        ["EXTRATO DE CONSORCIO", "CONSORCIO", "GRUPO DE CONSORCIO"],
+    ),
+    ("CONTA GRAFICA DETALHADA", ["CONTA GRAFICA DETALHADA"]),
+    ("CONTA GRAFICA SIMPLIFICADA", ["CONTA GRAFICA SIMPLIFICADA"]),
+    (
+        "EXTRATO DE FATURA DE CARTAO DE CREDITO",
+        [
+            "FATURA DE CARTAO DE CREDITO",
+            "EXTRATO DE FATURA",
+            "CREDITO ROTATIVO",
+            "CARTAO DE CREDITO",
+            "FATURA DO CARTAO",
+        ],
+    ),
+    (
+        "REL RECEBIMENTO",
+        [
+            "TITULOS POR PERIODO",
+            "RELATORIO DE RECEBIMENTO",
+            "TITULOS CADASTRADOS",
+            "RECEBIMENTO DE TITULOS",
+        ],
+    ),
+    ("EXTRATO PIX", ["EXTRATO PIX", "TRANSFERENCIA PIX", "EXTRATO DE PIX"]),
+    (
+        "EXTRATO DE CONTA CORRENTE",
+        [
+            "EXTRATO DE CONTA CORRENTE",
+            "EXTRATO CONTA CORRENTE",
+            "MOVIMENTACAO BANCARIA",
+            "EXTRATO BANCARIO",
+            "CONTA CORRENTE",
+        ],
+    ),
+]
+
+TIPOS_CANONICOS: list[str] = [tipo for tipo, _ in TIPO_KEYWORDS]
+
+TIPO_ALIASES: dict[str, str] = {
+    "CC": "EXTRATO DE CONTA CORRENTE",
+    "CARTAO": "EXTRATO DE FATURA DE CARTAO DE CREDITO",
+    "POUPANCA": "EXTRATO CONTA POUPANCA",
+    "CONTA CORRENTE": "EXTRATO DE CONTA CORRENTE",
+    "CONTA POUPANCA": "EXTRATO CONTA POUPANCA",
+    "CONTA CAPITAL": "EXTRATO DA CONTA CAPITAL",
+    "FATURA DE CARTAO": "EXTRATO DE FATURA DE CARTAO DE CREDITO",
+    "EXTRATO APLICACAO": "EXTRATO APLICACAO",
+    "EXTRATO EMPRESTIMO": "EXTRATO EMPRESTIMO",
+    "EXTRATO CONSORCIO": "EXTRATO CONSORCIO",
+    "EXTRATO CONTA POUPANCA": "EXTRATO CONTA POUPANCA",
+}
 
 # Prompt do sistema para extração de informações
 SYSTEM_PROMPT = """Você é um assistente especializado em análise de documentos financeiros e bancários.
@@ -370,8 +496,227 @@ class LLMService:
             temperature=0,  # Respostas mais determinísticas
             max_tokens=1000,
         )
-        
+
         self.parser = JsonOutputParser()
+
+        # Cache de extração por hash de arquivo
+        self._extraction_cache: dict[str, LLMExtractionResult] = {}
+        self._extraction_cache_lock = threading.Lock()
+        self._extraction_cache_max = 200
+        self._extraction_cache_hits = 0
+        self._extraction_cache_misses = 0
+
+    def _compute_file_hash(self, pdf_data: bytes | None, text: str) -> str:
+        """Computa MD5 do conteúdo do arquivo para uso como chave de cache."""
+        content = pdf_data if pdf_data else text.encode("utf-8", errors="replace")
+        return hashlib.md5(content).hexdigest()
+
+    def _get_cached_extraction(self, file_hash: str) -> LLMExtractionResult | None:
+        """Retorna resultado cacheado para o hash, ou None se não estiver no cache."""
+        with self._extraction_cache_lock:
+            cached = self._extraction_cache.get(file_hash)
+            if cached is not None:
+                self._extraction_cache_hits += 1
+                logger.info(
+                    "[EXTRACTION_CACHE] hit | hash=%s | tipo=%s confianca=%.2f",
+                    file_hash[:8],
+                    cached.tipo_documento,
+                    cached.confianca,
+                )
+                return cached.model_copy()
+            self._extraction_cache_misses += 1
+            return None
+
+    def _store_cached_extraction(self, file_hash: str, result: LLMExtractionResult) -> None:
+        """Armazena resultado no cache, evictando o mais antigo se atingir limite."""
+        with self._extraction_cache_lock:
+            if len(self._extraction_cache) >= self._extraction_cache_max:
+                oldest_key = next(iter(self._extraction_cache))
+                del self._extraction_cache[oldest_key]
+            self._extraction_cache[file_hash] = result.model_copy()
+
+    def get_extraction_cache_stats(self) -> dict:
+        """Retorna estatísticas do cache de extração."""
+        with self._extraction_cache_lock:
+            total = self._extraction_cache_hits + self._extraction_cache_misses
+            hit_rate = self._extraction_cache_hits / total if total > 0 else 0.0
+            return {
+                "size": len(self._extraction_cache),
+                "max_size": self._extraction_cache_max,
+                "hits": self._extraction_cache_hits,
+                "misses": self._extraction_cache_misses,
+                "hit_rate": round(hit_rate, 3),
+            }
+
+    def clear_extraction_cache(self) -> None:
+        """Limpa o cache de extração e reseta os contadores."""
+        with self._extraction_cache_lock:
+            self._extraction_cache.clear()
+            self._extraction_cache_hits = 0
+            self._extraction_cache_misses = 0
+        logger.info("[EXTRACTION_CACHE] cache limpo")
+
+    def _extract_header_chunk(self, text: str) -> str:
+        """Extrai um chunk inicial do documento, priorizando o cabecalho."""
+        if not text:
+            return ""
+
+        if RecursiveCharacterTextSplitter is None:
+            lines = [line.strip() for line in text.splitlines() if line.strip()]
+            header = "\n".join(lines[:12]).strip()
+            return header[:500] if header else text[:500]
+
+        splitter = RecursiveCharacterTextSplitter(
+            chunk_size=500,
+            chunk_overlap=0,
+            separators=["\n\n", "\n", " ", ""],
+        )
+        chunks = splitter.split_text(text)
+        if not chunks:
+            return text[:500]
+        return chunks[0]
+
+    def _classify_from_keywords(self, text: str) -> str | None:
+        """Classifica tipo por keywords priorizadas."""
+        normalized = self._normalize_text_for_hint(text)
+        for tipo, keywords in TIPO_KEYWORDS:
+            if any(keyword in normalized for keyword in keywords):
+                return tipo
+        return None
+
+    def _classify_from_fuzzy(
+        self,
+        text: str,
+        threshold: int = 80,
+    ) -> tuple[str, float] | None:
+        """Classifica tipo por similaridade fuzzy contra os tipos canonicos."""
+        normalized = self._normalize_text_for_hint(text)
+        if not normalized:
+            return None
+
+        result = process.extractOne(
+            normalized,
+            TIPOS_CANONICOS,
+            scorer=fuzz.token_sort_ratio,
+            score_cutoff=threshold,
+        )
+        if result is None:
+            return None
+
+        tipo, score, _ = result
+        return tipo, round(score / 100, 2)
+
+    def _normalize_tipo_documento(self, tipo: str | None) -> str | None:
+        """Normaliza variacoes do tipo retornado para o valor canonico."""
+        if not tipo:
+            return tipo
+
+        normalized = self._normalize_text_for_hint(tipo)
+        if not normalized:
+            return tipo
+
+        if normalized in TIPO_ALIASES:
+            return TIPO_ALIASES[normalized]
+        if normalized in TIPOS_CANONICOS:
+            return normalized
+        return tipo.strip().upper()
+
+    def _build_human_message(self, text: str, tipo_hint: str | None = None) -> str:
+        """Monta a mensagem enviada para a LLM com hint opcional."""
+        hint_block = ""
+        if tipo_hint:
+            hint_block = (
+                "\n\n<dica_pre_analise>"
+                f"\nAnalise textual preliminar sugere: tipo_documento = \"{tipo_hint}\""
+                "\nConfirme ou corrija com base no texto completo."
+                "\n</dica_pre_analise>"
+            )
+        return f"TEXTO DO DOCUMENTO:{hint_block}\n\n{text}"
+
+    def _get_tipo_analysis_text(self, text: str, is_pdf: bool = False) -> str:
+        """
+        Define o recorte usado para classificar tipo.
+
+        Para PDF, prioriza apenas o inicio do documento, onde o cabecalho
+        normalmente ja informa o tipo e evita ruido do corpo.
+        """
+        if not text:
+            return ""
+        if not is_pdf:
+            return text
+        return text[:3500]
+
+    def _apply_tipo_classification_pipeline(
+        self,
+        result: LLMExtractionResult,
+        text: str,
+    ) -> LLMExtractionResult:
+        """Aplica heuristicas deterministicas antes e depois da LLM."""
+        result.tipo_documento = self._normalize_tipo_documento(result.tipo_documento)
+
+        header_chunk = self._extract_header_chunk(text)
+        header_keyword = self._classify_from_keywords(header_chunk)
+        if header_keyword:
+            if result.tipo_documento != header_keyword:
+                logger.info(
+                    "Tipo ajustado por keyword no cabecalho: %s -> %s",
+                    result.tipo_documento,
+                    header_keyword,
+                )
+            result.tipo_documento = header_keyword
+            result.confianca = max(result.confianca, 0.95)
+            return result
+
+        current_tipo = self._normalize_tipo_documento(result.tipo_documento)
+        generic_or_low_confidence = current_tipo in (
+            None,
+            "OUTROS",
+            "EXTRATO DE CONTA CORRENTE",
+        ) or result.confianca < 0.82
+
+        if generic_or_low_confidence:
+            fuzzy_header = self._classify_from_fuzzy(header_chunk, threshold=82)
+            if fuzzy_header:
+                tipo_fuzzy, conf_fuzzy = fuzzy_header
+                logger.info(
+                    "Tipo ajustado por fuzzy no cabecalho: %s -> %s (score=%.0f%%)",
+                    result.tipo_documento,
+                    tipo_fuzzy,
+                    conf_fuzzy * 100,
+                )
+                result.tipo_documento = tipo_fuzzy
+                result.confianca = max(result.confianca, round(conf_fuzzy * 0.9, 2))
+                return result
+
+        if (
+            result.confianca < 0.70
+            and current_tipo in (None, "OUTROS", "EXTRATO DE CONTA CORRENTE")
+            and len(text) > 500
+        ):
+            tipo_fallback = self._classify_from_keywords(text)
+            if tipo_fallback and tipo_fallback != current_tipo:
+                logger.info(
+                    "Tipo ajustado por segunda passagem de keywords: %s -> %s",
+                    result.tipo_documento,
+                    tipo_fallback,
+                )
+                result.tipo_documento = tipo_fallback
+                result.confianca = max(result.confianca, 0.75)
+                return result
+
+            fuzzy_full = self._classify_from_fuzzy(text, threshold=78)
+            if fuzzy_full:
+                tipo_fuzzy, conf_fuzzy = fuzzy_full
+                logger.info(
+                    "Tipo ajustado por segunda passagem fuzzy: %s -> %s (score=%.0f%%)",
+                    result.tipo_documento,
+                    tipo_fuzzy,
+                    conf_fuzzy * 100,
+                )
+                result.tipo_documento = tipo_fuzzy
+                result.confianca = max(result.confianca, round(conf_fuzzy * 0.85, 2))
+
+        return result
 
     def _normalize_account_field(self, value: str) -> str:
         """
@@ -387,6 +732,8 @@ class LLMService:
         if not value:
             return value
         # Remove caracteres não numéricos
+        value = re.sub(r"(?i)(\d)\s*-\s*x\b", r"\g<1>-0", value.strip())
+        value = re.sub(r"(?i)(\d)\s*x\b", r"\g<1>0", value)
         only_numbers = re.sub(r'[^0-9]', '', value)
         # Remove zeros à esquerda (mas mantém "0" se for só zeros)
         return only_numbers
@@ -412,11 +759,14 @@ class LLMService:
         max_chars = 15000
         if len(text) > max_chars:
             text = text[:max_chars] + "\n\n[TEXTO TRUNCADO...]"
+
+        header_chunk = self._extract_header_chunk(text)
+        tipo_hint = self._classify_from_keywords(header_chunk)
         
         # Monta as mensagens para a LLM
         messages = [
             SystemMessage(content=self._select_system_prompt(text)),
-            HumanMessage(content=f"TEXTO DO DOCUMENTO:\n\n{text}"),
+            HumanMessage(content=self._build_human_message(text, tipo_hint=tipo_hint)),
         ]
         
         try:
@@ -439,6 +789,11 @@ class LLMService:
             
             # Valida e converte para o schema Pydantic
             result = LLMExtractionResult(**data)
+            result.tipo_documento = self._normalize_tipo_documento(result.tipo_documento)
+
+            if tipo_hint:
+                result.tipo_documento = tipo_hint
+                result.confianca = max(result.confianca, 0.95)
 
             # Normaliza agência e conta (remove pontos, hifens, mantém apenas números)
             if result.agencia:
@@ -477,13 +832,33 @@ class LLMService:
             Resultado da extração (real ou fallback)
         """
         try:
+            # Verifica cache antes de chamar a LLM
+            file_hash = self._compute_file_hash(pdf_data, text or "")
+            cached = self._get_cached_extraction(file_hash)
+            if cached is not None:
+                return cached
+
             analysis_text = text or ""
+            tipo_analysis_text = self._get_tipo_analysis_text(
+                analysis_text,
+                is_pdf=pdf_data is not None and not self._is_ofx_text(analysis_text),
+            )
             if pdf_data and self._needs_header_ocr(analysis_text):
                 header_text = self._try_extract_header_text(pdf_data)
                 if header_text:
                     analysis_text = f"{header_text}\n\n{analysis_text}"
+                    tipo_analysis_text = self._get_tipo_analysis_text(
+                        analysis_text,
+                        is_pdf=not self._is_ofx_text(analysis_text),
+                    )
 
             result = self.extract_info(analysis_text)
+
+            # Captura tipo e confiança da LLM antes do pipeline (para auditoria)
+            tipo_llm = result.tipo_documento
+            confianca_llm = result.confianca
+
+            result = self._apply_tipo_classification_pipeline(result, tipo_analysis_text)
 
             # Heurística textual: confirma banco por pistas fortes no texto
             banco_hint = self._infer_bank_from_text_hints(analysis_text)
@@ -536,17 +911,22 @@ class LLMService:
 
 
             # Heurística textual: RENDE FACIL indica extrato de investimento
-            if self._has_rende_facil_hint(analysis_text):
+            if (
+                self._has_rende_facil_hint(tipo_analysis_text)
+                and result.tipo_documento not in ("EXTRATO DE CONTA CORRENTE",)
+            ):
                 result.tipo_documento = "EXTRATO APLICACAO"
                 if result.confianca < 0.8:
                     result.confianca = 0.8
 
             # Heuristica textual: relatorio PAR do SICOOB (parcelas em aberto/liquidadas)
-            par_tipo = self._detect_par_report_type(analysis_text)
+            par_tipo = self._detect_par_report_type(tipo_analysis_text)
             if par_tipo:
                 result.tipo_documento = par_tipo
                 if result.confianca < 0.85:
                     result.confianca = 0.85
+
+            result = self._apply_tipo_classification_pipeline(result, tipo_analysis_text)
 
             # Se o banco não foi identificado, tenta OCR (visão) no PDF
             if (not result.banco or result.banco == "null") and pdf_data:
@@ -587,6 +967,34 @@ class LLMService:
                     result.banco = banco_planilha
                     if result.confianca < 0.8:
                         result.confianca = 0.8
+
+            # Log de auditoria: tipo LLM vs tipo final após todo o pipeline
+            if tipo_llm != result.tipo_documento:
+                logger.info(
+                    "[TIPO_AUDIT] corrigido | LLM='%s' (%.2f) → FINAL='%s' (%.2f)",
+                    tipo_llm,
+                    confianca_llm,
+                    result.tipo_documento,
+                    result.confianca,
+                )
+            else:
+                logger.debug(
+                    "[TIPO_AUDIT] mantido   | LLM='%s' (%.2f) → FINAL='%s' (%.2f)",
+                    tipo_llm,
+                    confianca_llm,
+                    result.tipo_documento,
+                    result.confianca,
+                )
+
+            # Armazena no cache apenas resultados com confiança mínima aceitável
+            if result.confianca >= 0.5:
+                self._store_cached_extraction(file_hash, result)
+                logger.debug(
+                    "[EXTRACTION_CACHE] stored | hash=%s | tipo=%s confianca=%.2f",
+                    file_hash[:8],
+                    result.tipo_documento,
+                    result.confianca,
+                )
 
             return result
 
@@ -725,6 +1133,10 @@ class LLMService:
         if "SAC 0800 729 0722" in normalized:
             return "BANCO DO BRASIL"
         if "BANCO DO BRASIL" in normalized or "BANCO DO BRASIL SA" in normalized:
+            return "BANCO DO BRASIL"
+        if "VISUALIZAR PIX AGRUPADOS" in normalized and "CLIENTE CONTA ATUAL" in normalized:
+            return "BANCO DO BRASIL"
+        if "CLIENTE CONTA ATUAL" in normalized and "CONTA CORRENTE" in normalized:
             return "BANCO DO BRASIL"
 
         return None

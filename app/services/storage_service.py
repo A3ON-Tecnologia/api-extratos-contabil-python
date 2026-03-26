@@ -1,7 +1,7 @@
 """
-Serviço de armazenamento de arquivos.
+Servico de armazenamento de arquivos.
 
-Responsável por salvar os PDFs no caminho correto da estrutura
+Responsavel por salvar os PDFs no caminho correto da estrutura
 de pastas em rede Windows.
 """
 
@@ -14,11 +14,11 @@ from app.schemas.client import ClientInfo, MatchResult
 
 logger = logging.getLogger(__name__)
 
-# Mapeamento de número do mês para nome da pasta
+# Mapeamento de numero do mes para nome da pasta
 MONTH_NAMES = {
     1: "JANEIRO",
     2: "FEVEREIRO",
-    3: "MARÇO",
+    3: "MARCO",
     4: "ABRIL",
     5: "MAIO",
     6: "JUNHO",
@@ -35,43 +35,45 @@ DOCUMENT_TYPE_MAPPING = {
     "EXTRATO DA CONTA CAPITAL": "EXTRATO DA CONTA CAPITAL",
     "EXTRATO DE CONTA CORRENTE": "EXTRATO DE CONTA CORRENTE",
     "EXTRATO CONSOLIDADO RENDA FIXA": "EXTRATO CONSOLIDADO RENDA FIXA",
-    "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO": "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO",
-    "EXTRATO DE FATURA": "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO",
-    "RELATÓRIO - TÍTULOS POR PERÍODO": "REL RECEBIMENTO",
+    "EXTRATO DE FATURA DE CARTAO DE CREDITO": "EXTRATO DE FATURA DE CARTAO DE CREDITO",
+    "EXTRATO DE FATURA": "EXTRATO DE FATURA DE CARTAO DE CREDITO",
+    "RELATORIO - TITULOS POR PERIODO": "REL RECEBIMENTO",
     "RELATORIO TITULOS POR PERIODO": "REL RECEBIMENTO",
-    "EXTRATO CONTA POUPANÇA": "EXTRATO CONTA POUPANÇA",
-    "SALDO DE APLICAÇÃO": "EXTRATO APLICAÇÃO",
-    "EXTRATO APLICAÇÃO": "EXTRATO APLICAÇÃO",
-    "CONTA GRÁFICA DETALHADA": "CONTA GRÁFICA DETALHADA",
-    "CONTA GRÁFICA SIMPLIFICADA": "CONTA GRÁFICA SIMPLIFICADA",
+    "EXTRATO CONTA POUPANCA": "EXTRATO CONTA POUPANCA",
+    "SALDO DE APLICACAO": "EXTRATO APLICACAO",
+    "EXTRATO APLICACAO": "EXTRATO APLICACAO",
+    "CONTA GRAFICA DETALHADA": "CONTA GRAFICA DETALHADA",
+    "CONTA GRAFICA SIMPLIFICADA": "CONTA GRAFICA SIMPLIFICADA",
     "CC": "EXTRATO DE CONTA CORRENTE",
-    "POUPANÇA": "EXTRATO CONTA POUPANÇA",
-    "CARTÃO": "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO",
+    "POUPANCA": "EXTRATO CONTA POUPANCA",
+    "CARTAO": "EXTRATO DE FATURA DE CARTAO DE CREDITO",
+    "EXTRATO EMPRESTIMO": "EXTRATO EMPRESTIMO",
+    "EXTRATO CONSORCIO": "EXTRATO CONSORCIO",
     "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS LIQUIDADAS": "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS LIQUIDADAS",
     "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS EM ABERTO": "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS EM ABERTO",
 }
 
 
 class StorageService:
-    """Serviço de armazenamento de arquivos."""
-    
+    """Servico de armazenamento de arquivos."""
+
     def __init__(self):
-        """Inicializa o serviço."""
+        """Inicializa o servico."""
         self.settings = get_settings()
-    
+
     def _get_previous_month(self) -> tuple[int, int]:
         """
-        Retorna o mês anterior ao atual.
-        
+        Retorna o mes anterior ao atual.
+
         Returns:
-            Tupla (ano, mes) do mês anterior
+            Tupla (ano, mes) do mes anterior
         """
         now = datetime.now()
         if now.month == 1:
             return (now.year - 1, 12)
         else:
             return (now.year, now.month - 1)
-    
+
     def _is_cresol(self, banco: str | None) -> bool:
         """Verifica se o banco e Cresol."""
         if not banco:
@@ -102,37 +104,31 @@ class StorageService:
         """
         Salva o arquivo PDF no caminho correto.
 
-        Usa automaticamente o mês anterior ao processamento como período do documento.
+        Usa automaticamente o mes anterior ao processamento como periodo do documento.
         Estrutura: ANO/MES/BANCO/CONTA/arquivo.pdf
         Cria a hierarquia de pastas quando necessario.
 
         Args:
-            conta_extrato: Número da conta extraído do extrato (prioritário sobre a conta da planilha)
+            conta_extrato: Numero da conta extraido do extrato (prioritario sobre a conta da planilha)
 
         Returns:
             Tupla (caminho_salvo, ano, mes)
         """
-        # Usa automaticamente o mês anterior
         ano, mes = self._get_previous_month()
 
         target_path = None
         filename = None
 
         if match_result.identificado:
-            # Tenta resolver o caminho do cliente validando existência
             client_base_path = self._resolve_client_path(match_result.cliente)
 
             if client_base_path:
-                # Pasta padrão: cliente/Departamento Contabil/ANO/MES
                 target_path = self._build_path_structure(client_base_path, ano, mes)
-
-                # Garante que a pasta do mes existe
                 month_path = self._build_path_structure(client_base_path, ano, mes)
                 if not month_path.exists():
                     logger.info(f"Criando pasta do mes: {month_path}")
                     month_path.mkdir(parents=True, exist_ok=True)
 
-                # Garante que a pasta do mes existe
                 if not target_path.exists():
                     logger.info(f"Criando pasta do mes: {target_path}")
                     target_path.mkdir(parents=True, exist_ok=True)
@@ -142,57 +138,47 @@ class StorageService:
                     tipo_documento,
                     pdf_data,
                     target_path,
-                    original_filename
+                    original_filename,
                 )
             else:
                 logger.warning(
-                    f"Estrutura de pastas não encontrada para cliente {match_result.cliente.cod}. "
+                    f"Estrutura de pastas nao encontrada para cliente {match_result.cliente.cod}. "
                     "Salvando em NAO_IDENTIFICADOS."
                 )
-        
-        # Fallback: salva direto na pasta NAO_IDENTIFICADOS (sem subpastas)
+
         if not target_path:
             target_path = self.get_unidentified_path(module)
-            
-            # Verifica se a pasta de não identificados existe
             if not target_path.exists():
                 logger.warning(f"Pasta NAO_IDENTIFICADOS nao encontrada, criando: {target_path}")
                 target_path.mkdir(parents=True, exist_ok=True)
-            
             filename = original_filename
-        
-        # Salva o arquivo garantindo nome Ãºnico (sequencial)
+
         filename = filename or "DOCUMENTO.pdf"
         filename, full_path = self._write_bytes_unique(target_path, filename, pdf_data)
-        
+
         logger.info(f"Arquivo salvo: {full_path}")
         return (str(full_path), ano, mes)
 
     def _resolve_client_path(self, client: ClientInfo) -> Path | None:
         """
         Resolve o caminho base do cliente, verificando se existe.
-        
+
         Tenta encontrar a pasta do cliente no formato "COD - NOME".
-        
-        Returns:
-            Path da pasta do cliente ou None se não encontrada
         """
-        # Formato padrão: "098 - NOME DO CLIENTE"
         folder_name = f"{client.cod} - {client.nome}"
         client_path = self.settings.base_path / folder_name
-        
+
         if client_path.exists():
             return client_path
-        
-        # Tenta buscar por código se o nome exato não bater
+
         pattern = f"{client.cod} - *"
         matches = list(self.settings.base_path.glob(pattern))
-        
+
         if matches:
             return matches[0]
-        
+
         return None
-    
+
     def _build_path_structure(
         self,
         client_base_path: Path,
@@ -202,51 +188,37 @@ class StorageService:
         conta: str | None = None,
     ) -> Path:
         """
-        Constrói a estrutura de pastas dentro da pasta do cliente.
+        Constroi a estrutura de pastas dentro da pasta do cliente.
 
-        Estrutura padrão: cliente/Departamento Contabil/ANO/MES
+        Estrutura padrao: cliente/Departamento Contabil/ANO/MES
         NUNCA cria subpastas por banco ou conta.
-
-        Aceita tanto "Departamento Contábil" quanto "Departamento Contabil" (sem acento)
         """
-        # Mês como número com 2 dígitos (01, 02, ..., 12)
         mes_str = str(mes).zfill(2)
 
-        # Tenta com acento primeiro
         dept_path = client_base_path / "Departamento Contábil"
         if dept_path.exists():
             base_path = dept_path / str(ano) / mes_str
         else:
-            # Tenta sem acento
             dept_path_sem_acento = client_base_path / "Departamento Contabil"
             if dept_path_sem_acento.exists():
                 base_path = dept_path_sem_acento / str(ano) / mes_str
             else:
-                # Retorna o padrão com acento (mesmo que não exista, será tratado depois)
                 base_path = client_base_path / "Departamento Contábil" / str(ano) / mes_str
 
         return base_path
-    
+
     def _build_unidentified_path(self, ano: int, mes: int, module: str = "make") -> Path:
-        """
-        Constrói o caminho para arquivos não identificados.
-        
-        Estrutura: NAO_IDENTIFICADOS/ANO/MÊS
-        """
+        """Constroi o caminho para arquivos nao identificados."""
         mes_nome = MONTH_NAMES.get(mes, f"MES_{mes}")
         return self.get_unidentified_path(module) / str(ano) / mes_nome
 
     def get_unidentified_path(self, module: str = "make") -> Path:
-        """
-        Retorna o caminho base de NAO_IDENTIFICADOS conforme o módulo.
-        module: "make" | "extratos"
-        """
+        """Retorna o caminho base de NAO_IDENTIFICADOS conforme o modulo."""
         module_norm = (module or "make").lower()
         if module_norm.startswith("extra"):
             return self.settings.unidentified_extratos_path
         return self.settings.unidentified_make_path
 
-    
     def _build_filename(
         self,
         banco: str | None,
@@ -256,67 +228,43 @@ class StorageService:
         original_filename: str = "",
     ) -> str:
         """
-        Constrói o nome do arquivo usando o mapeamento de tipos de documento.
+        Constroi o nome do arquivo usando o mapeamento de tipos de documento.
 
         Formato: NOME_DO_TIPO_DOCUMENTO.pdf
-        Ex: EXTRATO DE CONTA CORRENTE.pdf
         """
-        # Extensão (pega do original ou assume .pdf)
         ext = Path(original_filename).suffix.lower() if original_filename else ".pdf"
         if not ext:
             ext = ".pdf"
 
-        # Tenta mapear o tipo de documento
         if tipo_documento:
-            # Normaliza o tipo para uppercase para buscar no mapeamento
             tipo_upper = tipo_documento.upper()
-
-            # Busca no mapeamento (case-insensitive)
             mapped_name = None
             for key, value in DOCUMENT_TYPE_MAPPING.items():
                 if key.upper() == tipo_upper:
                     mapped_name = value
                     break
 
-            # Se encontrou no mapeamento, usa o nome mapeado
             if mapped_name:
                 filename = f"{mapped_name}{ext}"
             else:
-                # Se não encontrou, usa o tipo original
                 filename = f"{tipo_documento}{ext}"
         else:
-            # Fallback: usa banco se disponível
             if banco:
                 filename = f"EXTRATO_{banco.upper()}{ext}"
             else:
                 filename = f"DOCUMENTO{ext}"
 
-        # Se já existir arquivo com mesmo nome, será sobrescrito
         return filename
-    
+
     def _write_bytes_unique(
         self,
         target_path: Path,
         desired_filename: str,
         data: bytes,
-        max_attempts: int = 1000
+        max_attempts: int = 1000,
     ) -> tuple[str, Path]:
         """
-        Salva bytes garantindo nome único com sufixo incremental (_1, _2, ...).
-
-        Usa criação exclusiva para evitar sobrescrita em execução concorrente.
-
-        Args:
-            target_path: Diretório de destino
-            desired_filename: Nome desejado para o arquivo
-            data: Dados binários a serem salvos
-            max_attempts: Número máximo de tentativas (padrão: 1000)
-
-        Returns:
-            Tupla (nome_final, caminho_completo)
-
-        Raises:
-            RuntimeError: Se exceder max_attempts tentativas
+        Salva bytes garantindo nome unico com sufixo incremental (_1, _2, ...).
         """
         target_path.mkdir(parents=True, exist_ok=True)
         desired_path = Path(desired_filename)
@@ -334,41 +282,22 @@ class StorageService:
             except FileExistsError:
                 counter += 1
 
-        # Se chegou aqui, excedeu o limite
         raise RuntimeError(
-            f"Não foi possível criar arquivo único após {max_attempts} tentativas. "
+            f"Nao foi possivel criar arquivo unico apos {max_attempts} tentativas. "
             f"Base: {stem}{suffix}"
         )
 
-    # Métodos obsoletos removidos (_ensure_unique_filename e _ensure_unique_filename_incremental)
-    # A lógica foi consolidada no método _write_bytes_unique() que é thread-safe
-
     def check_folder_exists(self, client: ClientInfo) -> bool:
-        """
-        Verifica se a pasta do cliente existe.
-        
-        Útil para validação antes do salvamento.
-        """
+        """Verifica se a pasta do cliente existe."""
         client_path = self.settings.base_path / client.folder_name
         return client_path.exists()
-    
+
     def find_client_folder(self, cod: str) -> Path | None:
-        """
-        Procura a pasta do cliente pelo código.
-        
-        Busca pastas que começam com o código especificado.
-        Útil quando o nome exato não é conhecido.
-        
-        Args:
-            cod: Código do cliente (ex: "098")
-            
-        Returns:
-            Path da pasta encontrada ou None
-        """
+        """Procura a pasta do cliente pelo codigo."""
         pattern = f"{cod} - *"
         matches = list(self.settings.base_path.glob(pattern))
-        
+
         if matches:
             return matches[0]
-        
+
         return None

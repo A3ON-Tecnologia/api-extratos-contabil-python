@@ -20,6 +20,22 @@ from app.utils.hash import compute_hash
 
 logger = logging.getLogger(__name__)
 
+# Bancos válidos como subpasta de entrada (excluindo OUTROS, que não é banco definido)
+_BANCOS_VALIDOS_PASTA = {
+    "BANCO DO BRASIL", "BRADESCO", "CAIXA", "CRESOL",
+    "ITAU", "SANTANDER", "SICREDI", "SICOOB",
+}
+
+
+def _banco_from_folder_path(filename: str) -> str | None:
+    """Retorna o banco a partir da subpasta do arquivo (ex: 'BANCO DO BRASIL\\arquivo.pdf' → 'BANCO DO BRASIL').
+    Retorna None se a subpasta for OUTROS ou não reconhecida.
+    """
+    if not filename:
+        return None
+    first_part = Path(filename).parts[0].upper() if Path(filename).parts else None
+    return first_part if first_part in _BANCOS_VALIDOS_PASTA else None
+
 
 class ExtratosBaixadosSimulacaoService:
     """Servico para simular o processamento de extratos baixados."""
@@ -49,6 +65,17 @@ class ExtratosBaixadosSimulacaoService:
         extraction = await loop.run_in_executor(
             executor, self._llm_service.extract_info_with_fallback, text, pdf_data
         )
+
+        # Banco da subpasta tem prioridade máxima — é fonte de verdade confirmada pelo operador
+        banco_pasta = _banco_from_folder_path(filename)
+        if banco_pasta and banco_pasta != extraction.banco:
+            logger.info(
+                "[BANCO_PASTA] Banco corrigido: LLM='%s' → PASTA='%s' (%s)",
+                extraction.banco,
+                banco_pasta,
+                filename,
+            )
+            extraction.banco = banco_pasta
 
         match_result = self._matching_service.match(extraction)
         ano, mes = self._storage_service._get_previous_month()

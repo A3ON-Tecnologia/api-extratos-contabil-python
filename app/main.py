@@ -59,6 +59,7 @@ from app.services.db_extratos_baixados_log_teste_service import (
 )
 from app.services.reversao_service import get_reversao_service
 from app.services.extratos_baixados_reversao_service import get_extratos_baixados_reversao_service
+from app.services.excel_extractor_service import get_excel_extractor_service
 from app.services.extratos_baixados_simulacao_service import (
     ExtratosBaixadosSimulacaoService,
 )
@@ -222,6 +223,20 @@ EXTRATOS_INPUT_BANK_FOLDERS = (
     "OUTROS",
 )
 EXTRATOS_TRACE_FOLDER = "_LLM_TRACE"
+
+# Bancos válidos como subpasta (excluindo OUTROS)
+_BANCOS_VALIDOS_PASTA = set(EXTRATOS_INPUT_BANK_FOLDERS) - {"OUTROS"}
+
+
+def _banco_from_folder_path(filename: str) -> str | None:
+    """Retorna o banco a partir da subpasta do arquivo.
+    Ex: 'BANCO DO BRASIL\\arquivo.pdf' → 'BANCO DO BRASIL'.
+    Retorna None se a subpasta for OUTROS ou não reconhecida.
+    """
+    if not filename:
+        return None
+    first_part = Path(filename).parts[0].upper() if Path(filename).parts else None
+    return first_part if first_part in _BANCOS_VALIDOS_PASTA else None
 
 # Armazenamento de jobs de REVERSAO disparados via MAKE
 _make_reversao_jobs: dict[str, dict] = {}
@@ -1775,7 +1790,16 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         # Executar LLM em thread separada (com fallback de visão para identificar banco)
         loop = asyncio.get_event_loop()
         extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
-        
+
+        # Banco da subpasta tem prioridade máxima — é fonte de verdade confirmada pelo operador
+        banco_pasta = _banco_from_folder_path(filename)
+        if banco_pasta and banco_pasta != extraction.banco:
+            logger.info(
+                "[BANCO_PASTA] Banco corrigido: LLM='%s' → PASTA='%s' (%s)",
+                extraction.banco, banco_pasta, filename,
+            )
+            extraction.banco = banco_pasta
+
         # Check Cancelamento
         if job_id and jobs_dict.get(job_id, {}).get("status") == "cancelled":
              raise asyncio.CancelledError("Cancelado pelo usuário")
@@ -2370,9 +2394,29 @@ async def process_extratos_pdf_async(
             progress=30
         ))
 
-        llm_service = get_llm_service()
-        loop = asyncio.get_event_loop()
-        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+        # Tenta extração estruturada para Excel (sem LLM) — fallback para LLM se não reconhecido
+        excel_extractor = get_excel_extractor_service()
+        extraction = await loop.run_in_executor(
+            _executor, excel_extractor.extract, pdf_data, filename
+        )
+        if extraction is not None:
+            logger.info(
+                "[EXCEL_EXTRACTOR] Extração direta OK para '%s' (banco=%s tipo=%s conf=%.2f) — LLM ignorada",
+                filename, extraction.banco, extraction.tipo_documento, extraction.confianca,
+            )
+        else:
+            llm_service = get_llm_service()
+            extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+
+        # Banco da subpasta tem prioridade máxima — é fonte de verdade confirmada pelo operador
+        banco_pasta = _banco_from_folder_path(filename)
+        if banco_pasta and banco_pasta != extraction.banco:
+            logger.info(
+                "[BANCO_PASTA] Banco corrigido: LLM='%s' → PASTA='%s' (%s)",
+                extraction.banco, banco_pasta, filename,
+            )
+            extraction.banco = banco_pasta
+
         processing_trace["pipeline"]["extracao_texto"] = {
             "caracteres_extraidos": len(text),
             "amostra": text[:1000],
@@ -3171,6 +3215,29 @@ async def debug_clients():
         result["traceback"] = traceback.format_exc()
         
     return result
+
+
+@app.get("/debug/llm-cache")
+async def debug_llm_cache():
+    """Estatísticas do cache de extração LLM por hash de arquivo."""
+    llm_service = get_llm_service()
+    stats = llm_service.get_extraction_cache_stats()
+    return {
+        "extraction_cache": stats,
+        "description": {
+            "hit_rate": "Proporção de requisições atendidas pelo cache (0.0–1.0)",
+            "size": "Entradas atualmente no cache",
+            "max_size": "Limite máximo de entradas",
+        },
+    }
+
+
+@app.delete("/debug/llm-cache")
+async def clear_llm_cache():
+    """Limpa o cache de extração LLM e reseta contadores."""
+    llm_service = get_llm_service()
+    llm_service.clear_extraction_cache()
+    return {"status": "ok", "message": "Cache de extração LLM limpo"}
 
 
 @app.delete("/logs")
