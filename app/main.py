@@ -8,6 +8,7 @@ O Make recebe resposta imediata e o arquivo e processado em background.
 import asyncio
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime
@@ -67,9 +68,16 @@ from app.utils.hash import compute_hash, short_hash
 from app.utils.template import render_tech_navbar
 
 # Configuracao de logging
+_log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "logs", "extratos.log")
+_log_file = os.path.normpath(_log_file)
+os.makedirs(os.path.dirname(_log_file), exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(_log_file, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger(__name__)
 from contextlib import asynccontextmanager
@@ -390,7 +398,9 @@ def _write_extratos_llm_trace(processing_trace: dict, filename: str, file_hash: 
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = _sanitize_trace_component(Path(filename).name)
-    trace_name = f"{timestamp}_{base_name}_{short_hash(file_hash)}.json"
+    # file_hash já é uma string hex — usa os primeiros 8 caracteres diretamente
+    hash_suffix = file_hash[:8] if isinstance(file_hash, str) else short_hash(file_hash)
+    trace_name = f"{timestamp}_{base_name}_{hash_suffix}.json"
     trace_path = trace_dir / trace_name
     trace_path.write_text(
         json.dumps(processing_trace, ensure_ascii=False, indent=2),

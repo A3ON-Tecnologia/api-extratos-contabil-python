@@ -621,6 +621,67 @@ class LLMService:
             return normalized
         return tipo.strip().upper()
 
+    # Termos que indicam linhas com campos relevantes para extração
+    _RELEVANT_KEYWORDS = [
+        # Identificação do cliente
+        "cliente", "associado", "beneficiário", "beneficiario", "titular",
+        "nome", "razão social", "razao social", "empresa",
+        "cpf", "cnpj", "cpf/cnpj",
+        # Dados bancários
+        "banco", "instituição", "instituicao", "cooperativa", "coop",
+        "agência", "agencia", "ag.", "ag ",
+        "conta", "c/c", "cc:", "conta corrente", "conta capital",
+        "conta poupança", "conta poupanca",
+        # Tipo de documento
+        "extrato", "relatório", "relatorio", "demonstrativo",
+        "boleto", "empréstimo", "emprestimo", "financiamento",
+        "contrato", "apólice", "apolice",
+        # Período
+        "período", "periodo", "competência", "competencia",
+        "referência", "referencia", "data", "mês", "mes", "ano",
+        "de:", "até:", "ate:", "vigência", "vigencia",
+        # Matrícula (Conta Capital)
+        "matrícula", "matricula",
+    ]
+
+    def _preprocess_text_for_llm(self, text: str) -> str:
+        """
+        Pré-processa o texto extraído para destacar campos relevantes.
+
+        Varre as linhas procurando termos-chave (banco, conta, cliente, etc.)
+        e monta um bloco <campos_relevantes> no topo, seguido do texto completo.
+        Isso reduz o ruído de formatação e orienta a atenção da LLM.
+        """
+        lines = text.splitlines()
+        relevant_lines = []
+        seen = set()
+
+        keywords_lower = [k.lower() for k in self._RELEVANT_KEYWORDS]
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or len(stripped) < 4:
+                continue
+            line_lower = stripped.lower()
+            if any(kw in line_lower for kw in keywords_lower):
+                # Evita duplicatas (mesma linha aparecendo mais de uma vez)
+                key = line_lower[:80]
+                if key not in seen:
+                    seen.add(key)
+                    relevant_lines.append(stripped)
+            # Limita a 25 linhas para não inflar o bloco
+            if len(relevant_lines) >= 25:
+                break
+
+        if not relevant_lines:
+            return text
+
+        campos_block = "\n".join(f"  {l}" for l in relevant_lines)
+        return (
+            f"<campos_relevantes>\n{campos_block}\n</campos_relevantes>\n\n"
+            f"<texto_completo>\n{text}\n</texto_completo>"
+        )
+
     def _build_human_message(self, text: str, tipo_hint: str | None = None) -> str:
         """Monta a mensagem enviada para a LLM com hint opcional."""
         hint_block = ""
@@ -631,7 +692,8 @@ class LLMService:
                 "\nConfirme ou corrija com base no texto completo."
                 "\n</dica_pre_analise>"
             )
-        return f"TEXTO DO DOCUMENTO:{hint_block}\n\n{text}"
+        structured_text = self._preprocess_text_for_llm(text)
+        return f"TEXTO DO DOCUMENTO:{hint_block}\n\n{structured_text}"
 
     def _get_tipo_analysis_text(self, text: str, is_pdf: bool = False) -> str:
         """
