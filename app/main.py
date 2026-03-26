@@ -2375,9 +2375,6 @@ async def process_extratos_pdf_async(
             erro="Arquivo ja processado anteriormente (duplicado)",
         )
 
-    _trim_set(_extratos_processed_hashes, 2000)
-    _extratos_processed_hashes.add(file_hash)
-
     filename_lower = filename.lower()
     is_pdf = pdf_data.startswith(b"%PDF-") or filename_lower.endswith(".pdf")
     is_ofx = filename_lower.endswith(".ofx")
@@ -2677,6 +2674,12 @@ async def process_extratos_pdf_async(
             },
             progress=100
         ))
+
+        # Marca hash como processado apenas após sucesso confirmado (não em modo teste)
+        # Assim, se houve falha, o arquivo pode ser reprocessado normalmente
+        if proc_status == ProcessingStatus.SUCESSO and not test_mode:
+            _trim_set(_extratos_processed_hashes, 2000)
+            _extratos_processed_hashes.add(file_hash)
 
         event_manager.update_stats(
             sucesso=(proc_status == ProcessingStatus.SUCESSO),
