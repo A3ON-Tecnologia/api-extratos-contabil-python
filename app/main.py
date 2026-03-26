@@ -8,6 +8,7 @@ O Make recebe resposta imediata e o arquivo e processado em background.
 import asyncio
 import json
 import logging
+import os
 import re
 import uuid
 from datetime import datetime
@@ -67,9 +68,16 @@ from app.utils.hash import compute_hash, short_hash
 from app.utils.template import render_tech_navbar
 
 # Configuracao de logging
+_log_file = os.path.join(os.path.dirname(os.path.dirname(__file__)), "..", "logs", "extratos.log")
+_log_file = os.path.normpath(_log_file)
+os.makedirs(os.path.dirname(_log_file), exist_ok=True)
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
+    handlers=[
+        logging.FileHandler(_log_file, encoding="utf-8"),
+        logging.StreamHandler(),
+    ],
 )
 logger = logging.getLogger(__name__)
 from contextlib import asynccontextmanager
@@ -251,6 +259,23 @@ _watch_seen: dict[str, int] = {}
 _watch_processed: dict[str, float] = {}
 
 
+def _trim_dict(d: dict, max_size: int) -> None:
+    """Remove as entradas mais antigas do dict quando ultrapassa max_size."""
+    overflow = len(d) - max_size
+    if overflow > 0:
+        keys_to_remove = list(d.keys())[:overflow]
+        for k in keys_to_remove:
+            del d[k]
+
+
+def _trim_set(s: set, max_size: int) -> None:
+    """Remove entradas arbitrárias do set quando ultrapassa max_size."""
+    overflow = len(s) - max_size
+    if overflow > 0:
+        for item in list(s)[:overflow]:
+            s.discard(item)
+
+
 # Instancias dos servicos (singleton pattern simples)
 _pdf_service: PDFService | None = None
 _zip_service: ZIPService | None = None
@@ -390,7 +415,9 @@ def _write_extratos_llm_trace(processing_trace: dict, filename: str, file_hash: 
 
     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     base_name = _sanitize_trace_component(Path(filename).name)
-    trace_name = f"{timestamp}_{base_name}_{short_hash(file_hash)}.json"
+    # file_hash já é uma string hex — usa os primeiros 8 caracteres diretamente
+    hash_suffix = file_hash[:8] if isinstance(file_hash, str) else short_hash(file_hash)
+    trace_name = f"{timestamp}_{base_name}_{hash_suffix}.json"
     trace_path = trace_dir / trace_name
     trace_path.write_text(
         json.dumps(processing_trace, ensure_ascii=False, indent=2),
@@ -492,6 +519,7 @@ async def _watch_folder_loop():
 
                 last_size = _watch_seen.get(file_key)
                 if last_size is None or last_size != size:
+                    _trim_dict(_watch_seen, 500)
                     _watch_seen[file_key] = size
                     continue
 
@@ -512,6 +540,7 @@ async def _watch_folder_loop():
 
                 logger.info(f"Criando job {job_id} para {filename}")
 
+                _trim_dict(_extratos_jobs, 500)
                 _extratos_jobs[job_id] = {
                     "job_id": job_id,
                     "filename": filename,
@@ -523,6 +552,7 @@ async def _watch_folder_loop():
                     "source": "extratos",
                 }
 
+                _trim_dict(_watch_processed, 2000)
                 _watch_processed[file_key] = mtime
 
                 asyncio.create_task(
@@ -688,6 +718,7 @@ async def mapear_extratos(process: bool = False):
                     is_zip = file_path.suffix.lower() == ".zip"
                     job_id = str(uuid.uuid4())[:8]
 
+                    _trim_dict(_extratos_jobs, 500)
                     _extratos_jobs[job_id] = {
                         "job_id": job_id,
                         "filename": arquivo["nome"],
@@ -1240,6 +1271,7 @@ async def upload_file(
     job_id = str(uuid.uuid4())[:8]
     
     # Registra o job
+    _trim_dict(_jobs, 500)
     _jobs[job_id] = {
         "job_id": job_id,
         "filename": filename,
@@ -2343,8 +2375,6 @@ async def process_extratos_pdf_async(
             erro="Arquivo ja processado anteriormente (duplicado)",
         )
 
-    _extratos_processed_hashes.add(file_hash)
-
     filename_lower = filename.lower()
     is_pdf = pdf_data.startswith(b"%PDF-") or filename_lower.endswith(".pdf")
     is_ofx = filename_lower.endswith(".ofx")
@@ -2644,6 +2674,12 @@ async def process_extratos_pdf_async(
             },
             progress=100
         ))
+
+        # Marca hash como processado apenas após sucesso confirmado (não em modo teste)
+        # Assim, se houve falha, o arquivo pode ser reprocessado normalmente
+        if proc_status == ProcessingStatus.SUCESSO and not test_mode:
+            _trim_set(_extratos_processed_hashes, 2000)
+            _extratos_processed_hashes.add(file_hash)
 
         event_manager.update_stats(
             sucesso=(proc_status == ProcessingStatus.SUCESSO),
@@ -3691,6 +3727,7 @@ async def test_upload_file(
     is_zip = filename.lower().endswith('.zip') or content[:4] == b'PK\x03\x04'
     
     # Inicializa o job na tabela de TESTE
+    _trim_dict(_test_jobs, 200)
     _test_jobs[job_id] = {
         "job_id": job_id,
         "status": "queued",
@@ -3783,8 +3820,10 @@ async def _process_single_test_pdf(
                 progress=20
             ))
         pdf_service = get_pdf_service()
-        text = pdf_service.extract_text(pdf_content)
-        
+        # Extrai apenas a primeira página — o cabeçalho com banco/agência/conta/cliente
+        # está sempre na página 1; as demais são apenas transações (irrelevantes para LLM)
+        text = pdf_service.extract_text(pdf_content, filename=filename, max_pages=1)
+
         # 2. Analisa com IA
         if emit_events:
             await event_manager.emit(ProcessingEvent(
@@ -4454,6 +4493,7 @@ async def make_webhook_reversao(payload: MakeReversaoWebhook, background_tasks: 
         raise HTTPException(status_code=400, detail="Lista de IDs vazia")
 
     job_id = f"rev_{uuid.uuid4().hex[:10]}"
+    _trim_dict(_make_reversao_jobs, 200)
     _make_reversao_jobs[job_id] = {
         "job_id": job_id,
         "status": "queued",

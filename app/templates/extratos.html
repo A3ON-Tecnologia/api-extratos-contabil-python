@@ -1119,7 +1119,7 @@
             filesCard.style.display = 'block';
 
             try {
-                const response = await fetch('/extratos/mapear?process=true');
+                const response = await fetch('/extratos/mapear');
                 const data = await response.json();
 
                 if (!response.ok) {
@@ -1188,11 +1188,15 @@
         }
 
         let refreshPending = null;
-        function scheduleRefresh() {
+        function scheduleRefresh(updateFileList = false) {
             if (refreshPending) return;
             refreshPending = setTimeout(async () => {
                 refreshPending = null;
                 await refreshDashboard(false);
+                // Só atualiza a lista de arquivos se solicitado (arquivo processado)
+                if (updateFileList && filesCard.style.display !== 'none') {
+                    await mapearArquivos();
+                }
             }, 800);
         }
 
@@ -1219,8 +1223,9 @@
                             'info'
                         );
                     }
-                    if (['processing_completed', 'processing_error', 'stats_update'].includes(data.event_type)) {
-                        scheduleRefresh();
+                    const isProcessingEvent = ['processing_completed', 'processing_error'].includes(data.event_type);
+                    if (isProcessingEvent || data.event_type === 'stats_update') {
+                        scheduleRefresh(isProcessingEvent);
                     }
                 } catch (e) {
                     console.warn('Erro ao processar evento do websocket:', e);

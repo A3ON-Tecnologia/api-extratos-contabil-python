@@ -4,6 +4,7 @@ Serviço de integração com LLM via LangChain.
 Utiliza OpenAI para extrair informações estruturadas de documentos.
 """
 
+import collections
 import hashlib
 import json
 import logging
@@ -500,7 +501,7 @@ class LLMService:
         self.parser = JsonOutputParser()
 
         # Cache de extração por hash de arquivo
-        self._extraction_cache: dict[str, LLMExtractionResult] = {}
+        self._extraction_cache: collections.OrderedDict[str, LLMExtractionResult] = collections.OrderedDict()
         self._extraction_cache_lock = threading.Lock()
         self._extraction_cache_max = 200
         self._extraction_cache_hits = 0
@@ -516,6 +517,7 @@ class LLMService:
         with self._extraction_cache_lock:
             cached = self._extraction_cache.get(file_hash)
             if cached is not None:
+                self._extraction_cache.move_to_end(file_hash)
                 self._extraction_cache_hits += 1
                 logger.info(
                     "[EXTRACTION_CACHE] hit | hash=%s | tipo=%s confianca=%.2f",
@@ -528,11 +530,10 @@ class LLMService:
             return None
 
     def _store_cached_extraction(self, file_hash: str, result: LLMExtractionResult) -> None:
-        """Armazena resultado no cache, evictando o mais antigo se atingir limite."""
+        """Armazena resultado no cache, evictando o menos recentemente usado se atingir limite."""
         with self._extraction_cache_lock:
             if len(self._extraction_cache) >= self._extraction_cache_max:
-                oldest_key = next(iter(self._extraction_cache))
-                del self._extraction_cache[oldest_key]
+                self._extraction_cache.popitem(last=False)
             self._extraction_cache[file_hash] = result.model_copy()
 
     def get_extraction_cache_stats(self) -> dict:
@@ -621,6 +622,67 @@ class LLMService:
             return normalized
         return tipo.strip().upper()
 
+    # Termos que indicam linhas com campos relevantes para extração
+    _RELEVANT_KEYWORDS = [
+        # Identificação do cliente
+        "cliente", "associado", "beneficiário", "beneficiario", "titular",
+        "nome", "razão social", "razao social", "empresa",
+        "cpf", "cnpj", "cpf/cnpj",
+        # Dados bancários
+        "banco", "instituição", "instituicao", "cooperativa", "coop",
+        "agência", "agencia", "ag.", "ag ",
+        "conta", "c/c", "cc:", "conta corrente", "conta capital",
+        "conta poupança", "conta poupanca",
+        # Tipo de documento
+        "extrato", "relatório", "relatorio", "demonstrativo",
+        "boleto", "empréstimo", "emprestimo", "financiamento",
+        "contrato", "apólice", "apolice",
+        # Período
+        "período", "periodo", "competência", "competencia",
+        "referência", "referencia", "data", "mês", "mes", "ano",
+        "de:", "até:", "ate:", "vigência", "vigencia",
+        # Matrícula (Conta Capital)
+        "matrícula", "matricula",
+    ]
+
+    def _preprocess_text_for_llm(self, text: str) -> str:
+        """
+        Pré-processa o texto extraído para destacar campos relevantes.
+
+        Varre as linhas procurando termos-chave (banco, conta, cliente, etc.)
+        e monta um bloco <campos_relevantes> no topo, seguido do texto completo.
+        Isso reduz o ruído de formatação e orienta a atenção da LLM.
+        """
+        lines = text.splitlines()
+        relevant_lines = []
+        seen = set()
+
+        keywords_lower = [k.lower() for k in self._RELEVANT_KEYWORDS]
+
+        for line in lines:
+            stripped = line.strip()
+            if not stripped or len(stripped) < 4:
+                continue
+            line_lower = stripped.lower()
+            if any(kw in line_lower for kw in keywords_lower):
+                # Evita duplicatas (mesma linha aparecendo mais de uma vez)
+                key = line_lower[:80]
+                if key not in seen:
+                    seen.add(key)
+                    relevant_lines.append(stripped)
+            # Limita a 25 linhas para não inflar o bloco
+            if len(relevant_lines) >= 25:
+                break
+
+        if not relevant_lines:
+            return text
+
+        campos_block = "\n".join(f"  {l}" for l in relevant_lines)
+        return (
+            f"<campos_relevantes>\n{campos_block}\n</campos_relevantes>\n\n"
+            f"<texto_completo>\n{text}\n</texto_completo>"
+        )
+
     def _build_human_message(self, text: str, tipo_hint: str | None = None) -> str:
         """Monta a mensagem enviada para a LLM com hint opcional."""
         hint_block = ""
@@ -631,7 +693,8 @@ class LLMService:
                 "\nConfirme ou corrija com base no texto completo."
                 "\n</dica_pre_analise>"
             )
-        return f"TEXTO DO DOCUMENTO:{hint_block}\n\n{text}"
+        structured_text = self._preprocess_text_for_llm(text)
+        return f"TEXTO DO DOCUMENTO:{hint_block}\n\n{structured_text}"
 
     def _get_tipo_analysis_text(self, text: str, is_pdf: bool = False) -> str:
         """

@@ -71,142 +71,54 @@ class ClientService:
                 return self._clean_value(value)
         return None
 
-    def load_clients(self, force_reload: bool = False) -> list[ClientInfo]:
+    def _read_dataframe(self, path: Path) -> "pd.DataFrame":
         """
-        Carrega a lista de clientes da planilha Excel.
-        
-        Utiliza cache para evitar leituras repetidas do arquivo.
-        
-        Args:
-            force_reload: Se True, força recarregamento ignorando cache
-            
-        Returns:
-            Lista de clientes
-            
+        Lê uma planilha (Excel ou CSV) e retorna um DataFrame com colunas normalizadas.
+
         Raises:
-            FileNotFoundError: Se a planilha não existir
-            ValueError: Se a planilha não tiver as colunas obrigatórias
+            FileNotFoundError: Se o arquivo não existir
+            ValueError: Se não for possível ler o arquivo ou faltar colunas obrigatórias
         """
-        with self._cache_lock:
-            # Verifica se o cache é válido
-            if not force_reload and self._is_cache_valid():
-                logger.debug("Usando cache de clientes")
-                return self._cache
-            
-            # Carrega a planilha
-            logger.info(f"Carregando planilha de clientes: {self.settings.clients_excel_path}")
-            
-            if not self.settings.clients_excel_path.exists():
-                raise FileNotFoundError(
-                    f"Planilha de clientes não encontrada: {self.settings.clients_excel_path}"
-                )
-            
-            try:
-                suffix = self.settings.clients_excel_path.suffix.lower()
-                if suffix == ".csv":
-                    df = pd.read_csv(
-                        self.settings.clients_excel_path,
-                        dtype=str,
-                        sep=None,
-                        engine="python",
-                    )
-                else:
-                    df = pd.read_excel(
-                        self.settings.clients_excel_path,
-                        dtype=str,  # Le tudo como string para evitar conversoes
-                        engine="openpyxl",
-                    )
-            except Exception as e:
-                raise ValueError(f"Erro ao ler planilha de clientes: {e}")
-            
-            # Normaliza nomes das colunas (remove espaços, uppercase)
-            df.columns = df.columns.str.strip().str.upper()
-            
-            # Verifica colunas obrigatórias
-            required_columns = {"COD", "NOME"}
-            missing = required_columns - set(df.columns)
-            if missing:
-                raise ValueError(
-                    f"Colunas obrigatórias faltando na planilha: {missing}"
-                )
-            
-            # Converte para lista de ClientInfo
-            clients: list[ClientInfo] = []
-            
-            for _, row in df.iterrows():
-                # Pula linhas sem código ou nome
-                cod = str(row.get("COD", "")).strip()
-                nome = str(row.get("NOME", "")).strip()
-                
-                if not cod or not nome or cod.lower() == "nan":
-                    continue
-                
-                # Padroniza o código com zeros à esquerda (3 dígitos)
-                cod = cod.zfill(3)
-                
-                client = ClientInfo(
-                    cod=cod,
-                    nome=nome,
-                    cnpj=self._clean_value(row.get("CNPJ")),
-                    banco=self._clean_value(row.get("BANCO")),
-                    agencia=self._clean_value(row.get("AGENCIA")),
-                    conta=self._pick_conta(row),
-                    tipo_documento=self._pick_tipo_documento(row),
-                )
-                
-                clients.append(client)
-            
-            logger.info(f"Carregados {len(clients)} clientes da planilha")
-            
-            # Atualiza cache
-            ClientService._cache = clients
-            ClientService._cache_time = datetime.now()
-            
-            return clients
-
-    def load_clients_from_path(self, excel_path: Path, force_reload: bool = False) -> list[ClientInfo]:
-        """
-        Carrega clientes a partir de um caminho de planilha informado.
-
-        Usa o cache padrao apenas quando o caminho for o mesmo de clients_excel_path.
-        """
-        if excel_path == self.settings.clients_excel_path:
-            return self.load_clients(force_reload=force_reload)
-
-        logger.info(f"Carregando planilha de clientes (override): {excel_path}")
-
-        if not excel_path.exists():
-            raise FileNotFoundError(f"Planilha de clientes nao encontrada: {excel_path}")
+        if not path.exists():
+            raise FileNotFoundError(f"Planilha de clientes não encontrada: {path}")
 
         try:
-            suffix = excel_path.suffix.lower()
+            suffix = path.suffix.lower()
             if suffix == ".csv":
-                df = pd.read_csv(excel_path, dtype=str, sep=None, engine="python")
+                df = pd.read_csv(path, dtype=str, sep=None, engine="python")
             else:
-                df = pd.read_excel(
-                    excel_path,
-                    dtype=str,
-                    engine="openpyxl",
-                )
+                df = pd.read_excel(path, dtype=str, engine="openpyxl")
         except Exception as e:
             raise ValueError(f"Erro ao ler planilha de clientes: {e}")
 
+        # Normaliza nomes das colunas (remove espaços, uppercase)
         df.columns = df.columns.str.strip().str.upper()
 
+        # Verifica colunas obrigatórias
         required_columns = {"COD", "NOME"}
         missing = required_columns - set(df.columns)
         if missing:
-            raise ValueError(f"Colunas obrigatorias faltando na planilha: {missing}")
+            raise ValueError(f"Colunas obrigatórias faltando na planilha: {missing}")
 
+        return df
+
+    def _load_clients_from_dataframe(self, df: "pd.DataFrame") -> list[ClientInfo]:
+        """
+        Converte um DataFrame (já com colunas normalizadas) em lista de ClientInfo.
+
+        Linhas sem código ou nome válidos são ignoradas.
+        """
         clients: list[ClientInfo] = []
 
         for _, row in df.iterrows():
+            # Pula linhas sem código ou nome
             cod = str(row.get("COD", "")).strip()
             nome = str(row.get("NOME", "")).strip()
 
             if not cod or not nome or cod.lower() == "nan":
                 continue
 
+            # Padroniza o código com zeros à esquerda (3 dígitos)
             cod = cod.zfill(3)
 
             client = ClientInfo(
@@ -220,6 +132,58 @@ class ClientService:
             )
 
             clients.append(client)
+
+        return clients
+
+    def load_clients(self, force_reload: bool = False) -> list[ClientInfo]:
+        """
+        Carrega a lista de clientes da planilha Excel.
+
+        Utiliza cache para evitar leituras repetidas do arquivo.
+
+        Args:
+            force_reload: Se True, força recarregamento ignorando cache
+
+        Returns:
+            Lista de clientes
+
+        Raises:
+            FileNotFoundError: Se a planilha não existir
+            ValueError: Se a planilha não tiver as colunas obrigatórias
+        """
+        with self._cache_lock:
+            # Verifica se o cache é válido
+            if not force_reload and self._is_cache_valid():
+                logger.debug("Usando cache de clientes")
+                return self._cache
+
+            # Carrega a planilha
+            logger.info(f"Carregando planilha de clientes: {self.settings.clients_excel_path}")
+
+            df = self._read_dataframe(self.settings.clients_excel_path)
+            clients = self._load_clients_from_dataframe(df)
+
+            logger.info(f"Carregados {len(clients)} clientes da planilha")
+
+            # Atualiza cache
+            ClientService._cache = clients
+            ClientService._cache_time = datetime.now()
+
+            return clients
+
+    def load_clients_from_path(self, excel_path: Path, force_reload: bool = False) -> list[ClientInfo]:
+        """
+        Carrega clientes a partir de um caminho de planilha informado.
+
+        Usa o cache padrao apenas quando o caminho for o mesmo de clients_excel_path.
+        """
+        if excel_path == self.settings.clients_excel_path:
+            return self.load_clients(force_reload=force_reload)
+
+        logger.info(f"Carregando planilha de clientes (override): {excel_path}")
+
+        df = self._read_dataframe(excel_path)
+        clients = self._load_clients_from_dataframe(df)
 
         logger.info(f"Carregados {len(clients)} clientes da planilha (override)")
         return clients

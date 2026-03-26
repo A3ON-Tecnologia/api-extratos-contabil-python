@@ -17,33 +17,40 @@ logger = logging.getLogger(__name__)
 class PDFService:
     """Serviço para extração de texto de PDFs."""
     
-    def extract_text(self, pdf_data: bytes | BinaryIO, filename: str = "") -> str:
+    def extract_text(self, pdf_data: bytes | BinaryIO, filename: str = "", max_pages: int | None = None) -> str:
         """
         Extrai texto de um arquivo (PDF, CSV, OFX, Excel).
+
+        Args:
+            max_pages: Limita a extração às primeiras N páginas do PDF.
+                       None = todas as páginas.
         """
         # Converte bytes para file-like se necessário
         if isinstance(pdf_data, bytes):
             pdf_data = io.BytesIO(pdf_data)
-        
+
+        # Garante que a posição do stream está no início antes de qualquer leitura
+        pdf_data.seek(0)
+
         # Detecção por extensão
         ext = ""
         if filename:
             ext = "." + filename.split(".")[-1].lower() if "." in filename else ""
-        
+
         # Despacha para o extrator correto
         if ext in [".xlsx", ".xls", ".ods"]:
             return self._extract_from_excel(pdf_data)
         elif ext in [".csv", ".txt", ".ofx", ".html", ".xml", ".json"]:
             return self._extract_from_text(pdf_data)
-        
+
         # Padrão: Tenta como PDF
-        text = self._extract_with_pdfplumber(pdf_data)
-        
+        text = self._extract_with_pdfplumber(pdf_data, max_pages=max_pages)
+
         # Se pdfplumber não extraiu nada, tenta PyPDF
         if not text.strip():
             pdf_data.seek(0)
-            text = self._extract_with_pypdf(pdf_data)
-        
+            text = self._extract_with_pypdf(pdf_data, max_pages=max_pages)
+
         # Se ainda falhar, e for uma extensão desconhecida, tenta ler como texto puro
         if not text.strip():
              try:
@@ -51,10 +58,10 @@ class PDFService:
                  return self._extract_from_text(pdf_data)
              except:
                  pass
-        
+
         if not text.strip():
             raise ValueError("Não foi possível extrair texto do arquivo")
-        
+
         return self._normalize_text(text)
 
     def _extract_from_excel(self, file_data: BinaryIO) -> str:
@@ -87,44 +94,46 @@ class PDFService:
             logger.error(f"Erro ao ler texto: {e}")
             return ""
 
-    def _extract_with_pdfplumber(self, pdf_file: BinaryIO) -> str:
+    def _extract_with_pdfplumber(self, pdf_file: BinaryIO, max_pages: int | None = None) -> str:
         """
         Extrai texto usando pdfplumber.
-        
+
         Melhor para PDFs com tabelas e layouts complexos.
         """
         try:
             text_parts = []
-            
+
             with pdfplumber.open(pdf_file) as pdf:
-                for page in pdf.pages:
+                pages = pdf.pages[:max_pages] if max_pages else pdf.pages
+                for page in pages:
                     page_text = page.extract_text()
                     if page_text:
                         text_parts.append(page_text)
-            
+
             return "\n\n".join(text_parts)
-            
+
         except Exception as e:
             logger.warning(f"Erro ao extrair com pdfplumber: {e}")
             return ""
-    
-    def _extract_with_pypdf(self, pdf_file: BinaryIO) -> str:
+
+    def _extract_with_pypdf(self, pdf_file: BinaryIO, max_pages: int | None = None) -> str:
         """
         Extrai texto usando PyPDF.
-        
+
         Fallback mais robusto para PDFs problemáticos.
         """
         try:
             text_parts = []
-            
+
             reader = PdfReader(pdf_file)
-            for page in reader.pages:
+            pages = reader.pages[:max_pages] if max_pages else reader.pages
+            for page in pages:
                 page_text = page.extract_text()
                 if page_text:
                     text_parts.append(page_text)
-            
+
             return "\n\n".join(text_parts)
-            
+
         except Exception as e:
             logger.warning(f"Erro ao extrair com PyPDF: {e}")
             return ""
