@@ -270,6 +270,10 @@ EXTRAÇÃO DE CLIENTE (cliente_sugerido):
   - O cliente aparece na tabela sob o rótulo "Cedente"
   - IGNORE "Sacado" (pode conter muitos nomes diferentes)
   - Remova códigos numéricos antes do nome (ex: "54544-9 RODAIR TRATORES E" -> "RODAIR TRATORES E")
+- Para SICOOB "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO":
+  - O nome do cliente aparece como linha ISOLADA, logo após a linha que contém "EXTRATO DE FATURA DE CARTÃO DE CRÉDITO"
+  - Essa linha vem ANTES de "Conta Cartão:" e NÃO tem prefixo/label
+  - Exemplo: linha "FLORA F LTDA EPP" entre o cabeçalho e "Conta Cartão: 7563037126839"
 
 EXEMPLOS PRÁTICOS DE EXTRAÇÃO:
 
@@ -326,6 +330,38 @@ Extração correta:
   "contrato": null,
   "tipo_documento": "EXTRATO DE CONTA CORRENTE",
   "confianca": 0.9
+}
+```
+
+**Exemplo 3 - SICOOB Extrato de Fatura de Cartão de Crédito**:
+Texto:
+```
+SICOOB
+SISTEMA DE COOPERATIVAS DE CRÉDITO DO BRASIL
+SISBR - SISTEMA DE INFORMÁTICA DO SICOOB
+02/03/2026 EXTRATO DE FATURA DE CARTÃO DE CRÉDITO 08:35:23
+FLORA F LTDA EPP
+Conta Cartão: 7563037126839
+Fatura de FEVEREIRO Vencimento: 11/02/2026
+...
+O pagamento total de sua fatura no valor de R$ 18,75 está programado para 11/02/2026 na c/c 756 3037 228419
+```
+
+⚠️ **ATENÇÃO**: O nome do cliente ("FLORA F LTDA EPP") aparece como linha isolada ENTRE a linha do tipo de documento e a linha "Conta Cartão:". Não tem label "Nome:".
+⚠️ **CONTA CARTÃO**: O número "7563037126839" é o número do cartão, NÃO a conta corrente. A agência (cooperativa) está embutida: 756 (banco) + 3037 (cooperativa) + restante (cartão).
+⚠️ **CONTA CORRENTE**: Procure "na c/c 756 AAAA CCCC" no rodapé para extrair agência e conta corrente.
+
+Extração correta:
+```json
+{
+  "cliente_sugerido": "FLORA F LTDA EPP",
+  "cnpj": null,
+  "banco": "SICOOB",
+  "agencia": "3037",
+  "conta": "228419",
+  "contrato": null,
+  "tipo_documento": "EXTRATO DE FATURA DE CARTAO DE CREDITO",
+  "confianca": 0.92
 }
 ```
 
@@ -989,6 +1025,24 @@ class LLMService:
                 if result.confianca < 0.85:
                     result.confianca = 0.85
 
+            # Heurística textual: SICOOB Fatura de Cartão → nome por posição + agência da conta cartão
+            if self._is_sicoob_fatura_cartao(analysis_text, result.tipo_documento):
+                if not result.cliente_sugerido:
+                    cliente = self._extract_sicoob_fatura_cartao_cliente(analysis_text)
+                    if cliente:
+                        logger.info(f"[SICOOB_CARTAO] Cliente extraído por posição: {cliente}")
+                        result.cliente_sugerido = cliente
+                if not result.agencia:
+                    agencia = self._extract_sicoob_fatura_cartao_agencia(analysis_text)
+                    if agencia:
+                        logger.info(f"[SICOOB_CARTAO] Agência extraída: {agencia}")
+                        result.agencia = agencia
+                if not result.conta:
+                    conta = self._extract_sicoob_fatura_cartao_conta(analysis_text)
+                    if conta:
+                        logger.info(f"[SICOOB_CARTAO] Conta corrente extraída: {conta}")
+                        result.conta = conta
+
             result = self._apply_tipo_classification_pipeline(result, tipo_analysis_text)
 
             # Se o banco não foi identificado, tenta OCR (visão) no PDF
@@ -1372,6 +1426,75 @@ class LLMService:
         normalized_text = unicodedata.normalize("NFKD", text)
         normalized_text = normalized_text.encode("ascii", "ignore").decode("ascii")
         return bool(re.search(r"\bCONTA\b\s*[:\-]?\s*[0-9]", normalized_text, flags=re.IGNORECASE))
+
+    def _is_sicoob_fatura_cartao(self, text: str, tipo_documento: str | None) -> bool:
+        """Detecta extrato de fatura de cartão SICOOB."""
+        if tipo_documento:
+            tipo_upper = tipo_documento.upper()
+            if "FATURA" in tipo_upper and "CART" in tipo_upper:
+                return True
+        normalized = self._normalize_text_for_hint(text)
+        return (
+            ("EXTRATO DE FATURA DE CARTAO" in normalized or "FATURA DE CARTAO DE CREDITO" in normalized)
+            and "SICOOB" in normalized
+        )
+
+    def _extract_sicoob_fatura_cartao_cliente(self, text: str) -> str | None:
+        """Extrai nome do cliente de fatura de cartão SICOOB.
+
+        Estrutura esperada:
+            ...EXTRATO DE FATURA DE CARTÃO DE CRÉDITO HH:MM:SS
+            NOME DO CLIENTE
+            Conta Cartão: XXXXXXXX
+        O nome aparece sem label, entre o tipo do documento e a linha 'Conta Cartão:'.
+        """
+        if not text:
+            return None
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            if "EXTRATO DE FATURA DE CART" in line.upper():
+                for j in range(i + 1, min(i + 6, len(lines))):
+                    candidate = lines[j].strip()
+                    if not candidate:
+                        continue
+                    if "CONTA CART" in candidate.upper():
+                        break
+                    # Deve começar com letra (nome de empresa), não com dígito ou keyword de sistema
+                    if re.match(r'^[A-ZÁÉÍÓÚÀÂÊÔÃÕÇ]', candidate, re.IGNORECASE):
+                        return candidate
+                break
+        return None
+
+    def _extract_sicoob_fatura_cartao_agencia(self, text: str) -> str | None:
+        """Extrai agência (cooperativa) de fatura de cartão SICOOB.
+
+        Tenta duas fontes:
+        1. Rodapé: "na c/c 756 3037 228419" → agência = "3037"
+        2. Fallback: "Conta Cartão: 7563037XXXXXX" → agência = 4 dígitos após "756"
+        """
+        if not text:
+            return None
+        # Fonte 1: rodapé "c/c 756 AAAA CCCC"
+        m = re.search(r'c/c\s+756\s+(\d{3,4})', text, re.IGNORECASE)
+        if m:
+            return m.group(1)
+        # Fonte 2: "Conta Cartão: 756AAAA..."
+        m = re.search(r'Conta\s+Cart[aã]o\s*:\s*756(\d{4})', text, re.IGNORECASE)
+        if m:
+            return m.group(1)
+        return None
+
+    def _extract_sicoob_fatura_cartao_conta(self, text: str) -> str | None:
+        """Extrai conta corrente (não o cartão) de fatura de cartão SICOOB.
+
+        Procura o padrão "na c/c 756 AAAA CCCC" no rodapé do documento.
+        """
+        if not text:
+            return None
+        m = re.search(r'c/c\s+756\s+\d{3,4}\s+(\d{4,10})', text, re.IGNORECASE)
+        if m:
+            return m.group(1)
+        return None
 
 
     def identify_bank_from_images(self, images_base64: list[str]) -> str | None:
