@@ -1193,6 +1193,10 @@
             refreshPending = setTimeout(async () => {
                 refreshPending = null;
                 await refreshDashboard(false);
+                // Se o painel de arquivos estiver aberto, atualiza a lista também
+                if (filesCard.style.display !== 'none') {
+                    await mapearArquivos();
+                }
             }, 800);
         }
 

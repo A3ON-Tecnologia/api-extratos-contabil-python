@@ -3,10 +3,12 @@ Servico para gerenciar reversoes de extratos baixados.
 """
 
 import logging
+import shutil
 from pathlib import Path
 from typing import Optional, List
 from sqlalchemy import desc
 
+from app.config import get_settings
 from app.database import SessionLocal
 from app.models.extratos_baixados_log import ExtratosBaixadosLog
 from app.models.extratos_baixados_reversao_log import ExtratosBaixadosReversaoLog
@@ -107,15 +109,43 @@ class ExtratosBaixadosReversaoService:
                 return {"success": False, "message": f"Registro {log_id} nao encontrado"}
 
             arquivo_deletado = False
-            if deletar_arquivo and log.arquivo_salvo:
+            arquivo_restaurado = False
+            destino_restauracao = None
+
+            if log.arquivo_salvo:
                 path = Path(log.arquivo_salvo)
                 if path.exists():
-                    try:
-                        path.unlink()
-                        arquivo_deletado = True
-                    except Exception as e:
-                        logger.error("Erro ao deletar arquivo: %s", e)
-                        return {"success": False, "message": f"Erro ao deletar arquivo: {e}"}
+                    # Tenta mover de volta para a pasta do watcher
+                    if log.arquivo_original:
+                        try:
+                            watch_path = get_settings().watch_folder_path
+                            destino = watch_path / log.arquivo_original
+                            destino.parent.mkdir(parents=True, exist_ok=True)
+                            shutil.move(str(path), str(destino))
+                            arquivo_restaurado = True
+                            destino_restauracao = str(destino)
+                            logger.info(
+                                "Arquivo restaurado para fila: %s -> %s",
+                                path,
+                                destino,
+                            )
+                        except Exception as e:
+                            logger.error("Erro ao restaurar arquivo para fila: %s", e)
+                            # Fallback: apaga se não conseguiu mover
+                            if deletar_arquivo:
+                                try:
+                                    path.unlink()
+                                    arquivo_deletado = True
+                                except Exception as e2:
+                                    logger.error("Erro ao deletar arquivo: %s", e2)
+                                    return {"success": False, "message": f"Erro ao mover/deletar arquivo: {e}"}
+                    elif deletar_arquivo:
+                        try:
+                            path.unlink()
+                            arquivo_deletado = True
+                        except Exception as e:
+                            logger.error("Erro ao deletar arquivo: %s", e)
+                            return {"success": False, "message": f"Erro ao deletar arquivo: {e}"}
 
             self._registrar_reversao(
                 db=db,
@@ -132,7 +162,9 @@ class ExtratosBaixadosReversaoService:
                 "success": True,
                 "message": f"Registro {log_id} revertido com sucesso",
                 "arquivo_deletado": arquivo_deletado,
+                "arquivo_restaurado": arquivo_restaurado,
                 "arquivo_path": log.arquivo_salvo,
+                "destino_restauracao": destino_restauracao,
                 "cliente": log.cliente_nome,
             }
         except Exception as e:
@@ -168,15 +200,33 @@ class ExtratosBaixadosReversaoService:
                     continue
 
                 arquivo_deletado = False
-                if deletar_arquivos and log.arquivo_salvo:
+                if log.arquivo_salvo:
                     path = Path(log.arquivo_salvo)
                     if path.exists():
-                        try:
-                            path.unlink()
-                            arquivo_deletado = True
-                            resultados["arquivos_deletados"] += 1
-                        except Exception as e:
-                            logger.error("Erro ao deletar arquivo %s: %s", path, e)
+                        if log.arquivo_original:
+                            try:
+                                watch_path = get_settings().watch_folder_path
+                                destino = watch_path / log.arquivo_original
+                                destino.parent.mkdir(parents=True, exist_ok=True)
+                                shutil.move(str(path), str(destino))
+                                resultados["arquivos_deletados"] += 1  # reutiliza contador como "movidos"
+                                logger.info("Arquivo restaurado para fila: %s -> %s", path, destino)
+                            except Exception as e:
+                                logger.error("Erro ao restaurar arquivo %s: %s", path, e)
+                                if deletar_arquivos:
+                                    try:
+                                        path.unlink()
+                                        arquivo_deletado = True
+                                        resultados["arquivos_deletados"] += 1
+                                    except Exception as e2:
+                                        logger.error("Erro ao deletar arquivo %s: %s", path, e2)
+                        elif deletar_arquivos:
+                            try:
+                                path.unlink()
+                                arquivo_deletado = True
+                                resultados["arquivos_deletados"] += 1
+                            except Exception as e:
+                                logger.error("Erro ao deletar arquivo %s: %s", path, e)
 
                 self._registrar_reversao(
                     db=db,
