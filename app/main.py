@@ -3783,8 +3783,10 @@ async def _process_single_test_pdf(
                 progress=20
             ))
         pdf_service = get_pdf_service()
-        text = pdf_service.extract_text(pdf_content)
-        
+        # Extrai apenas a primeira página — o cabeçalho com banco/agência/conta/cliente
+        # está sempre na página 1; as demais são apenas transações (irrelevantes para LLM)
+        text = pdf_service.extract_text(pdf_content, filename=filename, max_pages=1)
+
         # 2. Analisa com IA
         if emit_events:
             await event_manager.emit(ProcessingEvent(

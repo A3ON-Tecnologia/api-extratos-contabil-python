@@ -1119,7 +1119,7 @@
             filesCard.style.display = 'block';
 
             try {
-                const response = await fetch('/extratos/mapear?process=true');
+                const response = await fetch('/extratos/mapear');
                 const data = await response.json();
 
                 if (!response.ok) {
