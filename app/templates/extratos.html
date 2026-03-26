@@ -1188,13 +1188,13 @@
         }
 
         let refreshPending = null;
-        function scheduleRefresh() {
+        function scheduleRefresh(updateFileList = false) {
             if (refreshPending) return;
             refreshPending = setTimeout(async () => {
                 refreshPending = null;
                 await refreshDashboard(false);
-                // Se o painel de arquivos estiver aberto, atualiza a lista também
-                if (filesCard.style.display !== 'none') {
+                // Só atualiza a lista de arquivos se solicitado (arquivo processado)
+                if (updateFileList && filesCard.style.display !== 'none') {
                     await mapearArquivos();
                 }
             }, 800);
@@ -1223,8 +1223,9 @@
                             'info'
                         );
                     }
-                    if (['processing_completed', 'processing_error', 'stats_update'].includes(data.event_type)) {
-                        scheduleRefresh();
+                    const isProcessingEvent = ['processing_completed', 'processing_error'].includes(data.event_type);
+                    if (isProcessingEvent || data.event_type === 'stats_update') {
+                        scheduleRefresh(isProcessingEvent);
                     }
                 } catch (e) {
                     console.warn('Erro ao processar evento do websocket:', e);
