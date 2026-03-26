@@ -259,6 +259,23 @@ _watch_seen: dict[str, int] = {}
 _watch_processed: dict[str, float] = {}
 
 
+def _trim_dict(d: dict, max_size: int) -> None:
+    """Remove as entradas mais antigas do dict quando ultrapassa max_size."""
+    overflow = len(d) - max_size
+    if overflow > 0:
+        keys_to_remove = list(d.keys())[:overflow]
+        for k in keys_to_remove:
+            del d[k]
+
+
+def _trim_set(s: set, max_size: int) -> None:
+    """Remove entradas arbitrárias do set quando ultrapassa max_size."""
+    overflow = len(s) - max_size
+    if overflow > 0:
+        for item in list(s)[:overflow]:
+            s.discard(item)
+
+
 # Instancias dos servicos (singleton pattern simples)
 _pdf_service: PDFService | None = None
 _zip_service: ZIPService | None = None
@@ -502,6 +519,7 @@ async def _watch_folder_loop():
 
                 last_size = _watch_seen.get(file_key)
                 if last_size is None or last_size != size:
+                    _trim_dict(_watch_seen, 500)
                     _watch_seen[file_key] = size
                     continue
 
@@ -522,6 +540,7 @@ async def _watch_folder_loop():
 
                 logger.info(f"Criando job {job_id} para {filename}")
 
+                _trim_dict(_extratos_jobs, 500)
                 _extratos_jobs[job_id] = {
                     "job_id": job_id,
                     "filename": filename,
@@ -533,6 +552,7 @@ async def _watch_folder_loop():
                     "source": "extratos",
                 }
 
+                _trim_dict(_watch_processed, 2000)
                 _watch_processed[file_key] = mtime
 
                 asyncio.create_task(
@@ -698,6 +718,7 @@ async def mapear_extratos(process: bool = False):
                     is_zip = file_path.suffix.lower() == ".zip"
                     job_id = str(uuid.uuid4())[:8]
 
+                    _trim_dict(_extratos_jobs, 500)
                     _extratos_jobs[job_id] = {
                         "job_id": job_id,
                         "filename": arquivo["nome"],
@@ -1250,6 +1271,7 @@ async def upload_file(
     job_id = str(uuid.uuid4())[:8]
     
     # Registra o job
+    _trim_dict(_jobs, 500)
     _jobs[job_id] = {
         "job_id": job_id,
         "filename": filename,
@@ -2353,6 +2375,7 @@ async def process_extratos_pdf_async(
             erro="Arquivo ja processado anteriormente (duplicado)",
         )
 
+    _trim_set(_extratos_processed_hashes, 2000)
     _extratos_processed_hashes.add(file_hash)
 
     filename_lower = filename.lower()
@@ -3701,6 +3724,7 @@ async def test_upload_file(
     is_zip = filename.lower().endswith('.zip') or content[:4] == b'PK\x03\x04'
     
     # Inicializa o job na tabela de TESTE
+    _trim_dict(_test_jobs, 200)
     _test_jobs[job_id] = {
         "job_id": job_id,
         "status": "queued",
@@ -4466,6 +4490,7 @@ async def make_webhook_reversao(payload: MakeReversaoWebhook, background_tasks: 
         raise HTTPException(status_code=400, detail="Lista de IDs vazia")
 
     job_id = f"rev_{uuid.uuid4().hex[:10]}"
+    _trim_dict(_make_reversao_jobs, 200)
     _make_reversao_jobs[job_id] = {
         "job_id": job_id,
         "status": "queued",
