@@ -29,6 +29,9 @@ class PDFService:
         if isinstance(pdf_data, bytes):
             pdf_data = io.BytesIO(pdf_data)
 
+        # Garante que a posição do stream está no início antes de qualquer leitura
+        pdf_data.seek(0)
+
         # Detecção por extensão
         ext = ""
         if filename:

@@ -4,6 +4,7 @@ Serviço de integração com LLM via LangChain.
 Utiliza OpenAI para extrair informações estruturadas de documentos.
 """
 
+import collections
 import hashlib
 import json
 import logging
@@ -500,7 +501,7 @@ class LLMService:
         self.parser = JsonOutputParser()
 
         # Cache de extração por hash de arquivo
-        self._extraction_cache: dict[str, LLMExtractionResult] = {}
+        self._extraction_cache: collections.OrderedDict[str, LLMExtractionResult] = collections.OrderedDict()
         self._extraction_cache_lock = threading.Lock()
         self._extraction_cache_max = 200
         self._extraction_cache_hits = 0
@@ -516,6 +517,7 @@ class LLMService:
         with self._extraction_cache_lock:
             cached = self._extraction_cache.get(file_hash)
             if cached is not None:
+                self._extraction_cache.move_to_end(file_hash)
                 self._extraction_cache_hits += 1
                 logger.info(
                     "[EXTRACTION_CACHE] hit | hash=%s | tipo=%s confianca=%.2f",
@@ -528,11 +530,10 @@ class LLMService:
             return None
 
     def _store_cached_extraction(self, file_hash: str, result: LLMExtractionResult) -> None:
-        """Armazena resultado no cache, evictando o mais antigo se atingir limite."""
+        """Armazena resultado no cache, evictando o menos recentemente usado se atingir limite."""
         with self._extraction_cache_lock:
             if len(self._extraction_cache) >= self._extraction_cache_max:
-                oldest_key = next(iter(self._extraction_cache))
-                del self._extraction_cache[oldest_key]
+                self._extraction_cache.popitem(last=False)
             self._extraction_cache[file_hash] = result.model_copy()
 
     def get_extraction_cache_stats(self) -> dict:
