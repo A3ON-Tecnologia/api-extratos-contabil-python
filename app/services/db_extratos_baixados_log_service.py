@@ -85,6 +85,9 @@ class ExtratosBaixadosLogService:
         cliente_nome: Optional[str] = None,
         ano: Optional[int] = None,
         mes: Optional[int] = None,
+        banco: Optional[str] = None,
+        tipo_documento: Optional[str] = None,
+        confianca_min: Optional[int] = None,
     ) -> list[ExtratosBaixadosLog]:
         """Busca logs com filtros opcionais."""
         db = SessionLocal()
@@ -99,6 +102,12 @@ class ExtratosBaixadosLogService:
                 query = query.filter(ExtratosBaixadosLog.ano == ano)
             if mes:
                 query = query.filter(ExtratosBaixadosLog.mes == mes)
+            if banco:
+                query = query.filter(ExtratosBaixadosLog.banco.ilike(f"%{banco}%"))
+            if tipo_documento:
+                query = query.filter(ExtratosBaixadosLog.tipo_documento.ilike(f"%{tipo_documento}%"))
+            if confianca_min is not None:
+                query = query.filter(ExtratosBaixadosLog.confianca_ia <= confianca_min)
 
             query = query.order_by(ExtratosBaixadosLog.processado_em.desc())
             query = query.limit(limit).offset(offset)

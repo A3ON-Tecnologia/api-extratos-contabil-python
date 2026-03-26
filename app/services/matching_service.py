@@ -80,6 +80,8 @@ class MatchingService:
                 logger.warning("[CONTA] Falha ao carregar planilha de extratos: %s", e)
                 clients_extratos = None
 
+        tentativas: list[str] = []
+
         if extraction.conta:
             base_clients = clients_extratos or clients
             result = self._match_by_conta_exata(
@@ -88,21 +90,23 @@ class MatchingService:
                 base_clients,
             )
             if result.identificado:
-                logger.info("Match por CONTA EXATA: %s", result.cliente.nome)
+                tentativas.append(f"CONTA_EXATA(score=100)")
+                self._log_match_audit(result, tentativas, extraction)
                 return result
+            tentativas.append(f"CONTA_EXATA(falhou: {result.motivo_fallback})")
 
-        # Para arquivos OFX: IDENTIFICA??O APENAS POR CONTA
+        # Para arquivos OFX: IDENTIFICAÇÃO APENAS POR CONTA
         if is_ofx and extraction.conta:
-            logger.info("[OFX] Buscando por CONTA (sem exigir ag?ncia)")
             result = self._match_by_conta_only(
                 extraction.banco,
                 extraction.conta,
                 clients
             )
-
             if result.identificado:
-                logger.info(f"[OFX] Match por Conta: {result.cliente.nome}")
+                tentativas.append(f"CONTA_OFX(score={result.score:.0f})")
+                self._log_match_audit(result, tentativas, extraction)
                 return result
+            tentativas.append(f"CONTA_OFX(falhou: {result.motivo_fallback})")
 
         # 1. Tentar match por CNPJ
         if extraction.cnpj:
@@ -113,21 +117,24 @@ class MatchingService:
                 conta=extraction.conta,
             )
             if result.identificado:
-                logger.info(f"Match por CNPJ: {result.cliente.nome}")
+                tentativas.append(f"CNPJ(score=100)")
+                self._log_match_audit(result, tentativas, extraction)
                 return result
+            tentativas.append(f"CNPJ(falhou: {result.motivo_fallback})")
+        else:
+            tentativas.append("CNPJ(pulado: sem cnpj)")
 
         # 2. Tentar match por Agência + Conta + Banco (para não-OFX ou quando conta OFX falhou)
         if extraction.agencia and extraction.conta and not is_ofx:
-            # Conta Capital: busca apenas por banco + agência (conta capital tem número diferente)
             is_conta_capital = extraction.tipo_documento and "CONTA CAPITAL" in extraction.tipo_documento.upper()
 
             if is_conta_capital:
-                logger.info("Extrato de CONTA CAPITAL detectado - matching apenas por banco+agência")
                 result = self._match_by_agencia_only(
                     extraction.banco,
                     extraction.agencia,
                     clients
                 )
+                metodo_label = "AGENCIA_ONLY"
             else:
                 result = self._match_by_conta(
                     extraction.banco,
@@ -135,11 +142,18 @@ class MatchingService:
                     extraction.conta,
                     clients
                 )
+                metodo_label = "AGENCIA_CONTA"
 
             if result.identificado:
-                logger.info(f"Match por Conta/Agência: {result.cliente.nome}")
+                tentativas.append(f"{metodo_label}(score={result.score:.0f})")
+                self._log_match_audit(result, tentativas, extraction)
                 return result
-        
+            tentativas.append(f"{metodo_label}(falhou: {result.motivo_fallback})")
+        elif not is_ofx:
+            tentativas.append(
+                f"AGENCIA_CONTA(pulado: ag={extraction.agencia} conta={extraction.conta})"
+            )
+
         # 3. Tentar match por nome com similaridade
         if extraction.cliente_sugerido:
             result = self._match_by_name(
@@ -150,21 +164,56 @@ class MatchingService:
                 conta=extraction.conta,
             )
             if result.identificado:
-                logger.info(
-                    f"Match por nome ({result.score:.1f}%): {result.cliente.nome}"
-                )
+                tentativas.append(f"NOME(score={result.score:.1f})")
+                self._log_match_audit(result, tentativas, extraction)
                 return result
-        
+            tentativas.append(f"NOME(falhou: score abaixo do threshold)")
+        else:
+            tentativas.append("NOME(pulado: sem nome sugerido)")
+
         # Nenhum match encontrado
         motivo = self._build_fallback_reason(extraction, is_ofx=is_ofx)
-        logger.warning(f"Cliente não identificado: {motivo}")
-        
-        return MatchResult(
+        result = MatchResult(
             cliente=None,
             metodo=MatchMethod.NAO_IDENTIFICADO,
             score=0.0,
             motivo_fallback=motivo,
         )
+        self._log_match_audit(result, tentativas, extraction)
+        return result
+
+    def _log_match_audit(
+        self,
+        result: "MatchResult",
+        tentativas: list[str],
+        extraction: LLMExtractionResult,
+    ) -> None:
+        """Emite log de auditoria consolidado do processo de matching."""
+        tentativas_str = " → ".join(tentativas)
+        if result.identificado:
+            logger.info(
+                "[MATCH_AUDIT] identificado | metodo=%s | score=%.1f | cliente='%s' "
+                "| banco=%s | agencia=%s | conta=%s | tentativas=[%s]",
+                result.metodo.value if result.metodo else "?",
+                result.score,
+                result.cliente.nome if result.cliente else "?",
+                extraction.banco,
+                extraction.agencia,
+                extraction.conta,
+                tentativas_str,
+            )
+        else:
+            logger.warning(
+                "[MATCH_AUDIT] nao_identificado | banco=%s | agencia=%s | conta=%s "
+                "| cnpj=%s | nome='%s' | motivo='%s' | tentativas=[%s]",
+                extraction.banco,
+                extraction.agencia,
+                extraction.conta,
+                extraction.cnpj,
+                extraction.cliente_sugerido,
+                result.motivo_fallback,
+                tentativas_str,
+            )
     
     def _match_by_cnpj(
         self,
