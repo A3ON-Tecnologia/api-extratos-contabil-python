@@ -569,12 +569,31 @@
                         <button class="tab" data-tab="test">Teste</button>
                     </div>
                 </div>
-                <div class="card-header" style="border-top: 1px solid var(--border-color);">
+                <div class="card-header" style="border-top: 1px solid var(--border-color); flex-wrap: wrap; gap: 0.75rem;">
                     <div class="status-filters" id="statusFilters">
                         <button class="status-filter active" data-status="ALL">Todos</button>
                         <button class="status-filter" data-status="SUCESSO">Sucesso</button>
                         <button class="status-filter" data-status="NAO_IDENTIFICADO">Nao identificado</button>
                         <button class="status-filter" data-status="FALHA">Falha</button>
+                    </div>
+                    <div style="display: flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+                        <input id="filterBanco" type="text" placeholder="Banco..." title="Filtrar por banco"
+                            style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:0.45rem; padding:0.35rem 0.6rem; font-size:0.78rem; width:110px; outline:none;"
+                            oninput="loadLogs()" />
+                        <input id="filterTipo" type="text" placeholder="Tipo extrato..." title="Filtrar por tipo de documento"
+                            style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:0.45rem; padding:0.35rem 0.6rem; font-size:0.78rem; width:150px; outline:none;"
+                            oninput="loadLogs()" />
+                        <label style="font-size:0.75rem; color:var(--text-secondary); display:flex; align-items:center; gap:0.3rem;">
+                            Conf ≤
+                            <input id="filterConfianca" type="number" min="0" max="100" placeholder="100" title="Confiança máxima (%)"
+                                style="background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-color); border-radius:0.45rem; padding:0.35rem 0.4rem; font-size:0.78rem; width:58px; outline:none;"
+                                oninput="loadLogs()" />
+                            %
+                        </label>
+                        <button class="btn" style="font-size:0.75rem; padding:0.35rem 0.6rem;"
+                            onclick="document.getElementById('filterBanco').value=''; document.getElementById('filterTipo').value=''; document.getElementById('filterConfianca').value=''; loadLogs();">
+                            Limpar
+                        </button>
                     </div>
                 </div>
                 <div class="table-wrapper" id="tableWrapper">
@@ -733,8 +752,14 @@
         async function loadLogs() {
             setEmpty('Carregando...');
             let url = currentTab === 'test' ? '/extratos/monitor/test/logs?limit=200' : '/extratos/logs?limit=200';
-            if (currentTab === 'prod' && currentStatus !== 'ALL') {
-                url += `&status=${encodeURIComponent(currentStatus)}`;
+            if (currentTab === 'prod') {
+                if (currentStatus !== 'ALL') url += `&status=${encodeURIComponent(currentStatus)}`;
+                const banco = (document.getElementById('filterBanco')?.value || '').trim();
+                const tipo  = (document.getElementById('filterTipo')?.value || '').trim();
+                const conf  = (document.getElementById('filterConfianca')?.value || '').trim();
+                if (banco) url += `&banco=${encodeURIComponent(banco)}`;
+                if (tipo)  url += `&tipo_documento=${encodeURIComponent(tipo)}`;
+                if (conf)  url += `&confianca_max=${encodeURIComponent(conf)}`;
             }
 
             try {

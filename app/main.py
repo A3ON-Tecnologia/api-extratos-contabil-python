@@ -3498,6 +3498,9 @@ async def get_extratos_logs(
     cliente: str = None,
     ano: int = None,
     mes: int = None,
+    banco: str = None,
+    tipo_documento: str = None,
+    confianca_max: int = None,
 ):
     """Consulta logs de extratos baixados."""
     try:
@@ -3509,6 +3512,9 @@ async def get_extratos_logs(
             cliente_nome=cliente,
             ano=ano,
             mes=mes,
+            banco=banco,
+            tipo_documento=tipo_documento,
+            confianca_min=confianca_max,
         )
         return {
             "total": len(logs),
