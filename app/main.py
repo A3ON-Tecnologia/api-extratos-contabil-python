@@ -218,7 +218,7 @@ _extratos_jobs: dict[str, dict] = {}
 
 # Armazenamento de jobs de EXTRATOS BAIXADOS (TESTE)
 _extratos_test_jobs: dict[str, dict] = {}
-EXTRATOS_ALLOWED_EXTENSIONS = {".pdf", ".zip", ".ofx"}
+EXTRATOS_ALLOWED_EXTENSIONS = {".pdf", ".zip", ".ofx", ".xls", ".xlsx"}
 EXTRATOS_INPUT_BANK_FOLDERS = (
     "BANCO DO BRASIL",
     "BRADESCO",
