@@ -123,14 +123,10 @@ class StorageService:
             client_base_path = self._resolve_client_path(match_result.cliente)
 
             if client_base_path:
-                target_path = self._build_path_structure(client_base_path, ano, mes)
-                month_path = self._build_path_structure(client_base_path, ano, mes)
-                if not month_path.exists():
-                    logger.info(f"Criando pasta do mes: {month_path}")
-                    month_path.mkdir(parents=True, exist_ok=True)
-
+                conta = self._select_account(banco, conta_extrato, match_result.cliente.conta)
+                target_path = self._build_path_structure(client_base_path, ano, mes, banco, conta)
                 if not target_path.exists():
-                    logger.info(f"Criando pasta do mes: {target_path}")
+                    logger.info(f"Criando pasta: {target_path}")
                     target_path.mkdir(parents=True, exist_ok=True)
 
                 filename = self._build_filename(
@@ -190,8 +186,7 @@ class StorageService:
         """
         Constroi a estrutura de pastas dentro da pasta do cliente.
 
-        Estrutura padrao: cliente/Departamento Contabil/ANO/MES
-        NUNCA cria subpastas por banco ou conta.
+        Estrutura: cliente/Departamento Contabil/ANO/MES/BANCO
         """
         mes_str = str(mes).zfill(2)
 
@@ -204,6 +199,9 @@ class StorageService:
                 base_path = dept_path_sem_acento / str(ano) / mes_str
             else:
                 base_path = client_base_path / "Departamento Contábil" / str(ano) / mes_str
+
+        if banco:
+            base_path = base_path / banco.upper().strip()
 
         return base_path
 

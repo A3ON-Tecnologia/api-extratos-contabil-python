@@ -16,6 +16,7 @@ from app.services import ClientService, LLMService, MatchingService, PDFService,
 from app.services.db_extratos_baixados_log_teste_service import (
     get_extratos_baixados_log_teste_service,
 )
+from app.services.excel_extractor_service import get_excel_extractor_service
 from app.utils.hash import compute_hash
 
 logger = logging.getLogger(__name__)
@@ -62,9 +63,19 @@ class ExtratosBaixadosSimulacaoService:
             executor, self._pdf_service.extract_text, pdf_data, filename
         )
 
+        excel_extractor = get_excel_extractor_service()
         extraction = await loop.run_in_executor(
-            executor, self._llm_service.extract_info_with_fallback, text, pdf_data
+            executor, excel_extractor.extract, pdf_data, filename
         )
+        if extraction is not None:
+            logger.info(
+                "[EXCEL_EXTRACTOR] Extração direta OK para '%s' (banco=%s tipo=%s conf=%.2f) — LLM ignorada",
+                filename, extraction.banco, extraction.tipo_documento, extraction.confianca,
+            )
+        else:
+            extraction = await loop.run_in_executor(
+                executor, self._llm_service.extract_info_with_fallback, text, pdf_data
+            )
 
         # Banco da subpasta tem prioridade máxima — é fonte de verdade confirmada pelo operador
         banco_pasta = _banco_from_folder_path(filename)

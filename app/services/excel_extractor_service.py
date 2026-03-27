@@ -102,6 +102,19 @@ def _is_sicredi_boletos(df: pd.DataFrame) -> bool:
     return has_associado and has_cooperativa and has_conta and has_titulo
 
 
+def _is_cooperativa_extrato(df: pd.DataFrame) -> bool:
+    """
+    Detecta extratos de cooperativas (Sicoob, Sicredi, etc.) que usam
+    as labels padrão: Associado, Cooperativa e Conta Corrente.
+
+    Não exige título específico — as 3 labels já identificam o formato.
+    """
+    has_associado = _find_label_value(df, "Associado:") is not None
+    has_cooperativa = _find_label_value(df, "Cooperativa:") is not None
+    has_conta = _find_label_value(df, "Conta Corrente:") is not None
+    return has_associado and has_cooperativa and has_conta
+
+
 # ---------------------------------------------------------------------------
 # Extratores por formato
 # ---------------------------------------------------------------------------
@@ -131,6 +144,67 @@ def _extract_sicredi_boletos(df: pd.DataFrame) -> LLMExtractionResult:
         cliente_sugerido=cliente,
         cnpj=None,
         banco="SICREDI",
+        agencia=cooperativa,
+        conta=conta,
+        contrato=None,
+        tipo_documento=tipo,
+        confianca=0.95,
+    )
+
+
+def _detect_banco_cooperativa(df: pd.DataFrame, filename: str) -> str:
+    """Tenta identificar o banco a partir do conteúdo ou nome do arquivo."""
+    filename_upper = filename.upper()
+    if "SICOOB" in filename_upper:
+        return "SICOOB"
+    if "SICREDI" in filename_upper:
+        return "SICREDI"
+    # Busca nas primeiras células
+    for row in range(min(len(df), 10)):
+        for col in range(min(df.shape[1], 4)):
+            cell = str(df.iloc[row, col]) if not pd.isna(df.iloc[row, col]) else ""
+            cell_up = _normalize(cell)
+            if "SICOOB" in cell_up:
+                return "SICOOB"
+            if "SICREDI" in cell_up:
+                return "SICREDI"
+    return "COOPERATIVA"  # genérico se não identificar
+
+
+def _extract_cooperativa_extrato(df: pd.DataFrame, filename: str) -> LLMExtractionResult:
+    """Extrai campos de extrato de cooperativa usando as labels padrão."""
+
+    cliente = _find_label_value(df, "Associado:")
+    cooperativa = _find_label_value(df, "Cooperativa:")  # = agência
+    conta = _find_label_value(df, "Conta Corrente:")
+    banco = _detect_banco_cooperativa(df, filename)
+
+    # Período
+    periodo_raw = _find_cell_containing(df, "PERIODO") or _find_cell_containing(df, "DADOS REFERENTES")
+    mes, ano = _parse_period(periodo_raw) if periodo_raw else (None, None)
+
+    # Tipo: tenta identificar pelo título, senão usa padrão
+    tipo = "EXTRATO"
+    for keyword, tipo_canonico in [
+        ("RELATORIO DE BOLETOS", "REL RECEBIMENTO"),
+        ("EXTRATO DE CONTA", "EXTRATO CC"),
+        ("EXTRATO CAPITAL", "EXTRATO CAPITAL"),
+        ("RELATORIO DE TITULOS", "REL RECEBIMENTO"),
+    ]:
+        if _find_cell_containing(df, keyword) is not None:
+            tipo = tipo_canonico
+            break
+
+    logger.info(
+        "[EXCEL_EXTRACTOR] Cooperativa Extrato | banco=%s | cliente=%s | cooperativa=%s | "
+        "conta=%s | mes=%s ano=%s | tipo=%s",
+        banco, cliente, cooperativa, conta, mes, ano, tipo,
+    )
+
+    return LLMExtractionResult(
+        cliente_sugerido=cliente,
+        cnpj=None,
+        banco=banco,
         agencia=cooperativa,
         conta=conta,
         contrato=None,
@@ -169,8 +243,14 @@ class ExcelExtractorService:
             if isinstance(file_data, bytes):
                 file_data = io.BytesIO(file_data)
 
-            engine = "xlrd" if ext == ".xls" else "openpyxl"
-            xls = pd.ExcelFile(file_data, engine=engine)
+            # Tenta openpyxl primeiro (funciona para .xlsx e para .xls salvos no formato moderno).
+            # Fallback para xlrd apenas se openpyxl falhar (arquivos BIFF legados).
+            try:
+                xls = pd.ExcelFile(file_data, engine="openpyxl")
+            except Exception:
+                if isinstance(file_data, io.BytesIO):
+                    file_data.seek(0)
+                xls = pd.ExcelFile(file_data, engine="xlrd")
 
             # Tenta a aba "Relatorio" primeiro, depois qualquer aba
             sheet_name = "Relatorio" if "Relatorio" in xls.sheet_names else xls.sheet_names[0]
@@ -179,9 +259,17 @@ class ExcelExtractorService:
             if _is_sicredi_boletos(df):
                 return _extract_sicredi_boletos(df)
 
-            logger.debug(
-                "[EXCEL_EXTRACTOR] Formato não reconhecido para '%s' — fallback para LLM",
+            if _is_cooperativa_extrato(df):
+                return _extract_cooperativa_extrato(df, filename)
+
+            # Log diagnóstico: mostra as primeiras células para identificar novo formato
+            logger.warning(
+                "[EXCEL_EXTRACTOR] Formato não reconhecido para '%s' (%d linhas, %d colunas) — "
+                "primeiras células: %s",
                 filename,
+                len(df),
+                df.shape[1],
+                str(df.iloc[:8, :4].values.tolist()),
             )
             return None
 

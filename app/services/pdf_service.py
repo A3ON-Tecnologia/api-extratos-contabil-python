@@ -39,7 +39,7 @@ class PDFService:
 
         # Despacha para o extrator correto
         if ext in [".xlsx", ".xls", ".ods"]:
-            return self._extract_from_excel(pdf_data)
+            return self._extract_from_excel(pdf_data, ext=ext)
         elif ext in [".csv", ".txt", ".ofx", ".html", ".xml", ".json"]:
             return self._extract_from_text(pdf_data)
 
@@ -64,21 +64,29 @@ class PDFService:
 
         return self._normalize_text(text)
 
-    def _extract_from_excel(self, file_data: BinaryIO) -> str:
+    def _extract_from_excel(self, file_data: BinaryIO, ext: str = ".xlsx") -> str:
         """Extrai texto de todos as abas de um Excel."""
         try:
             import pandas as pd
-            dfs = pd.read_excel(file_data, sheet_name=None)
+            # Tenta openpyxl primeiro (funciona para .xlsx e para .xls salvos no formato moderno).
+            # Fallback para xlrd apenas se openpyxl falhar (arquivos BIFF legados).
+            try:
+                dfs = pd.read_excel(file_data, sheet_name=None, engine="openpyxl", header=None)
+            except Exception:
+                import io as _io
+                if hasattr(file_data, "seek"):
+                    file_data.seek(0)
+                dfs = pd.read_excel(file_data, sheet_name=None, engine="xlrd", header=None)
             text_parts = []
-            
+
             for sheet_name, df in dfs.items():
                 text_parts.append(f"--- Aba: {sheet_name} ---")
                 # Converte para string CSV-like para o LLM entender a estrutura
                 text_parts.append(df.to_string(index=False))
-            
+
             return "\n\n".join(text_parts)
         except Exception as e:
-            logger.error(f"Erro ao ler Excel: {e}")
+            logger.error(f"Erro ao ler Excel (engine={ext}): {e}")
             return ""
 
     def _extract_from_text(self, file_data: BinaryIO) -> str:

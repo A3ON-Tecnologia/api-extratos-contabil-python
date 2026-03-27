@@ -60,7 +60,6 @@ from app.services.db_extratos_baixados_log_teste_service import (
 )
 from app.services.reversao_service import get_reversao_service
 from app.services.extratos_baixados_reversao_service import get_extratos_baixados_reversao_service
-from app.services.excel_extractor_service import get_excel_extractor_service
 from app.services.extratos_baixados_simulacao_service import (
     ExtratosBaixadosSimulacaoService,
 )
@@ -1818,9 +1817,9 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
             progress=30
         ))
         
-        llm_service = get_llm_service()
-        # Executar LLM em thread separada (com fallback de visão para identificar banco)
         loop = asyncio.get_event_loop()
+
+        llm_service = get_llm_service()
         extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
 
         # Banco da subpasta tem prioridade máxima — é fonte de verdade confirmada pelo operador
@@ -2424,19 +2423,8 @@ async def process_extratos_pdf_async(
             progress=30
         ))
 
-        # Tenta extração estruturada para Excel (sem LLM) — fallback para LLM se não reconhecido
-        excel_extractor = get_excel_extractor_service()
-        extraction = await loop.run_in_executor(
-            _executor, excel_extractor.extract, pdf_data, filename
-        )
-        if extraction is not None:
-            logger.info(
-                "[EXCEL_EXTRACTOR] Extração direta OK para '%s' (banco=%s tipo=%s conf=%.2f) — LLM ignorada",
-                filename, extraction.banco, extraction.tipo_documento, extraction.confianca,
-            )
-        else:
-            llm_service = get_llm_service()
-            extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+        llm_service = get_llm_service()
+        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
 
         # Banco da subpasta tem prioridade máxima — é fonte de verdade confirmada pelo operador
         banco_pasta = _banco_from_folder_path(filename)
@@ -3834,7 +3822,7 @@ async def _process_single_test_pdf(
             ))
         llm_service = get_llm_service()
         extraction = llm_service.extract_info_with_fallback(text, pdf_content)
-        
+
         # 3. Matching de cliente
         if emit_events:
             await event_manager.emit(ProcessingEvent(
