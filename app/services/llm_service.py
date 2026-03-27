@@ -1018,6 +1018,23 @@ class LLMService:
                 if result.confianca < 0.8:
                     result.confianca = 0.8
 
+            # Heurística textual: Cresol Extrato de RDC → Extrato de Aplicação
+            if self._is_cresol_extrato_rdc(tipo_analysis_text):
+                result.tipo_documento = "EXTRATO APLICACAO"
+                if result.confianca < 0.9:
+                    result.confianca = 0.9
+                logger.info("[CRESOL_RDC] Classificado como EXTRATO APLICACAO")
+                if not result.agencia:
+                    agencia = self._extract_cresol_rdc_agencia(analysis_text)
+                    if agencia:
+                        result.agencia = agencia
+                        logger.info(f"[CRESOL_RDC] Agência extraída: {agencia}")
+                if not result.conta:
+                    conta = self._extract_cresol_rdc_conta(analysis_text)
+                    if conta:
+                        result.conta = conta
+                        logger.info(f"[CRESOL_RDC] Conta extraída: {conta}")
+
             # Heuristica textual: relatorio PAR do SICOOB (parcelas em aberto/liquidadas)
             par_tipo = self._detect_par_report_type(tipo_analysis_text)
             if par_tipo:
@@ -1241,6 +1258,11 @@ class LLMService:
             return "SICOOB"
 
         # CRESOL - diferente de SICOOB!
+        # Código 133 = Cresol (Cooperativa de Crédito Rural com Interação Solidária)
+        if "INSTITUICAO FINANCEIRA 133" in normalized and "SICOOB" not in normalized:
+            return "CRESOL"
+        if "EXTRATO DE RDC" in normalized and "SICOOB" not in normalized:
+            return "CRESOL"
         if "CRESOL" in normalized and "SICOOB" not in normalized and "SICOOB" not in compact and "SICOOB" not in compact_ambiguous:
             return "CRESOL"
 
@@ -1332,6 +1354,37 @@ class LLMService:
         """Detecta indicio de investimento pelo termo RENDE FACIL."""
         normalized = self._normalize_text_for_hint(text)
         return "RENDE FACIL" in normalized
+
+    def _is_cresol_extrato_rdc(self, text: str) -> bool:
+        """Detecta Extrato de RDC da Cresol (produto exclusivo — sem necessidade de checar banco)."""
+        normalized = self._normalize_text_for_hint(text)
+        return "EXTRATO DE RDC" in normalized
+
+    def _extract_cresol_rdc_agencia(self, text: str) -> str | None:
+        """Extrai agência do Extrato de RDC Cresol.
+
+        Estrutura esperada:
+            Agencia: 5684-7
+        """
+        if not text:
+            return None
+        match = re.search(r"Ag[eê]ncia\s*[:\-]\s*([0-9]+-[0-9A-Za-z]+)", text, re.IGNORECASE)
+        if not match:
+            match = re.search(r"Ag[eê]ncia\s*[:\-]\s*([0-9]+)", text, re.IGNORECASE)
+        return match.group(1).strip() if match else None
+
+    def _extract_cresol_rdc_conta(self, text: str) -> str | None:
+        """Extrai conta do Extrato de RDC Cresol.
+
+        Estrutura esperada:
+            Conta: 1074-0
+        """
+        if not text:
+            return None
+        match = re.search(r"\bConta\s*[:\-]\s*([0-9]+-[0-9A-Za-z]+)", text, re.IGNORECASE)
+        if not match:
+            match = re.search(r"\bConta\s*[:\-]\s*([0-9]+)", text, re.IGNORECASE)
+        return match.group(1).strip() if match else None
 
     def _detect_par_report_type(self, text: str) -> str | None:
         """Detecta relatorio PAR do SICOOB e classifica o tipo."""
