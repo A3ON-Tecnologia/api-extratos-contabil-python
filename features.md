@@ -245,15 +245,15 @@ Try-finally garante retomada mesmo em caso de erro. Evita que arquivos sejam mov
 `POST /extratos/watch/start` e `POST /extratos/watch/stop`.
 Status em `/extratos/watch/status` com campo `paused_for_simulation`.
 
-### 💡 Filtro de arquivos por padrão de nome no watcher
+### ✅ Filtro de arquivos por padrão de nome no watcher
 Permitir configurar regex/glob de quais arquivos o watcher deve processar.
 Ex: ignorar arquivos que começam com `~$` (temporários do Office) ou `._`.
 
-### 💡 Reprocessamento automático de falhas
+### ✅ Reprocessamento automático de falhas
 Manter fila de arquivos que falharam e tentar novamente após intervalo configurável.
 Útil para falhas temporárias de API ou banco de dados.
 
-### 💡 Watcher com debounce configurável
+### ✅ Watcher com debounce configurável
 Hoje o debounce para detectar mudanças recentes é fixo.
 Tornar configurável via `.env` para ajustar conforme velocidade do servidor.
 
@@ -395,7 +395,7 @@ Equivalente à simulação, mas via API (útil para integração).
 Filtrar por: data, banco, tipo de documento, método de matching, confiança mínima.
 Facilita auditoria e identificação de padrões de erro.
 
-### 💡 Endpoint de estatísticas por banco
+### ✅ Endpoint de estatísticas por banco
 `GET /stats/banco/{banco}` — retorna taxa de sucesso, confiança média, tipos mais comuns.
 
 ---

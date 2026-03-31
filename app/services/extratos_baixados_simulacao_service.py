@@ -59,8 +59,10 @@ class ExtratosBaixadosSimulacaoService:
         file_hash = compute_hash(pdf_data)
 
         loop = asyncio.get_event_loop()
+        # Extrai apenas a primeira página — o cabeçalho com banco/agência/conta/cliente
+        # está sempre na página 1; as demais são apenas transações (irrelevantes para LLM)
         text = await loop.run_in_executor(
-            executor, self._pdf_service.extract_text, pdf_data, filename
+            executor, self._pdf_service.extract_text, pdf_data, filename, 1
         )
 
         excel_extractor = get_excel_extractor_service()

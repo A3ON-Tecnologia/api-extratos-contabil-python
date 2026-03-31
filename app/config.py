@@ -31,6 +31,14 @@ class Settings(BaseSettings):
     # ==================== Pasta de Extratos ====================
     extratos_excel_path: Path
     watch_folder_path: Path
+    watch_filename_allow_globs: str = "*"
+    watch_filename_allow_regex: str = ""
+    watch_filename_ignore_globs: str = "~$*,._*,*.tmp,*.temp,*.part,*.crdownload,*.download,thumbs.db,desktop.ini"
+    watch_filename_ignore_regex: str = ""
+    watch_poll_interval_seconds: float = 5.0
+    watch_debounce_seconds: float = 5.0
+    watch_retry_interval_seconds: float = 30.0
+    watch_retry_max_attempts: int = 3
 
     # ==================== Matching ====================
     similarity_threshold: int = 85
@@ -128,6 +136,14 @@ class Settings(BaseSettings):
             "log_excel_path": str(self.log_excel_path),
             "extratos_excel_path": str(self.extratos_excel_path),
             "watch_folder_path": str(self.watch_folder_path),
+            "watch_filename_allow_globs": self.watch_filename_allow_globs,
+            "watch_filename_allow_regex": self.watch_filename_allow_regex,
+            "watch_filename_ignore_globs": self.watch_filename_ignore_globs,
+            "watch_filename_ignore_regex": self.watch_filename_ignore_regex,
+            "watch_poll_interval_seconds": self.watch_poll_interval_seconds,
+            "watch_debounce_seconds": self.watch_debounce_seconds,
+            "watch_retry_interval_seconds": self.watch_retry_interval_seconds,
+            "watch_retry_max_attempts": self.watch_retry_max_attempts,
             "similarity_threshold": self.similarity_threshold,
             "port": self.port,
             "unidentified_make_path": str(self.unidentified_make_path),
