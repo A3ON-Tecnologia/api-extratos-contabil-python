@@ -8,14 +8,17 @@ O Make recebe resposta imediata e o arquivo e processado em background.
 import asyncio
 import json
 import logging
+import math
 import os
 import re
 import uuid
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, List
 from concurrent.futures import ThreadPoolExecutor
 import mimetypes
+from fnmatch import fnmatch
 
 from fastapi import (
     BackgroundTasks,
@@ -58,6 +61,7 @@ from app.services.db_extratos_baixados_log_service import get_extratos_baixados_
 from app.services.db_extratos_baixados_log_teste_service import (
     get_extratos_baixados_log_teste_service,
 )
+from app.services.excel_extractor_service import get_excel_extractor_service
 from app.services.reversao_service import get_reversao_service
 from app.services.extratos_baixados_reversao_service import get_extratos_baixados_reversao_service
 from app.services.extratos_baixados_simulacao_service import (
@@ -230,6 +234,7 @@ EXTRATOS_INPUT_BANK_FOLDERS = (
     "OUTROS",
 )
 EXTRATOS_TRACE_FOLDER = "_LLM_TRACE"
+EXTRATOS_DEFAULT_IGNORE_GLOBS = ("~$*", "._*", "*.tmp", "*.temp", "*.part", "*.crdownload", "*.download", "thumbs.db", "desktop.ini")
 
 # Bancos válidos como subpasta (excluindo OUTROS)
 _BANCOS_VALIDOS_PASTA = set(EXTRATOS_INPUT_BANK_FOLDERS) - {"OUTROS"}
@@ -254,8 +259,9 @@ _executor = ThreadPoolExecutor(max_workers=4)
 # Watcher de pasta de entrada (controlado por endpoints)
 _watch_task: asyncio.Task | None = None
 _watch_running: bool = False
-_watch_seen: dict[str, int] = {}
+_watch_seen: dict[str, dict[str, float]] = {}
 _watch_processed: dict[str, float] = {}
+_watch_retry_queue: dict[str, dict[str, object]] = {}
 
 
 def _trim_dict(d: dict, max_size: int) -> None:
@@ -365,6 +371,216 @@ def _ensure_extratos_bank_folders(watch_path: Path) -> list[str]:
     return created
 
 
+def _split_csv_patterns(value: str | None) -> list[str]:
+    """Converte lista CSV de padr?es em lista limpa."""
+    if not value:
+        return []
+    return [item.strip() for item in value.split(",") if item and item.strip()]
+
+
+def _compile_optional_regex(pattern: str | None, *, label: str) -> re.Pattern[str] | None:
+    """Compila regex opcional; em caso de erro loga e ignora o filtro."""
+    if not pattern or not pattern.strip():
+        return None
+    try:
+        return re.compile(pattern.strip(), flags=re.IGNORECASE)
+    except re.error as exc:
+        logger.warning("Regex invalido em %s: %s (%s)", label, pattern, exc)
+        return None
+
+
+def _should_process_file_by_name(
+    file_name: str,
+    *,
+    allow_globs: list[str],
+    allow_regex: re.Pattern[str] | None,
+    ignore_globs: list[str],
+    ignore_regex: re.Pattern[str] | None,
+) -> bool:
+    """Aplica filtros de include/exclude por nome de arquivo."""
+    name_lower = file_name.lower()
+
+    if allow_globs and not any(fnmatch(name_lower, pattern.lower()) for pattern in allow_globs):
+        return False
+
+    if allow_regex and not allow_regex.search(file_name):
+        return False
+
+    if ignore_globs and any(fnmatch(name_lower, pattern.lower()) for pattern in ignore_globs):
+        return False
+
+    if ignore_regex and ignore_regex.search(file_name):
+        return False
+
+    return True
+
+
+def _get_watch_filename_filters(settings) -> dict[str, str]:
+    """Resumo dos filtros de nome aplicados pelo watcher."""
+    return {
+        "allow_globs": (getattr(settings, "watch_filename_allow_globs", "") or "*").strip(),
+        "allow_regex": (getattr(settings, "watch_filename_allow_regex", "") or "").strip(),
+        "ignore_globs": (getattr(settings, "watch_filename_ignore_globs", "") or ",".join(EXTRATOS_DEFAULT_IGNORE_GLOBS)).strip(),
+        "ignore_regex": (getattr(settings, "watch_filename_ignore_regex", "") or "").strip(),
+    }
+
+
+def _get_watch_runtime_config(settings) -> dict[str, float]:
+    """Retorna configuracao efetiva de polling e debounce do watcher."""
+
+    def _to_float(value, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    poll_interval = max(0.5, _to_float(getattr(settings, "watch_poll_interval_seconds", 5.0), 5.0))
+    debounce_seconds = max(0.0, _to_float(getattr(settings, "watch_debounce_seconds", 5.0), 5.0))
+
+    return {
+        "poll_interval_seconds": poll_interval,
+        "debounce_seconds": debounce_seconds,
+    }
+
+
+def _get_watch_retry_config(settings) -> dict[str, float | int]:
+    """Retorna configuracao de retry automatico para falhas do watcher."""
+
+    def _to_float(value, default: float) -> float:
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return default
+
+    def _to_int(value, default: int) -> int:
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            return default
+
+    retry_interval = max(1.0, _to_float(getattr(settings, "watch_retry_interval_seconds", 30.0), 30.0))
+    retry_max_attempts = max(0, _to_int(getattr(settings, "watch_retry_max_attempts", 3), 3))
+
+    return {
+        "retry_interval_seconds": retry_interval,
+        "retry_max_attempts": retry_max_attempts,
+    }
+
+
+def _schedule_watch_retry(
+    *,
+    source_path: Path,
+    filename: str,
+    is_zip: bool,
+    error_message: str,
+    retry_attempt: int,
+) -> None:
+    """Agenda um novo retry para arquivo que falhou no watcher."""
+    settings = get_settings()
+    retry_cfg = _get_watch_retry_config(settings)
+    max_attempts = int(retry_cfg["retry_max_attempts"])
+
+    if retry_attempt >= max_attempts:
+        logger.error(
+            "Watcher retry esgotado para %s (tentativas=%s, max=%s): %s",
+            source_path,
+            retry_attempt,
+            max_attempts,
+            error_message,
+        )
+        return
+
+    retry_interval = float(retry_cfg["retry_interval_seconds"])
+    source_key = str(source_path.resolve())
+    _watch_retry_queue[source_key] = {
+        "source_path": source_path,
+        "filename": filename,
+        "is_zip": is_zip,
+        "retry_attempt": retry_attempt,
+        "next_retry_at": time.monotonic() + retry_interval,
+        "last_error": error_message,
+        "updated_at": datetime.now().isoformat(),
+    }
+    logger.warning(
+        "Retry agendado para %s em %.1fs (tentativa %s/%s)",
+        source_path,
+        retry_interval,
+        retry_attempt + 1,
+        max_attempts,
+    )
+
+
+async def _process_watch_retry_queue(watch_path: Path) -> None:
+    """Dispara retries agendados para arquivos com falha no watcher."""
+    if not _watch_retry_queue:
+        return
+
+    settings = get_settings()
+    retry_cfg = _get_watch_retry_config(settings)
+    max_attempts = int(retry_cfg["retry_max_attempts"])
+    now_mono = time.monotonic()
+
+    for source_key, item in list(_watch_retry_queue.items()):
+        next_retry_at = float(item.get("next_retry_at", now_mono))
+        if now_mono < next_retry_at:
+            continue
+
+        source_path = item.get("source_path")
+        filename = item.get("filename")
+        is_zip = bool(item.get("is_zip", False))
+        retry_attempt = int(item.get("retry_attempt", 0)) + 1
+
+        if not isinstance(source_path, Path) or not source_path.exists():
+            _watch_retry_queue.pop(source_key, None)
+            logger.warning("Retry removido: arquivo nao existe mais (%s)", source_path)
+            continue
+
+        if retry_attempt > max_attempts:
+            _watch_retry_queue.pop(source_key, None)
+            logger.error("Retry removido: excedeu maximo de tentativas (%s)", source_path)
+            continue
+
+        try:
+            content = source_path.read_bytes()
+        except OSError as exc:
+            item["retry_attempt"] = retry_attempt
+            item["next_retry_at"] = now_mono + float(retry_cfg["retry_interval_seconds"])
+            item["last_error"] = str(exc)
+            item["updated_at"] = datetime.now().isoformat()
+            _watch_retry_queue[source_key] = item
+            continue
+
+        _watch_retry_queue.pop(source_key, None)
+
+        job_id = str(uuid.uuid4())[:8]
+        _trim_dict(_extratos_jobs, 500)
+        _extratos_jobs[job_id] = {
+            "job_id": job_id,
+            "filename": str(filename),
+            "status": "processing",
+            "message": f"Reprocessamento automatico (tentativa {retry_attempt})",
+            "created_at": datetime.now().isoformat(),
+            "completed_at": None,
+            "results": None,
+            "source": "extratos-retry",
+            "retry_attempt": retry_attempt,
+        }
+
+        logger.info("Disparando retry %s/%s para %s", retry_attempt, max_attempts, source_path)
+
+        asyncio.create_task(
+            process_extratos_file_background(
+                job_id=job_id,
+                content=content,
+                filename=str(filename),
+                is_zip=is_zip,
+                test_mode=False,
+                source_path=source_path,
+                retry_attempt=retry_attempt,
+            )
+        )
+
+
 def _iter_extratos_input_files(watch_path: Path) -> list[Path]:
     """
     Lista apenas arquivos dentro das subpastas da pasta de extratos.
@@ -373,6 +589,23 @@ def _iter_extratos_input_files(watch_path: Path) -> list[Path]:
     """
     if not watch_path.exists() or not watch_path.is_dir():
         return []
+
+    settings = get_settings()
+    allow_globs = _split_csv_patterns(getattr(settings, "watch_filename_allow_globs", "*"))
+    if not allow_globs:
+        allow_globs = ["*"]
+    allow_regex = _compile_optional_regex(
+        getattr(settings, "watch_filename_allow_regex", ""),
+        label="watch_filename_allow_regex",
+    )
+
+    ignore_globs = _split_csv_patterns(
+        getattr(settings, "watch_filename_ignore_globs", "")
+    ) or list(EXTRATOS_DEFAULT_IGNORE_GLOBS)
+    ignore_regex = _compile_optional_regex(
+        getattr(settings, "watch_filename_ignore_regex", ""),
+        label="watch_filename_ignore_regex",
+    )
 
     files: list[Path] = []
     for file_path in watch_path.rglob("*"):
@@ -383,6 +616,14 @@ def _iter_extratos_input_files(watch_path: Path) -> list[Path]:
         if EXTRATOS_TRACE_FOLDER in file_path.parts:
             continue
         if file_path.suffix.lower() not in EXTRATOS_ALLOWED_EXTENSIONS:
+            continue
+        if not _should_process_file_by_name(
+            file_path.name,
+            allow_globs=allow_globs,
+            allow_regex=allow_regex,
+            ignore_globs=ignore_globs,
+            ignore_regex=ignore_regex,
+        ):
             continue
         files.append(file_path)
 
@@ -489,14 +730,27 @@ async def _watch_folder_loop():
     if created_folders:
         logger.info("Subpastas de bancos criadas em extratos: %s", ", ".join(created_folders))
 
-    logger.info(f"Watcher ativo! Monitorando: {watch_path}")
+    watch_runtime = _get_watch_runtime_config(settings)
+    watch_poll_interval = watch_runtime["poll_interval_seconds"]
+    watch_debounce_seconds = watch_runtime["debounce_seconds"]
+
+    logger.info(
+        "Watcher ativo! Monitorando: %s | poll=%.2fs | debounce=%.2fs",
+        watch_path,
+        watch_poll_interval,
+        watch_debounce_seconds,
+    )
 
     try:
         iteration = 0
+        log_every_iterations = max(1, int(math.ceil(60.0 / watch_poll_interval)))
         while _watch_running:
             iteration += 1
-            if iteration % 12 == 1:  # Log a cada 1 minuto (12 * 5seg)
+            if iteration % log_every_iterations == 1:
                 logger.info(f"Watcher ativo - iteracao {iteration} - arquivos pendentes: {len(_watch_seen)}")
+
+            await _process_watch_retry_queue(watch_path)
+
             for file_path in _iter_extratos_input_files(watch_path):
                 if not file_path.is_file():
                     continue
@@ -516,10 +770,23 @@ async def _watch_folder_loop():
                 if _watch_processed.get(file_key) == mtime:
                     continue
 
-                last_size = _watch_seen.get(file_key)
-                if last_size is None or last_size != size:
+                now_mono = time.monotonic()
+                seen_state = _watch_seen.get(file_key)
+                if (
+                    seen_state is None
+                    or seen_state.get("size") != float(size)
+                    or seen_state.get("mtime") != float(mtime)
+                ):
                     _trim_dict(_watch_seen, 500)
-                    _watch_seen[file_key] = size
+                    _watch_seen[file_key] = {
+                        "size": float(size),
+                        "mtime": float(mtime),
+                        "stable_since": now_mono,
+                    }
+                    continue
+
+                stable_since = seen_state.get("stable_since", now_mono)
+                if (now_mono - stable_since) < watch_debounce_seconds:
                     continue
 
                 # Arquivo estavel, processar
@@ -567,7 +834,7 @@ async def _watch_folder_loop():
 
                 logger.info(f"Job {job_id} criado e processamento iniciado em background")
 
-            await asyncio.sleep(5)
+            await asyncio.sleep(watch_poll_interval)
     except asyncio.CancelledError:
         logger.info("Watcher de extratos interrompido")
     finally:
@@ -587,6 +854,12 @@ async def extratos_watch_status():
         "path_exists": watch_path.exists(),
         "is_directory": watch_path.is_dir() if watch_path.exists() else False,
         "bank_folders": list(EXTRATOS_INPUT_BANK_FOLDERS),
+        "filename_filters": _get_watch_filename_filters(settings),
+        "runtime": _get_watch_runtime_config(settings),
+        "retry": {
+            "pending": len(_watch_retry_queue),
+            **_get_watch_retry_config(settings),
+        },
     }
 
 
@@ -620,6 +893,7 @@ async def extratos_watch_debug():
             "task_exists": _watch_task is not None,
             "pending_files": len(_watch_seen),
             "processed_files": len(_watch_processed),
+            "retry_pending": len(_watch_retry_queue),
         },
         "path": {
             "configured": str(watch_path),
@@ -632,6 +906,14 @@ async def extratos_watch_debug():
         "config_source": {
             "WATCH_FOLDER_PATH": str(settings.watch_folder_path),
             "EXTRATOS_EXCEL_PATH": str(settings.extratos_excel_path),
+            "WATCH_FILENAME_ALLOW_GLOBS": settings.watch_filename_allow_globs,
+            "WATCH_FILENAME_ALLOW_REGEX": settings.watch_filename_allow_regex,
+            "WATCH_FILENAME_IGNORE_GLOBS": settings.watch_filename_ignore_globs,
+            "WATCH_FILENAME_IGNORE_REGEX": settings.watch_filename_ignore_regex,
+            "WATCH_POLL_INTERVAL_SECONDS": settings.watch_poll_interval_seconds,
+            "WATCH_DEBOUNCE_SECONDS": settings.watch_debounce_seconds,
+            "WATCH_RETRY_INTERVAL_SECONDS": settings.watch_retry_interval_seconds,
+            "WATCH_RETRY_MAX_ATTEMPTS": settings.watch_retry_max_attempts,
         }
     }
 
@@ -1785,8 +2067,9 @@ async def process_pdf_async(pdf_data: bytes, filename: str, job_id: str | None =
         try:
             # Executar em thread separada para nao bloquear
             loop = asyncio.get_event_loop()
-            # Passa o filename para ajudar na detecção do tipo
-            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
+            # Extrai apenas a primeira página — o cabeçalho com banco/agência/conta/cliente
+            # está sempre na página 1; as demais são apenas transações (irrelevantes para LLM)
+            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename, 1)
         except ValueError as e:
             # Se falhar extração, salva em NAO_IDENTIFICADOS para análise posterior
             return await create_failure_result(
@@ -2167,6 +2450,7 @@ async def process_extratos_file_background(
     is_zip: bool,
     test_mode: bool = False,
     source_path: Path | None = None,
+    retry_attempt: int = 0,
 ):
     """Processa arquivo de extratos baixados em background."""
     event_manager = get_extratos_test_event_manager() if test_mode else get_extratos_event_manager()
@@ -2239,6 +2523,16 @@ async def process_extratos_file_background(
             "completed_at": datetime.now().isoformat(),
             "results": None,
         })
+
+        if source_path and not test_mode:
+            _schedule_watch_retry(
+                source_path=source_path,
+                filename=filename,
+                is_zip=is_zip,
+                error_message=str(e),
+                retry_attempt=retry_attempt,
+            )
+
         await event_manager.emit(ProcessingEvent(
             event_type=EventType.PROCESSING_ERROR,
             filename=filename,
@@ -2394,7 +2688,9 @@ async def process_extratos_pdf_async(
         pdf_service = get_pdf_service()
         try:
             loop = asyncio.get_event_loop()
-            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename)
+            # Extrai apenas a primeira página — o cabeçalho com banco/agência/conta/cliente
+            # está sempre na página 1; as demais são apenas transações (irrelevantes para LLM)
+            text = await loop.run_in_executor(_executor, pdf_service.extract_text, pdf_data, filename, 1)
         except ValueError as e:
             return await create_extratos_failure_result(
                 filename,
@@ -2423,8 +2719,16 @@ async def process_extratos_pdf_async(
             progress=30
         ))
 
-        llm_service = get_llm_service()
-        extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
+        excel_extractor = get_excel_extractor_service()
+        extraction = await loop.run_in_executor(_executor, excel_extractor.extract, pdf_data, filename)
+        if extraction is not None:
+            logger.info(
+                "[EXCEL_EXTRACTOR] Extração direta OK para '%s' (banco=%s tipo=%s conf=%.2f) — LLM ignorada",
+                filename, extraction.banco, extraction.tipo_documento, extraction.confianca,
+            )
+        else:
+            llm_service = get_llm_service()
+            extraction = await loop.run_in_executor(_executor, llm_service.extract_info_with_fallback, text, pdf_data)
 
         # Banco da subpasta tem prioridade máxima — é fonte de verdade confirmada pelo operador
         banco_pasta = _banco_from_folder_path(filename)
@@ -3425,6 +3729,44 @@ async def get_logs_stats(ano: int = None, mes: int = None):
         return db_service.get_stats(ano=ano, mes=mes)
     except Exception as e:
         logger.error(f"Erro ao obter estatísticas: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.get("/stats/banco/{banco}")
+async def get_stats_by_bank(
+    banco: str,
+    source: str = "extratos",
+    ano: int = None,
+    mes: int = None,
+    top_tipos: int = 5,
+):
+    """Retorna estatisticas por banco, com taxa de sucesso, confianca media e tipos mais comuns."""
+    try:
+        source_norm = (source or "extratos").strip().lower()
+        if source_norm in {"extratos", "extratos_baixados"}:
+            db_service = get_extratos_baixados_log_service()
+            source_norm = "extratos"
+        elif source_norm in {"logs", "monitor", "make"}:
+            db_service = get_db_log_service()
+            source_norm = "logs"
+        else:
+            raise HTTPException(
+                status_code=400,
+                detail="Parametro 'source' invalido. Use 'extratos' ou 'logs'.",
+            )
+
+        stats = db_service.get_bank_stats(
+            banco=banco,
+            ano=ano,
+            mes=mes,
+            top_tipos=top_tipos,
+        )
+        stats["source"] = source_norm
+        return stats
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Erro ao obter estatisticas por banco: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 

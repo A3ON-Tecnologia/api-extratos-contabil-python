@@ -380,8 +380,8 @@ class MatchingService:
         return (conta_numbers, conta_sem_verificador)
 
     def _normalize_conta_exata(self, conta: str) -> str:
-        """Normaliza conta mantendo zeros a esquerda (match exato)."""
-        return extract_numbers(conta)
+        """Normaliza conta removendo zeros à esquerda para comparação."""
+        return extract_numbers(conta).lstrip("0") or "0"
 
     def _tipo_documento_compat(self, tipo_extrato: str | None, tipo_cliente: str | None) -> bool:
         if not tipo_extrato or not tipo_cliente:
@@ -393,7 +393,7 @@ class MatchingService:
     def _match_by_conta_exata(self, conta: str, tipo_documento: str | None, clients: list[ClientInfo]) -> MatchResult:
         """Match estrito por conta, com filtro opcional por tipo de documento."""
         conta_exata = self._normalize_conta_exata(conta)
-        if not conta_exata:
+        if not conta_exata or conta_exata == "0":
             return MatchResult(motivo_fallback="Conta vazia para matching exato")
 
         candidates: list[ClientInfo] = []
@@ -485,7 +485,7 @@ class MatchingService:
         Tenta encontrar cliente pela combina????o Banco + Ag??ncia + Conta (match exato).
         """
         agencia_numbers = extract_numbers(agencia).lstrip("0") or "0"
-        conta_exata = self._normalize_conta_exata(conta)
+        conta_numbers = self._normalize_conta_exata(conta)
         banco_normalized = normalize_text(banco) if banco else None
         banco_cresol = self._is_cresol(banco)
 
@@ -505,7 +505,7 @@ class MatchingService:
                 continue
 
             client_conta = self._normalize_conta_exata(str(client.conta))
-            if client_conta != conta_exata:
+            if client_conta != conta_numbers:
                 continue
 
             score = 92.0

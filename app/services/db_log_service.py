@@ -6,7 +6,7 @@ import logging
 from datetime import datetime
 from typing import Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import extract
+from sqlalchemy import extract, func
 
 from app.database import SessionLocal
 from app.models.extrato_log import ExtratoLog
@@ -168,6 +168,79 @@ class DatabaseLogService:
             }
         finally:
             db.close()
+
+    def get_bank_stats(
+        self,
+        banco: str,
+        ano: Optional[int] = None,
+        mes: Optional[int] = None,
+        top_tipos: int = 5,
+    ) -> dict:
+        """Retorna estatisticas agregadas por banco."""
+        db = SessionLocal()
+        try:
+            base_query = db.query(ExtratoLog).filter(ExtratoLog.banco.ilike(f"%{banco}%"))
+            if ano:
+                base_query = base_query.filter(extract("year", ExtratoLog.processado_em) == ano)
+            if mes:
+                base_query = base_query.filter(extract("month", ExtratoLog.processado_em) == mes)
+
+            total = base_query.count()
+            sucesso = base_query.filter(ExtratoLog.status == "SUCESSO").count()
+
+            nao_identificado_values = [
+                "NAO_IDENTIFICADO",
+                "NAO IDENTIFICADO",
+            ]
+            nao_identificado = base_query.filter(ExtratoLog.status.in_(nao_identificado_values)).count()
+
+            falha_values = ["FALHA", "ERRO"]
+            falha = base_query.filter(ExtratoLog.status.in_(falha_values)).count()
+
+            confianca_media = (
+                base_query.with_entities(func.avg(ExtratoLog.confianca_ia)).scalar()
+            )
+
+            tipos_rows = (
+                db.query(
+                    ExtratoLog.tipo_documento,
+                    func.count(ExtratoLog.id).label("total"),
+                )
+                .filter(ExtratoLog.banco.ilike(f"%{banco}%"))
+            )
+            if ano:
+                tipos_rows = tipos_rows.filter(extract("year", ExtratoLog.processado_em) == ano)
+            if mes:
+                tipos_rows = tipos_rows.filter(extract("month", ExtratoLog.processado_em) == mes)
+
+            tipos_rows = (
+                tipos_rows
+                .filter(ExtratoLog.tipo_documento.isnot(None))
+                .group_by(ExtratoLog.tipo_documento)
+                .order_by(func.count(ExtratoLog.id).desc())
+                .limit(max(1, min(int(top_tipos), 20)))
+                .all()
+            )
+
+            taxa_sucesso = round((sucesso / total) * 100, 2) if total > 0 else 0.0
+
+            return {
+                "banco": banco,
+                "periodo": {"ano": ano, "mes": mes},
+                "total": total,
+                "sucesso": sucesso,
+                "nao_identificado": nao_identificado,
+                "falha": falha,
+                "taxa_sucesso": taxa_sucesso,
+                "confianca_media": round(float(confianca_media), 2) if confianca_media is not None else None,
+                "tipos_mais_comuns": [
+                    {"tipo_documento": tipo or "-", "total": int(total_tipo)}
+                    for tipo, total_tipo in tipos_rows
+                ],
+            }
+        finally:
+            db.close()
+
 
     def update_batch(self, ids: list[int], updates: dict) -> int:
         """

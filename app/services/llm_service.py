@@ -94,6 +94,14 @@ TIPO_KEYWORDS: list[tuple[str, list[str]]] = [
         ],
     ),
     (
+        "DESCONTO DE DUPLICATAS",
+        [
+            "DESCONTO DE DUPLICATAS",
+            "SUBPRODUTO DUPLICATAS",
+            "DUPLICATAS DESCONTADAS",
+        ],
+    ),
+    (
         "EXTRATO CONSORCIO",
         ["EXTRATO DE CONSORCIO", "CONSORCIO", "GRUPO DE CONSORCIO"],
     ),
@@ -186,6 +194,7 @@ OUTROS TIPOS:
 - "EXTRATO PIX" -> Para extratos de transferências PIX
 - "EXTRATO EMPRÉSTIMO" -> Para empréstimos, financiamentos
 - "EXTRATO CONSÓRCIO" -> Para consórcios
+- "DESCONTO DE DUPLICATAS" -> Para operações de desconto de duplicatas (Bradesco: campo "Subproduto: DUPLICATAS")
 - "OUTROS" -> Se não se encaixar em nenhuma categoria acima
 
 IDENTIFICAÇÃO DE BANCOS - INSTRUÇÕES CRÍTICAS:
@@ -201,19 +210,25 @@ IDENTIFICAÇÃO DE BANCOS - INSTRUÇÕES CRÍTICAS:
 - Palavra-chave: "CRESOL" (SEM "SICOOB" no texto)
 - É uma cooperativa diferente do SICOOB
 
+**BRADESCO** (Banco Bradesco S.A.):
+- Palavras-chave: "BRADESCO", "BANCO BRADESCO", "BCO BRADESCO"
+- Agência: aparece após "Agência:", "Ag.:" ou "Ag./C/C:" (4 dígitos, ex: "1234-5")
+- Conta: aparece após "C/C:", "Conta Corrente:" (formato XXXXXXX-X)
+- Formato combinado frequente: "Ag./C/C: 1234-5/0001234-5"
+
 **Outros Bancos**:
 - "COOP DE CRED POUP INV SOMA" ou "SICREDI" -> Banco: SICREDI
 - "CAIXA ECONOMICA" ou "CAIXA" -> Banco: CAIXA
 - "BANCO DO BRASIL" ou "BB S.A" ou "BB" -> Banco: BANCO DO BRASIL
-- "BRADESCO" -> Banco: BRADESCO
 - "ITAU" ou "ITAÚ" -> Banco: ITAU
 - "SANTANDER" -> Banco: SANTANDER
 
 **REGRA DE OURO**:
 1. Procure "SICOOB" ou "SISBR" no texto → É SICOOB (nunca CRESOL!)
 2. Procure "CRESOL" (sem SICOOB) → É CRESOL
-3. Sempre retorne o nome SIMPLIFICADO em UPPERCASE
-4. Se não tiver 100% de certeza, retorne null
+3. Procure "BRADESCO" ou "BCO BRADESCO" → É BRADESCO
+4. Sempre retorne o nome SIMPLIFICADO em UPPERCASE
+5. Se não tiver 100% de certeza, retorne null
 
 EXTRAÇÃO DE AGÊNCIA E CONTA - ONDE PROCURAR:
 
@@ -254,7 +269,20 @@ EXTRAÇÃO DE AGÊNCIA E CONTA - ONDE PROCURAR:
    - "Conta corrente 20000-X SUPERMERCADO" -> conta="20000-X"
    - Texto após o número da conta é o cliente_sugerido
 
-3. **SICOOB - Extrato da Conta Capital**:
+3. **BRADESCO - Extrato de Conta Corrente**:
+   - Agência: procure após "Agência:", "Ag.:" ou na forma "Ag./C/C: XXXX/"
+   - Conta: procure após "C/C:", "Conta Corrente:" ou na forma "Ag./C/C: XXXX/XXXXXXX-X"
+   - Exemplos: "Ag.: 1234-5" → agencia="1234-5"; "C/C: 0001234-5" → conta="0001234-5"
+   - Formato combinado: "Ag./C/C: 1234-5/0001234-5" → agencia="1234-5", conta="0001234-5"
+   - **Cliente + CNPJ na mesma linha**: padrão "NOME DA EMPRESA | CNPJ: XX.XXX.XXX/XXXX-XX"
+     → cliente_sugerido = texto ANTES do " | CNPJ:"
+     → cnpj = número após "CNPJ:"
+     → ⚠️ IGNORE o campo "Nome do usuário:" — ele contém o operador, NÃO o cliente
+   - **Agência e conta em tabela**: cabeçalho "Agência | Conta ..." seguido de linha de dados
+     → Exemplo: "00384 | 0037502-0 204.007,20 ..." → agencia="00384", conta="0037502-0"
+   - Subtipo "Extrato Consolidado / Por Período" → tipo_documento = "EXTRATO DE CONTA CORRENTE"
+
+4. **SICOOB - Extrato da Conta Capital**:
    - ⚠️ **ATENÇÃO**: Este tipo de extrato NÃO possui campo "Conta"
    - Existe apenas "MATRÍCULA", mas MATRÍCULA ≠ CONTA
    - Se o documento for "EXTRATO DA CONTA CAPITAL", retorne conta=null
@@ -266,6 +294,8 @@ EXTRAÇÃO DE CLIENTE (cliente_sugerido):
 - REMOVA prefixos: "ASSOCIADO:", "CLIENTE:", números de matrícula
 - Exemplo: "ASSOCIADO: 123 - EMPRESA X" -> retorne apenas "EMPRESA X"
 - NÃO use o nome do banco como cliente
+- ⚠️ IGNORE o campo "Nome do usuário:" (Bradesco) — contém o operador do sistema, NÃO o titular da conta
+- Para Bradesco com padrão "NOME | CNPJ: XX": use o texto ANTES do " | " como cliente_sugerido
 - Para documentos "PAR - RELATORIO SELECAO DE OPERACOES PARCELAS ...":
   - O cliente aparece na tabela sob o rótulo "Cedente"
   - IGNORE "Sacado" (pode conter muitos nomes diferentes)
@@ -333,7 +363,31 @@ Extração correta:
 }
 ```
 
-**Exemplo 3 - SICOOB Extrato de Fatura de Cartão de Crédito**:
+**Exemplo 3 - BRADESCO Extrato de Conta Corrente**:
+Texto:
+```
+Banco Bradesco S.A.
+Ag./C/C: 1234-5/0001234-5
+Nome: EMPRESA EXEMPLO LTDA
+CNPJ: 00.000.000/0001-00
+Extrato de Conta Corrente
+```
+
+Extração correta:
+```json
+{
+  "cliente_sugerido": "EMPRESA EXEMPLO LTDA",
+  "cnpj": "00.000.000/0001-00",
+  "banco": "BRADESCO",
+  "agencia": "1234-5",
+  "conta": "0001234-5",
+  "contrato": null,
+  "tipo_documento": "EXTRATO DE CONTA CORRENTE",
+  "confianca": 0.93
+}
+```
+
+**Exemplo 4 - SICOOB Extrato de Fatura de Cartão de Crédito**:
 Texto:
 ```
 SICOOB
@@ -1018,6 +1072,11 @@ class LLMService:
                 if result.confianca < 0.8:
                     result.confianca = 0.8
 
+            # ---------------------------------------------------------------
+            # CRESOL — heurísticas exclusivas deste banco.
+            # Nenhum trecho abaixo afeta outros bancos (Bradesco, Sicoob, etc.)
+            # e nenhuma lógica de outro banco deve entrar aqui.
+            # ---------------------------------------------------------------
             # Heurística textual: Cresol Extrato de RDC → Extrato de Aplicação
             if self._is_cresol_extrato_rdc(tipo_analysis_text):
                 result.tipo_documento = "EXTRATO APLICACAO"
@@ -1042,6 +1101,11 @@ class LLMService:
                 if result.confianca < 0.85:
                     result.confianca = 0.85
 
+            # ---------------------------------------------------------------
+            # SICOOB — heurísticas exclusivas deste banco.
+            # Nenhum trecho abaixo afeta outros bancos (Bradesco, Cresol, etc.)
+            # e nenhuma lógica de outro banco deve entrar aqui.
+            # ---------------------------------------------------------------
             # Heurística textual: SICOOB Fatura de Cartão → nome por posição + agência da conta cartão
             if self._is_sicoob_fatura_cartao(analysis_text, result.tipo_documento):
                 if not result.cliente_sugerido:
@@ -1060,7 +1124,78 @@ class LLMService:
                         logger.info(f"[SICOOB_CARTAO] Conta corrente extraída: {conta}")
                         result.conta = conta
 
-            result = self._apply_tipo_classification_pipeline(result, tipo_analysis_text)
+            # ---------------------------------------------------------------
+            # BRADESCO — heurísticas exclusivas deste banco.
+            # Nenhum trecho abaixo afeta outros bancos (Sicoob, Sicredi, etc.)
+            # e nenhuma lógica de outro banco deve entrar aqui.
+            # ---------------------------------------------------------------
+            if self._is_bradesco_extrato(analysis_text, result.banco):
+                if not result.agencia:
+                    agencia = self._extract_bradesco_agencia(analysis_text)
+                    if agencia:
+                        logger.info(f"[BRADESCO] Agência extraída: {agencia}")
+                        result.agencia = agencia
+                if not result.conta:
+                    conta = self._extract_bradesco_conta(analysis_text)
+                    if conta:
+                        logger.info(f"[BRADESCO] Conta extraída: {conta}")
+                        result.conta = conta
+                # Fallback: formato de tabela "Agência | Conta\n00384 | 0037502-0 ..."
+                if not result.agencia or not result.conta:
+                    ag_tab, ct_tab = self._extract_bradesco_agencia_conta_tabela(analysis_text)
+                    if ag_tab and not result.agencia:
+                        logger.info(f"[BRADESCO] Agência extraída (tabela): {ag_tab}")
+                        result.agencia = ag_tab
+                    if ct_tab and not result.conta:
+                        logger.info(f"[BRADESCO] Conta extraída (tabela): {ct_tab}")
+                        result.conta = ct_tab
+                # Extrai cliente + CNPJ do padrão "NOME | CNPJ: XX" (ignora "Nome do usuário:")
+                if not result.cliente_sugerido:
+                    cliente, cnpj = self._extract_bradesco_cliente_cnpj(analysis_text)
+                    if cliente:
+                        logger.info(f"[BRADESCO] Cliente extraído por padrão pipe: {cliente}")
+                        result.cliente_sugerido = cliente
+                    if cnpj and not result.cnpj:
+                        result.cnpj = cnpj
+
+            # Pipeline genérico de tipo (keyword + fuzzy).
+            # Não se aplica ao Bradesco: o banco usa nomenclatura própria que não encaixa
+            # nos padrões do pipeline (construído para Sicoob/Sicredi/cooperativas).
+            # A classificação do Bradesco é feita inteiramente no bloco dedicado abaixo.
+            if not self._is_bradesco_extrato(analysis_text, result.banco):
+                result = self._apply_tipo_classification_pipeline(result, tipo_analysis_text)
+
+            # ---------------------------------------------------------------
+            # BRADESCO — correção de tipo após pipeline genérico.
+            # Deve rodar DEPOIS do pipeline para ter a palavra final,
+            # já que o pipeline trata "EXTRATO DE CONTA CORRENTE" como genérico
+            # e pode desfazer correções aplicadas antes dele.
+            # ---------------------------------------------------------------
+            if self._is_bradesco_extrato(analysis_text, result.banco):
+                if self._is_bradesco_desconto_duplicatas(analysis_text):
+                    logger.info("[BRADESCO] Tipo corrigido para DESCONTO DE DUPLICATAS")
+                    result.tipo_documento = "DESCONTO DE DUPLICATAS"
+                    if result.confianca < 0.9:
+                        result.confianca = 0.9
+                elif "CONSOLIDADO POR PERIODO" in self._normalize_text_for_hint(analysis_text):
+                    # Regra direta: "Extrato Consolidado / Por Período" no Bradesco = EXTRATO DE CONTA CORRENTE.
+                    # Esse título é exclusivo do extrato CC do Bradesco — não existe em outros bancos.
+                    logger.info("[BRADESCO] 'Extrato Consolidado / Por Período' → EXTRATO DE CONTA CORRENTE")
+                    result.tipo_documento = "EXTRATO DE CONTA CORRENTE"
+                    if result.confianca < 0.9:
+                        result.confianca = 0.9
+                elif result.tipo_documento == "EXTRATO CONSOLIDADO RENDA FIXA":
+                    # "EXTRATO CONSOLIDADO RENDA FIXA" é exclusivo do Sicoob e nunca existe
+                    # no Bradesco. Se chegou aqui com esse tipo, a LLM ou o pipeline erraram.
+                    logger.info("[BRADESCO] Tipo 'EXTRATO CONSOLIDADO RENDA FIXA' é Sicoob — corrigido para EXTRATO DE CONTA CORRENTE")
+                    result.tipo_documento = "EXTRATO DE CONTA CORRENTE"
+                    if result.confianca < 0.9:
+                        result.confianca = 0.9
+                elif self._is_bradesco_extrato_consolidado_cc(analysis_text):
+                    logger.info("[BRADESCO] Tipo corrigido para EXTRATO DE CONTA CORRENTE (layout CC detectado)")
+                    result.tipo_documento = "EXTRATO DE CONTA CORRENTE"
+                    if result.confianca < 0.9:
+                        result.confianca = 0.9
 
             # Se o banco não foi identificado, tenta OCR (visão) no PDF
             if (not result.banco or result.banco == "null") and pdf_data:
@@ -1277,6 +1412,14 @@ class LLMService:
             return "BANCO DO BRASIL"
         if "CLIENTE CONTA ATUAL" in normalized and "CONTA CORRENTE" in normalized:
             return "BANCO DO BRASIL"
+
+        # BRADESCO - pistas fortes
+        if "BCO BRADESCO" in normalized:
+            return "BRADESCO"
+        if "BANCO BRADESCO" in normalized:
+            return "BRADESCO"
+        if "BRADESCO" in normalized:
+            return "BRADESCO"
 
         return None
 
@@ -1549,6 +1692,224 @@ class LLMService:
             return m.group(1)
         return None
 
+    # ------------------------------------------------------------------
+    # BRADESCO — métodos dedicados (análogo ao SICOOB)
+    # ------------------------------------------------------------------
+
+    def _is_bradesco_extrato(self, text: str, banco: str | None) -> bool:
+        """Detecta documento do Bradesco pelo banco já identificado ou por pistas textuais."""
+        if banco and "BRADESCO" in banco.upper():
+            return True
+        normalized = self._normalize_text_for_hint(text)
+        return "BRADESCO" in normalized
+
+    def _extract_bradesco_agencia_conta_tabela(self, text: str) -> tuple[str | None, str | None]:
+        """Extrai agência e conta do layout de tabela do Bradesco Extrato Consolidado.
+
+        Suporta cabeçalho com ou sem pipe:
+            "Agência | Conta Total Disponível (R$) Total (R$)"
+            "Agência   Conta   Total Disponível (R$)   Total (R$)"
+
+        Linha de dados compacta (mesma linha):
+            "00384 | 0037502-0 204.007,20 204.007,20"
+            "00384   0037502-0   204.007,20   204.007,20"
+
+        Linha de dados fragmentada (agência com pipe, conta nas linhas seguintes):
+            "01735 |"
+            "0005242"
+            "-"
+            "6"
+            → agencia="01735", conta="0005242-6"
+        """
+        if not text:
+            return None, None
+        lines = text.splitlines()
+        for i, line in enumerate(lines):
+            normalized = self._normalize_text_for_hint(line)
+            # Cabeçalho: linha que tem "AGENCIA" e "CONTA" (pipe é opcional)
+            if "AGENCIA" not in normalized or "CONTA" not in normalized:
+                continue
+            # Procura a linha de dados nas próximas 8 linhas
+            for j in range(i + 1, min(i + 9, len(lines))):
+                data = lines[j].strip()
+                if not data:
+                    continue
+                # Padrão 1 — com pipe, dados na mesma linha: "00384 | 0037502-0 ..."
+                m = re.match(r"(\d{3,6})\s*\|\s*(\d{4,10}(?:-\d+)?)", data)
+                if m:
+                    return m.group(1).strip(), m.group(2).strip()
+                # Padrão 2 — sem pipe, conta tem hífen: "00384  0037502-0 ..."
+                m = re.match(r"(\d{3,6})\s+(\d{4,10}-\d+)", data)
+                if m:
+                    return m.group(1).strip(), m.group(2).strip()
+                # Padrão 3 — fragmentado: "01735 |" na linha, conta nas linhas seguintes
+                m = re.match(r"(\d{3,6})\s*\|?\s*$", data)
+                if m:
+                    agencia = m.group(1).strip()
+                    # Coleta os próximos tokens para montar a conta (ex: "0005242", "-", "6")
+                    conta_parts: list[str] = []
+                    for k in range(j + 1, min(j + 6, len(lines))):
+                        token = lines[k].strip()
+                        if not token:
+                            continue
+                        if re.match(r"^\d+$", token) or token == "-":
+                            conta_parts.append(token)
+                        else:
+                            break
+                        # Para quando tiver dígito verificador (1 dígito após "-")
+                        if len(conta_parts) >= 3:
+                            break
+                    if conta_parts:
+                        # Une: ["0005242", "-", "6"] → "0005242-6"
+                        conta = "".join(conta_parts) if "-" not in conta_parts else conta_parts[0] + "-" + conta_parts[-1]
+                        return agencia, conta
+                    return agencia, None
+                # Só para se a linha tem texto mas não parece dados numéricos
+                if re.search(r"[A-Za-z]{3,}", data):
+                    break
+        return None, None
+
+    def _extract_bradesco_cliente_cnpj(self, text: str) -> tuple[str | None, str | None]:
+        """Extrai cliente e CNPJ do padrão Bradesco.
+
+        Suporta com ou sem pipe entre nome e CNPJ:
+            "FLORA FRUTAS LTDA | CNPJ: 003.206.707/0001-47"
+            "FLORA FRUTAS LTDA CNPJ: 003.206.707/0001-47"
+
+        "Nome do usuário:" é sempre ignorado — contém o operador, não o titular.
+        Retorna (cliente, cnpj) ou (None, None) se não encontrar.
+        """
+        if not text:
+            return None, None
+        _CNPJ_RE = r"(\d{2,3}\.?\d{3}\.?\d{3}/\d{4}-\d{2})"
+        _REJECT = re.compile(r"usu[aá]rio|operador|data\s+da\s+opera", re.IGNORECASE)
+        for line in text.splitlines():
+            stripped = line.strip()
+            if re.search(r"Nome\s+do\s+usu[aá]rio", stripped, re.IGNORECASE):
+                continue
+            # Padrão 1 — com pipe: "NOME | CNPJ: XX"
+            m = re.match(
+                r"^(.+?)\s*\|\s*CNPJ\s*[:\-]\s*" + _CNPJ_RE,
+                stripped,
+                re.IGNORECASE,
+            )
+            if not m:
+                # Padrão 2 — sem pipe: "NOME CNPJ: XX"
+                m = re.match(
+                    r"^(.+?)\s+CNPJ\s*[:\-]\s*" + _CNPJ_RE,
+                    stripped,
+                    re.IGNORECASE,
+                )
+            if m:
+                cliente = m.group(1).strip()
+                cnpj = m.group(2).strip()
+                if _REJECT.search(cliente):
+                    continue
+                return cliente, cnpj
+        return None, None
+
+    def _is_bradesco_desconto_duplicatas(self, text: str) -> bool:
+        """Detecta operação de Desconto de Duplicatas do Bradesco.
+
+        Pista principal: campo "Subproduto: DUPLICATAS" na primeira página do PDF.
+        Aceita também variações normalizadas.
+        """
+        normalized = self._normalize_text_for_hint(text)
+        if "SUBPRODUTO DUPLICATAS" in normalized:
+            return True
+        if "DESCONTO DE DUPLICATAS" in normalized:
+            return True
+        if "DUPLICATAS DESCONTADAS" in normalized:
+            return True
+        return False
+
+    def _is_bradesco_extrato_consolidado_cc(self, text: str) -> bool:
+        """Detecta extrato de conta corrente do Bradesco que a LLM classifica errado.
+
+        A LLM confunde documentos Bradesco que contêm 'CONSOLIDADO' com
+        'EXTRATO CONSOLIDADO RENDA FIXA' (padrão do Sicoob). Para o Bradesco,
+        'CONSOLIDADO' sem 'RENDA FIXA' no texto indica extrato de conta corrente.
+
+        Casos cobertos:
+          - "Extrato Consolidado / Por Período" (título principal)
+          - Qualquer documento Bradesco com 'CONSOLIDADO' sem 'RENDA FIXA'
+          - Layout com colunas "Crédito (R$) | Débito (R$) | Saldo (R$)" — extrato CC padrão
+        """
+        normalized = self._normalize_text_for_hint(text)
+        if "CONSOLIDADO" in normalized and "RENDA FIXA" not in normalized:
+            return True
+        # Layout de extrato CC: colunas Crédito/Débito/Saldo identificam movimentação de CC
+        if "CREDITO" in normalized and "DEBITO" in normalized and "SALDO" in normalized:
+            return True
+        return False
+
+    def _extract_bradesco_agencia(self, text: str) -> str | None:
+        """Extrai agência do Bradesco.
+
+        Padrões suportados:
+          - "Agência: 1234-5"  /  "Ag.: 1234"
+          - "Ag./C/C: 1234-5/XXXXXXX-X"
+          - "Ag./C/C: 1234/XXXXXXX-X"
+        """
+        if not text:
+            return None
+        # Formato combinado Ag./C/C primeiro (mais específico)
+        m = re.search(
+            r"Ag\.?\s*/\s*C\.?/C\.?\s*[:\-]?\s*(\d{3,4}(?:[-]\d)?)\s*/",
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).strip()
+        # "Agência: XXXX-X" ou "Agência: XXXX"
+        m = re.search(
+            r"Ag[êe]ncia\s*[:\-]\s*(\d{3,4}(?:[-\s]\d)?)",
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).strip()
+        # "Ag.: XXXX" ou "Ag: XXXX"
+        m = re.search(r"\bAg\.?\s*[:\-]\s*(\d{3,4})", text, re.IGNORECASE)
+        if m:
+            return m.group(1).strip()
+        return None
+
+    def _extract_bradesco_conta(self, text: str) -> str | None:
+        """Extrai conta corrente do Bradesco.
+
+        Padrões suportados:
+          - "C/C: 0001234-5"  /  "CC: 0001234-5"
+          - "Conta Corrente: 0001234-5"
+          - "Ag./C/C: XXXX/0001234-5"
+        """
+        if not text:
+            return None
+        # Formato combinado Ag./C/C — pega o que vem depois da barra
+        m = re.search(
+            r"Ag\.?\s*/\s*C\.?/C\.?\s*[:\-]?\s*\d{3,4}(?:[-]\d)?\s*/\s*(\d{5,10}(?:[-]\d+)?)",
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).strip()
+        # "C/C: XXXXXXX-X" ou "CC: XXXXXXX-X"
+        m = re.search(
+            r"\bC\.?/C\.?\s*[:\-]\s*(\d{5,10}(?:[-]\d+)?)",
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).strip()
+        # "Conta Corrente: XXXXXXX-X"
+        m = re.search(
+            r"Conta\s+Corrente\s*[:\-]\s*(\d{5,10}(?:[-]\d+)?)",
+            text,
+            re.IGNORECASE,
+        )
+        if m:
+            return m.group(1).strip()
+        return None
 
     def identify_bank_from_images(self, images_base64: list[str]) -> str | None:
         """
