@@ -1587,10 +1587,10 @@ async def make_webhook_monitor(
     background_tasks: BackgroundTasks,
 ):
     """
-    Webhook específico do Módulo MAKE para a view Monitor.
-    Mesmo fluxo do /upload, mas com rota dedicada.
+    [DECOMMISSIONED] Make webhook (monitor) — endpoint removed.
+    Preserved to return a clear status so callers fail fast.
     """
-    return await upload_file(file=file, background_tasks=background_tasks)
+    raise HTTPException(status_code=410, detail="Make integration decommissioned")
 
 
 async def _handle_extratos_webhook(
@@ -4103,10 +4103,10 @@ async def make_webhook_test(
     background_tasks: BackgroundTasks,
 ):
     """
-    Webhook específico do Módulo MAKE para a view Test.
-    Mesmo fluxo do /test/upload, mas com rota dedicada.
+    [DECOMMISSIONED] Make webhook (test) — endpoint removed.
+    Preserved to return a clear status so callers fail fast.
     """
-    return await test_upload_file(file=file, background_tasks=background_tasks)
+    raise HTTPException(status_code=410, detail="Make integration decommissioned")
 
 
 # Funções antigas de teste background removidas - Agora usa o fluxo unificado
@@ -4816,80 +4816,26 @@ async def reverter_lote(ids: List[int], deletar_arquivos: bool = True):
 @app.post("/make/webhook/reversao")
 async def make_webhook_reversao(payload: MakeReversaoWebhook, background_tasks: BackgroundTasks):
     """
-    Webhook específico do Módulo MAKE para a view Reversão.
-    Mesmo fluxo do /reversao/lote, mas com rota dedicada.
+    [DECOMMISSIONED] Make webhook (reversao) — endpoint removed.
+    Returns 410 so callers fail fast.
     """
-    if not payload.ids:
-        raise HTTPException(status_code=400, detail="Lista de IDs vazia")
-
-    job_id = f"rev_{uuid.uuid4().hex[:10]}"
-    _trim_dict(_make_reversao_jobs, 200)
-    _make_reversao_jobs[job_id] = {
-        "job_id": job_id,
-        "status": "queued",
-        "message": "Reversao recebida via Make. Aguardando processamento.",
-        "created_at": datetime.now().isoformat(),
-        "started_at": None,
-        "completed_at": None,
-        "total_ids": len(payload.ids),
-        "deletar_arquivos": payload.deletar_arquivos,
-        "resultado": None,
-        "erro": None,
-    }
-
-    background_tasks.add_task(
-        _process_make_reversao_job,
-        job_id,
-        payload.ids,
-        payload.deletar_arquivos,
-    )
-
-    return {
-        "success": True,
-        "accepted": True,
-        "processing_async": True,
-        "job_id": job_id,
-        "message": "Webhook recebido. Reversao iniciada em background.",
-        "status_url": f"/make/webhook/reversao/{job_id}",
-        "revertidos": 0,
-        "erros": 0,
-        "arquivos_deletados": 0,
-    }
+    raise HTTPException(status_code=410, detail="Make integration decommissioned")
 
 
 async def _process_make_reversao_job(job_id: str, ids: list[int], deletar_arquivos: bool):
+    # Stub for decommissioned Make reversao jobs. Previously executed reverter_lote.
+    logger.info(f"Make reversao job received but Make module is decommissioned: {job_id}")
     job = _make_reversao_jobs.get(job_id)
-    if not job:
-        return
-
-    job["status"] = "processing"
-    job["started_at"] = datetime.now().isoformat()
-    job["message"] = "Processando reversao em lote."
-
-    try:
-        resultado = await reverter_lote(ids=ids, deletar_arquivos=deletar_arquivos)
-        job["resultado"] = resultado
-        if resultado.get("success"):
-            job["status"] = "completed"
-            job["message"] = "Reversao concluida com sucesso."
-        else:
-            job["status"] = "failed"
-            job["message"] = resultado.get("message", "Falha na reversao.")
-    except Exception as e:
-        logger.error(f"Erro no job MAKE de reversao {job_id}: {e}")
+    if job:
         job["status"] = "failed"
-        job["erro"] = str(e)
-        job["message"] = "Erro inesperado ao processar reversao."
-    finally:
+        job["message"] = "Make integration decommissioned"
         job["completed_at"] = datetime.now().isoformat()
+    return
 
 
 @app.get("/make/webhook/reversao/{job_id}")
 async def get_make_reversao_job_status(job_id: str):
-    job = _make_reversao_jobs.get(job_id)
-    if not job:
-        raise HTTPException(status_code=404, detail="Job nao encontrado")
-    return job
+    raise HTTPException(status_code=410, detail="Make integration decommissioned")
 
 
 @app.post("/reversao/ultimos/{quantidade}")
