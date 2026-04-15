@@ -537,3 +537,8 @@
         margin-left: 0 !important;
     }
 }
+
+/* Hide MAKE nav section to ensure deprecated module isn't visible */
+.nav-section.nav-main {
+    display: none !important;
+}
