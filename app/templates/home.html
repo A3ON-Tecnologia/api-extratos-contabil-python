@@ -635,10 +635,10 @@
                         <div class="insight-bar"><div id="statUnidentifiedBar" style="width: 0%; background: linear-gradient(90deg, #f6b04e, #f97316);"></div></div>
                     </div>
                     <div class="insight-card">
-                        <div class="insight-label">Falhas</div>
-                        <div class="insight-value"><span id="statFailures">--</span></div>
-                        <div class="insight-sub" id="statFailuresSub">0% do total</div>
-                        <div class="insight-bar"><div id="statFailuresBar" style="width: 0%; background: linear-gradient(90deg, #ff6b6b, #f43f5e);"></div></div>
+                        <div class="insight-label">Movidos Manualmente</div>
+                        <div class="insight-value"><span id="statManuallyMoved">--</span></div>
+                        <div class="insight-sub" id="statManuallyMovedSub">0% do total</div>
+                        <div class="insight-bar"><div id="statManuallyMovedBar" style="width: 0%; background: linear-gradient(90deg, #ffb86b, #f59e0b);"></div></div>
                     </div>
                     <div class="insight-card">
                         <div class="insight-label">Sucesso</div>
@@ -700,15 +700,15 @@
             const note = document.getElementById('insightsNote');
             const statProcessed = document.getElementById('statProcessed');
             const statUnidentified = document.getElementById('statUnidentified');
-            const statFailures = document.getElementById('statFailures');
+            const statManuallyMoved = document.getElementById('statManuallyMoved');
             const statSuccess = document.getElementById('statSuccess');
             const statProcessedSub = document.getElementById('statProcessedSub');
             const statUnidentifiedSub = document.getElementById('statUnidentifiedSub');
-            const statFailuresSub = document.getElementById('statFailuresSub');
+            const statManuallyMovedSub = document.getElementById('statManuallyMovedSub');
             const statSuccessSub = document.getElementById('statSuccessSub');
             const statProcessedBar = document.getElementById('statProcessedBar');
             const statUnidentifiedBar = document.getElementById('statUnidentifiedBar');
-            const statFailuresBar = document.getElementById('statFailuresBar');
+            const statManuallyMovedBar = document.getElementById('statManuallyMovedBar');
             const statSuccessBar = document.getElementById('statSuccessBar');
             const selectedMonth = monthFilter ? monthFilter.value : '';
             const validMonth = /^\d{4}-\d{2}$/.test(selectedMonth);
