@@ -3,7 +3,7 @@ Modelo para log de extratos baixados processados.
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean
 from app.database import Base
 
 
@@ -42,6 +42,7 @@ class ExtratosBaixadosLog(Base):
     # Status do processamento
     status = Column(String(50), nullable=False)
     metodo_identificacao = Column(String(50), nullable=True)
+    manually_moved = Column(Boolean, default=False, nullable=False)
 
     # Confianca da IA
     confianca_ia = Column(Integer, nullable=True)
@@ -71,6 +72,7 @@ class ExtratosBaixadosLog(Base):
             "mes": self.mes,
             "status": self.status,
             "metodo_identificacao": self.metodo_identificacao,
+            "manually_moved": bool(self.manually_moved),
             "confianca_ia": self.confianca_ia,
             "erro": self.erro,
         }

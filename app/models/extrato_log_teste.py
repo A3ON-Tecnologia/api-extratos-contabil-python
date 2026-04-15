@@ -3,7 +3,7 @@ Modelo para log de testes de extratos processados.
 """
 
 from datetime import datetime
-from sqlalchemy import Column, Integer, String, DateTime, Text
+from sqlalchemy import Column, Integer, String, DateTime, Text, Boolean
 from app.database import Base
 
 
@@ -44,6 +44,7 @@ class ExtratoLogTeste(Base):
     # Status do processamento
     status = Column(String(50), nullable=False)
     metodo_identificacao = Column(String(50), nullable=True)
+    manually_moved = Column(Boolean, default=False, nullable=False)
     
     # Confiança da IA
     confianca_ia = Column(Integer, nullable=True)
@@ -76,6 +77,7 @@ class ExtratoLogTeste(Base):
             "mes": self.mes,
             "status": self.status,
             "metodo_identificacao": self.metodo_identificacao,
+            "manually_moved": bool(self.manually_moved),
             "confianca_ia": self.confianca_ia,
             "erro": self.erro,
             "modo_teste": True,
