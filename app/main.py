@@ -202,6 +202,14 @@ async def _inject_navbar_middleware(request, call_next):
 from app.routes.extratos_test import router as extratos_test_router
 app.include_router(extratos_test_router)
 
+# Gmail integration routes
+try:
+    from app.routes.gmail import router as gmail_router
+    app.include_router(gmail_router)
+except Exception:
+    # Gmail routes optional if google libs are not installed/configured
+    pass
+
 # Cache de hashes processados para idempotencia
 _processed_hashes: set[str] = set()
 
