@@ -100,21 +100,29 @@ class StorageService:
         banco: str | None = None,
         conta_extrato: str | None = None,
         module: str = "make",
+        ano: int | None = None,
+        mes: int | None = None,
     ) -> tuple[str, int, int]:
         """
         Salva o arquivo PDF no caminho correto.
 
-        Usa automaticamente o mes anterior ao processamento como periodo do documento.
+        Usa automaticamente o mes anterior ao processamento como periodo do documento,
+        a menos que ano e mes sejam fornecidos explicitamente.
         Estrutura: ANO/MES/BANCO/CONTA/arquivo.pdf
         Cria a hierarquia de pastas quando necessario.
 
         Args:
             conta_extrato: Numero da conta extraido do extrato (prioritario sobre a conta da planilha)
+            ano: Ano do documento (opcional)
+            mes: Mes do documento (opcional)
 
         Returns:
             Tupla (caminho_salvo, ano, mes)
         """
-        ano, mes = self._get_previous_month()
+        if ano is None or mes is None:
+            prev_ano, prev_mes = self._get_previous_month()
+            ano = ano if ano is not None else prev_ano
+            mes = mes if mes is not None else prev_mes
 
         target_path = None
         filename = None

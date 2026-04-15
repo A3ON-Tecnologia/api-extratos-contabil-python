@@ -737,23 +737,23 @@
                 const total = (mainStats.total || 0) + (extratosStats.total || 0);
                 const sucesso = (mainStats.sucesso || 0) + (extratosStats.sucesso || 0);
                 const naoIdentificado = (mainStats.nao_identificado || 0) + (extratosStats.nao_identificado || 0);
-                const falha = (mainStats.falha || 0) + (extratosStats.falha || 0);
+                const manuallyMoved = (mainStats.manually_moved || 0) + (extratosStats.manually_moved || 0);
 
                 const pct = (value) => total > 0 ? Math.round((value / total) * 100) : 0;
 
                 statProcessed.textContent = total.toLocaleString('pt-BR');
                 statUnidentified.textContent = naoIdentificado.toLocaleString('pt-BR');
-                statFailures.textContent = falha.toLocaleString('pt-BR');
+                statManuallyMoved.textContent = manuallyMoved.toLocaleString('pt-BR');
                 statSuccess.textContent = sucesso.toLocaleString('pt-BR');
 
                 statProcessedSub.textContent = total > 0 ? 'Total consolidado' : 'Sem dados';
                 statUnidentifiedSub.textContent = `${pct(naoIdentificado)}% do total`;
-                statFailuresSub.textContent = `${pct(falha)}% do total`;
+                statManuallyMovedSub.textContent = `${pct(manuallyMoved)}% do total`;
                 statSuccessSub.textContent = `${pct(sucesso)}% do total`;
 
                 statProcessedBar.style.width = total > 0 ? '100%' : '0%';
                 statUnidentifiedBar.style.width = `${pct(naoIdentificado)}%`;
-                statFailuresBar.style.width = `${pct(falha)}%`;
+                statManuallyMovedBar.style.width = `${pct(manuallyMoved)}%`;
                 statSuccessBar.style.width = `${pct(sucesso)}%`;
 
                 const now = new Date();

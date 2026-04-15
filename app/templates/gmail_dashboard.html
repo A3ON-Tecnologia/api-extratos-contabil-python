@@ -1,0 +1,820 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gmail | Extratos Contabeis</title>
+    <link rel="icon" type="image/svg+xml" href="/static/img/favicon-monitor.svg">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="/static/css/tech-navbar.css">
+    <style>
+        :root {
+            --bg-primary: #0a0f14;
+            --bg-secondary: #0c1622;
+            --bg-card: #111b2a;
+            --bg-card-hover: #162235;
+            --accent-primary: #12c2e9;
+            --accent-secondary: #2dd4bf;
+            --accent-success: #10b981;
+            --accent-warning: #f59e0b;
+            --accent-error: #ef4444;
+            --accent-info: #3b82f6;
+            --text-primary: #f8fafc;
+            --text-secondary: #94a3b8;
+            --text-muted: #64748b;
+            --border-color: rgba(34, 211, 238, 0.25);
+            --glow-monitor: rgba(6, 182, 212, 0.35);
+        }
+
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Inter', sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            min-height: 100vh;
+            overflow: hidden;
+        }
+
+        .bg-animation {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            pointer-events: none;
+            z-index: 0;
+            background:
+                radial-gradient(circle at 25% 20%, rgba(34, 211, 238, 0.1) 0%, transparent 45%);
+        }
+
+        .page-wrapper {
+            position: relative;
+            z-index: 1;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* ===== LAYOUT 3-COLUMN ===== */
+        .content-area {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+            gap: 0.75rem;
+            padding: 0.75rem;
+        }
+
+        /* COLUNA 1: LABELS */
+        .labels-panel {
+            width: 200px;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .labels-panel-header {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(18, 194, 233, 0.05);
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--accent-primary);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .labels-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.4rem;
+        }
+
+        .label-btn {
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            width: 100%;
+            padding: 0.6rem 0.8rem;
+            margin-bottom: 0.2rem;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text-secondary);
+            font-size: 0.75rem;
+            border-radius: 0.4rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            text-align: left;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .label-btn:hover {
+            background: var(--bg-card-hover);
+            border-color: var(--border-color);
+            color: var(--text-primary);
+        }
+
+        .label-btn.active {
+            background: rgba(18, 194, 233, 0.2);
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+
+        .label-btn i {
+            width: 14px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .labels-footer {
+            padding: 0.5rem;
+            border-top: 1px solid var(--border-color);
+            display: flex;
+            gap: 0.4rem;
+        }
+
+        .btn-small {
+            flex: 1;
+            padding: 0.4rem;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-secondary);
+            border-radius: 0.3rem;
+            cursor: pointer;
+            font-size: 0.65rem;
+            transition: all 0.2s ease;
+        }
+
+        .btn-small:hover {
+            border-color: var(--accent-primary);
+            color: var(--accent-primary);
+        }
+
+        /* COLUNA 2: EMAILS */
+        .emails-panel {
+            flex: 1;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .emails-header {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(18, 194, 233, 0.05);
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+
+        .emails-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.4rem;
+        }
+
+        .email-item {
+            padding: 0.8rem;
+            margin-bottom: 0.4rem;
+            background: rgba(18, 194, 233, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 0.4rem;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .email-item:hover {
+            background: rgba(18, 194, 233, 0.1);
+            border-color: var(--accent-primary);
+        }
+
+        .email-item.selected {
+            background: rgba(18, 194, 233, 0.2);
+            border-color: var(--accent-primary);
+        }
+
+        .email-item-subject {
+            font-size: 0.75rem;
+            font-weight: 600;
+            color: var(--text-primary);
+            margin-bottom: 0.2rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .email-item-from {
+            font-size: 0.65rem;
+            color: var(--text-secondary);
+            margin-bottom: 0.2rem;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .email-item-date {
+            font-size: 0.6rem;
+            color: var(--text-muted);
+        }
+
+        /* COLUNA 3: ATTACHMENTS */
+        .attachments-panel {
+            flex: 1.2;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+        }
+
+        .attachments-header {
+            padding: 0.75rem;
+            border-bottom: 1px solid var(--border-color);
+            background: rgba(18, 194, 233, 0.05);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+
+        .attachments-header-left {
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--accent-primary);
+            font-weight: 600;
+        }
+
+        .attachments-header-right {
+            display: flex;
+            gap: 0.4rem;
+        }
+
+        .btn-action {
+            padding: 0.4rem 0.6rem;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--accent-primary);
+            border-radius: 0.3rem;
+            cursor: pointer;
+            font-size: 0.65rem;
+            transition: all 0.2s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.3rem;
+        }
+
+        .btn-action:hover {
+            background: rgba(18, 194, 233, 0.15);
+            border-color: var(--accent-primary);
+        }
+
+        .btn-action:disabled {
+            opacity: 0.4;
+            cursor: not-allowed;
+        }
+
+        .attachments-list {
+            flex: 1;
+            overflow-y: auto;
+            padding: 0.6rem;
+        }
+
+        .attachment-item {
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            padding: 0.8rem;
+            margin-bottom: 0.4rem;
+            background: rgba(18, 194, 233, 0.05);
+            border: 1px solid var(--border-color);
+            border-radius: 0.4rem;
+            transition: all 0.2s ease;
+            cursor: pointer;
+        }
+
+        .attachment-item:hover {
+            background: rgba(18, 194, 233, 0.15);
+            border-color: var(--accent-primary);
+        }
+
+        .attachment-item input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+            accent-color: var(--accent-primary);
+            flex-shrink: 0;
+        }
+
+        .attachment-item i {
+            font-size: 1rem;
+            color: var(--accent-primary);
+            width: 20px;
+            text-align: center;
+            flex-shrink: 0;
+        }
+
+        .attachment-info {
+            flex: 1;
+            min-width: 0;
+        }
+
+        .attachment-name {
+            font-size: 0.75rem;
+            color: var(--text-primary);
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            font-weight: 500;
+            margin-bottom: 0.2rem;
+        }
+
+        .attachment-size {
+            font-size: 0.65rem;
+            color: var(--text-muted);
+        }
+
+        .attachment-btn {
+            padding: 0.3rem 0.5rem;
+            background: transparent;
+            border: 1px solid var(--border-color);
+            color: var(--accent-info);
+            border-radius: 0.3rem;
+            cursor: pointer;
+            font-size: 0.6rem;
+            transition: all 0.2s ease;
+            flex-shrink: 0;
+            display: none;
+        }
+
+        .attachment-item:hover .attachment-btn {
+            display: block;
+        }
+
+        .attachment-btn:hover {
+            background: rgba(59, 130, 246, 0.2);
+            border-color: var(--accent-info);
+        }
+
+        /* ===== EMPTY STATES ===== */
+        .empty-state {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100%;
+            color: var(--text-secondary);
+            text-align: center;
+            gap: 0.5rem;
+        }
+
+        .empty-state i {
+            font-size: 2rem;
+            opacity: 0.5;
+        }
+
+        .empty-state p {
+            font-size: 0.75rem;
+        }
+
+        /* ===== SPINNER ===== */
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid var(--border-color);
+            border-top-color: var(--accent-primary);
+            border-radius: 50%;
+            animation: spin 0.8s linear infinite;
+        }
+
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+
+        /* ===== TOAST ===== */
+        .toast-container {
+            position: fixed;
+            top: 80px;
+            right: 1rem;
+            z-index: 9999;
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        .toast {
+            padding: 0.7rem 1rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border-color);
+            border-left: 3px solid var(--accent-info);
+            border-radius: 0.4rem;
+            display: flex;
+            align-items: center;
+            gap: 0.6rem;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.3);
+            animation: slideIn 0.3s ease;
+            min-width: 280px;
+            font-size: 0.75rem;
+        }
+
+        .toast.success { border-left-color: var(--accent-success); }
+        .toast.error { border-left-color: var(--accent-error); }
+        .toast.warning { border-left-color: var(--accent-warning); }
+
+        .toast i {
+            font-size: 1rem;
+            flex-shrink: 0;
+        }
+
+        .toast.success i { color: var(--accent-success); }
+        .toast.error i { color: var(--accent-error); }
+        .toast.warning i { color: var(--accent-warning); }
+        .toast.info i { color: var(--accent-info); }
+
+        @keyframes slideIn {
+            from { transform: translateX(400px); opacity: 0; }
+            to { transform: translateX(0); opacity: 1; }
+        }
+
+        /* ===== SCROLLBAR ===== */
+        ::-webkit-scrollbar {
+            width: 5px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: transparent;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: var(--border-color);
+            border-radius: 2px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: var(--accent-primary);
+        }
+    </style>
+</head>
+
+<body>
+    <div class="bg-animation"></div>
+    {{ TECH_NAVBAR }}
+
+    <div class="page-wrapper">
+        <div class="content-area">
+            <!-- COLUNA 1: LABELS -->
+            <div class="labels-panel">
+                <div class="labels-panel-header">
+                    <i class="fas fa-tags"></i> Pastas
+                </div>
+                <div class="labels-list" id="labels-list">
+                    <div class="empty-state" style="height: auto; padding: 1rem;">
+                        <div class="spinner"></div>
+                        <p>Carregando...</p>
+                    </div>
+                </div>
+                <div class="labels-footer">
+                    <button class="btn-small" onclick="loadLabels()" title="F5">
+                        <i class="fas fa-sync-alt"></i>
+                    </button>
+                    <button class="btn-small" onclick="checkAuth()" title="Status">
+                        <i class="fas fa-check"></i>
+                    </button>
+                </div>
+            </div>
+
+            <!-- COLUNA 2: EMAILS -->
+            <div class="emails-panel">
+                <div class="emails-header" id="emails-header">
+                    Emails
+                </div>
+                <div class="emails-list" id="emails-list">
+                    <div class="empty-state">
+                        <i class="fas fa-envelope"></i>
+                        <p>Selecione uma pasta</p>
+                    </div>
+                </div>
+            </div>
+
+            <!-- COLUNA 3: ATTACHMENTS -->
+            <div class="attachments-panel">
+                <div class="attachments-header">
+                    <div class="attachments-header-left">
+                        Arquivos
+                    </div>
+                    <div class="attachments-header-right">
+                        <button class="btn-action" id="btn-select-all" onclick="selectAllAttachments()" title="Ctrl+A">
+                            <i class="fas fa-check-double"></i>
+                        </button>
+                        <button class="btn-action" id="btn-clear-all" onclick="clearAllAttachments()" title="Shift+A">
+                            <i class="fas fa-times"></i>
+                        </button>
+                        <button class="btn-action" id="btn-process-selected" disabled title="Enter">
+                            <i class="fas fa-play"></i>
+                            <span id="selected-count">0</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="attachments-list" id="attachments-list">
+                    <div class="empty-state">
+                        <i class="fas fa-paperclip"></i>
+                        <p>Nenhum arquivo</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="toast-container" id="toast-container"></div>
+
+    <script>
+        let currentLabelId = null;
+        let currentLabelName = null;
+        let selectedEmails = new Map(); // messageId -> email data
+        let selectedAttachments = new Set();
+
+        // ===== TOAST =====
+        function showToast(msg, type = 'info', duration = 3000) {
+            const toast = document.createElement('div');
+            toast.className = `toast ${type}`;
+
+            const icons = { success: 'fa-check-circle', error: 'fa-exclamation-circle', warning: 'fa-warning', info: 'fa-info-circle' };
+            toast.innerHTML = `<i class="fas ${icons[type]}"></i><p>${msg}</p>`;
+
+            document.getElementById('toast-container').appendChild(toast);
+            if (duration) setTimeout(() => toast.remove(), duration);
+        }
+
+        // ===== API =====
+        async function api(url, opts = {}) {
+            try {
+                const res = await fetch(url, opts);
+                if (!res.ok) throw new Error(`HTTP ${res.status}`);
+                return await res.json();
+            } catch (e) {
+                showToast(`Erro: ${e.message}`, 'error');
+                return null;
+            }
+        }
+
+        // ===== LOAD LABELS =====
+        async function loadLabels() {
+            const labelsList = document.getElementById('labels-list');
+            labelsList.innerHTML = '<div class="empty-state" style="height: auto; padding: 1rem;"><div class="spinner"></div><p>Carregando...</p></div>';
+
+            const labels = await api('/gmail/api/labels');
+            if (!labels) return;
+
+            labelsList.innerHTML = '';
+
+            labels.sort((a, b) => a.name.localeCompare(b.name))
+                .forEach(label => {
+                    if (label.type === 'system' && !['INBOX', 'SENT', 'DRAFT'].includes(label.id)) return;
+
+                    const isFluxo = label.name.startsWith('FLUXO PDF');
+                    const icon = isFluxo ? 'fa-folder-tree' : (label.type === 'system' ? 'fa-inbox' : 'fa-tag');
+
+                    const btn = document.createElement('button');
+                    btn.className = `label-btn ${currentLabelId === label.id ? 'active' : ''}`;
+                    btn.onclick = () => selectLabel(label);
+                    btn.innerHTML = `<i class="fas ${icon}"></i> <span>${label.name}</span>`;
+                    labelsList.appendChild(btn);
+                });
+
+            showToast(`${labels.length} pastas carregadas`, 'success', 2000);
+        }
+
+        // ===== SELECT LABEL =====
+        async function selectLabel(label) {
+            currentLabelId = label.id;
+            currentLabelName = label.name;
+
+            document.querySelectorAll('.label-btn').forEach(btn => btn.classList.remove('active'));
+            event.target.closest('.label-btn').classList.add('active');
+
+            document.getElementById('emails-header').textContent = label.name;
+
+            const emailsList = document.getElementById('emails-list');
+            emailsList.innerHTML = '<div class="empty-state"><div class="spinner"></div><p>Carregando emails...</p></div>';
+
+            const messages = await api(`/gmail/api/messages?label_id=${label.id}`);
+            if (!messages || messages.length === 0) {
+                emailsList.innerHTML = '<div class="empty-state"><i class="fas fa-inbox"></i><p>Nenhum email</p></div>';
+                document.getElementById('attachments-list').innerHTML = '<div class="empty-state"><i class="fas fa-paperclip"></i><p>Nenhum arquivo</p></div>';
+                return;
+            }
+
+            selectedEmails.clear();
+            emailsList.innerHTML = '';
+
+            messages.forEach(msg => {
+                const item = document.createElement('div');
+                item.className = 'email-item';
+                item.onclick = () => selectEmail(msg);
+                item.innerHTML = `
+                    <div class="email-item-subject">${msg.subject || '(Sem assunto)'}</div>
+                    <div class="email-item-from">${msg.from}</div>
+                    <div class="email-item-date">${msg.date}</div>
+                `;
+                emailsList.appendChild(item);
+                selectedEmails.set(msg.id, msg);
+            });
+
+            // Seleciona o primeiro email automaticamente
+            if (messages.length > 0) {
+                const firstItem = emailsList.firstChild;
+                firstItem.classList.add('selected');
+                loadAttachments(messages[0].id);
+            }
+
+            showToast(`${messages.length} emails`, 'success', 2000);
+        }
+
+        // ===== SELECT EMAIL =====
+        function selectEmail(msg) {
+            document.querySelectorAll('.email-item').forEach(item => item.classList.remove('selected'));
+            event.currentTarget.classList.add('selected');
+            loadAttachments(msg.id);
+        }
+
+        // ===== LOAD ATTACHMENTS =====
+        async function loadAttachments(messageId) {
+            const attachsList = document.getElementById('attachments-list');
+            attachsList.innerHTML = '<div class="empty-state"><div class="spinner"></div><p>Carregando...</p></div>';
+
+            const attachments = await api(`/gmail/api/attachments?message_id=${messageId}`);
+
+            if (!attachments || attachments.length === 0) {
+                attachsList.innerHTML = '<div class="empty-state"><i class="fas fa-paperclip"></i><p>Sem anexos</p></div>';
+                return;
+            }
+
+            attachsList.innerHTML = '';
+
+            attachments.forEach(att => {
+                const isPdf = att.filename.toLowerCase().endsWith('.pdf');
+                const icon = isPdf ? 'fa-file-pdf' : 'fa-file';
+                const key = `${messageId}|${att.attachment_id}`;
+                const isSelected = selectedAttachments.has(key);
+
+                const item = document.createElement('div');
+                item.className = 'attachment-item';
+                item.innerHTML = `
+                    <input type="checkbox" data-key="${key}" data-msg-id="${messageId}" data-att-id="${att.attachment_id}" data-filename="${att.filename}" data-label="${currentLabelName}" ${isSelected ? 'checked' : ''} onchange="updateSelection()">
+                    <i class="fas ${icon}"></i>
+                    <div class="attachment-info">
+                        <div class="attachment-name">${att.filename}</div>
+                        <div class="attachment-size">${(att.size / 1024).toFixed(0)} KB</div>
+                    </div>
+                    <button class="attachment-btn" onclick="processOne('${messageId}', '${att.attachment_id}', '${att.filename}', '${currentLabelName}')">
+                        <i class="fas fa-play"></i>
+                    </button>
+                `;
+                attachsList.appendChild(item);
+            });
+        }
+
+        // ===== UPDATE SELECTION =====
+        function updateSelection() {
+            selectedAttachments.clear();
+            document.querySelectorAll('.attachment-item input:checked').forEach(cb => {
+                selectedAttachments.add(cb.dataset.key);
+            });
+
+            const count = selectedAttachments.size;
+            document.getElementById('selected-count').textContent = count;
+            document.getElementById('btn-process-selected').disabled = count === 0;
+        }
+
+        // ===== SELECT ALL =====
+        function selectAllAttachments() {
+            document.querySelectorAll('.attachment-item input').forEach(cb => cb.checked = true);
+            updateSelection();
+            showToast('Todos selecionados', 'success', 1500);
+        }
+
+        // ===== CLEAR ALL =====
+        function clearAllAttachments() {
+            document.querySelectorAll('.attachment-item input').forEach(cb => cb.checked = false);
+            updateSelection();
+            showToast('Seleção limpa', 'info', 1500);
+        }
+
+        // ===== PROCESS ONE =====
+        async function processOne(msgId, attId, filename, label) {
+            if (!confirm(`Processar "${filename}"?`)) return;
+
+            const match = label.match(/(\d{2})-(\d{4})/);
+            const res = await api('/gmail/api/process-attachment', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message_id: msgId,
+                    attachment_id: attId,
+                    filename: filename,
+                    mes: match ? parseInt(match[1]) : null,
+                    ano: match ? parseInt(match[2]) : null
+                })
+            });
+
+            if (res?.status === 'success') {
+                showToast(`✓ ${res.result.cliente || 'Processado'}`, 'success');
+            }
+        }
+
+        // ===== PROCESS SELECTED =====
+        document.getElementById('btn-process-selected').addEventListener('click', async () => {
+            const items = Array.from(selectedAttachments).map(key => {
+                const [msgId, attId] = key.split('|');
+                const cb = document.querySelector(`input[data-key="${key}"]`);
+                return {
+                    message_id: msgId,
+                    attachment_id: attId,
+                    filename: cb.dataset.filename,
+                    label: cb.dataset.label
+                };
+            });
+
+            if (!confirm(`Processar ${items.length} arquivo(s)?`)) return;
+
+            const btn = document.getElementById('btn-process-selected');
+            const original = btn.innerHTML;
+            let done = 0;
+
+            for (const item of items) {
+                const match = item.label.match(/(\d{2})-(\d{4})/);
+                await api('/gmail/api/process-attachment', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message_id: item.message_id,
+                        attachment_id: item.attachment_id,
+                        filename: item.filename,
+                        mes: match ? parseInt(match[1]) : null,
+                        ano: match ? parseInt(match[2]) : null
+                    })
+                });
+                done++;
+                btn.innerHTML = `<i class="fas fa-play"></i> ${done}/${items.length}`;
+            }
+
+            btn.innerHTML = original;
+            showToast(`✓ ${done} arquivo(s) processado(s)!`, 'success');
+            clearAllAttachments();
+            setTimeout(() => loadLabels(), 1500);
+        });
+
+        // ===== KEYBOARD SHORTCUTS =====
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.key === 'a') { e.preventDefault(); selectAllAttachments(); }
+            if (e.shiftKey && e.key === 'A') { clearAllAttachments(); }
+            if (e.key === 'F5') { e.preventDefault(); loadLabels(); }
+            if (e.key === 'Enter' && selectedAttachments.size > 0) {
+                document.getElementById('btn-process-selected').click();
+            }
+        });
+
+        // ===== AUTH CHECK =====
+        async function checkAuth() {
+            const result = await api('/gmail/status');
+            if (result?.authenticated) {
+                showToast('✓ Gmail autenticado', 'success');
+            } else {
+                showToast('✗ Gmail não configurado', 'error');
+            }
+        }
+
+        // Initialize
+        loadLabels();
+        checkAuth();
+        setInterval(loadLabels, 30000);
+    </script>
+</body>
+
+</html>

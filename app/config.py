@@ -17,11 +17,16 @@ class Settings(BaseSettings):
         env_file=".env",
         env_file_encoding="utf-8",
         case_sensitive=False,
+        extra="ignore",
     )
 
     # ==================== OpenAI / LLM ====================
     openai_api_key: str
     llm_model: str = "gpt-4o-mini"
+
+    # ==================== Gmail (Service Account) ====================
+    gmail_json_path: Path | None = None
+    gmail_delegated_user: str | None = "contabil06@jpcontabil.com.br"
 
     # ==================== Caminhos do Sistema ====================
     base_path: Path
