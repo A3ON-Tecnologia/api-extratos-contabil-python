@@ -65,7 +65,7 @@ class TechNavbar {
             const link = item.querySelector('.nav-link');
             if (link) {
                 const href = link.getAttribute('href');
-                if (href === currentPath || (currentPath === '/' && href === '/monitor')) {
+                if (href === currentPath || (currentPath === '/' && href === '/gmail')) {
                     item.classList.add('active');
                 } else {
                     item.classList.remove('active');

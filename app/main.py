@@ -163,12 +163,9 @@ async def _inject_navbar_middleware(request, call_next):
     show_main = True
     show_extratos = True
 
-    if path == "/monitor":
-        active_main = "monitor"
-    elif path == "/test":
-        active_main = "test"
-    elif path == "/reversao":
-        active_main = "reversao"
+    if path.startswith("/gmail"):
+        # mark gmail as active for any gmail subpath
+        active_main = "gmail"
     elif path == "/extratos":
         active_extratos = "extratos"
     elif path == "/extratos/simular":
@@ -176,11 +173,11 @@ async def _inject_navbar_middleware(request, call_next):
     elif path == "/extratos/reversao":
         active_extratos = "reversao-extratos"
 
-    # Hide Make module from navbar since Make was decommissioned
+    # Show Gmail module in navbar
     navbar_html = render_tech_navbar(
         active_main=active_main,
         active_extratos=active_extratos,
-        show_main=False,
+        show_main=show_main,
         show_extratos=show_extratos,
     )
     navbar_placeholder_re = re.compile(r"\{\{\s*TECH_NAVBAR\s*\}\}|\{\s*TECH_NAVBAR\s*\}")

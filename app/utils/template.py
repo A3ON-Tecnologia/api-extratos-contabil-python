@@ -23,28 +23,28 @@ def render_tech_navbar(
 
     main_block = "" if not show_main else f"""
             <div class=\"nav-section nav-main\"{main_style}>
-                <div class=\"nav-section-title\">Módulo MAKE</div>
-                <div class=\"nav-item nav-item-monitor{active_class(active_main, 'monitor')}\">
-                    <a href=\"/monitor\" class=\"nav-link\">
-                        <span class=\"nav-icon\">&#128250;</span>
-                        <span class=\"nav-text\">Monitor</span>
+                <div class=\"nav-section-title\">Módulo Gmail</div>
+                <div class=\"nav-item nav-item-gmail-dashboard{active_class(active_main, 'gmail')}\">
+                    <a href=\"/gmail\" class=\"nav-link\">
+                        <span class=\"nav-icon\">&#128231;</span>
+                        <span class=\"nav-text\">Gmail Dashboard</span>
                         <span class=\"nav-status\"></span>
                     </a>
-                    <span class=\"nav-tooltip\">Monitor</span>
+                    <span class=\"nav-tooltip\">Gmail Dashboard</span>
                 </div>
-                <div class=\"nav-item nav-item-test{active_class(active_main, 'test')}\">
-                    <a href=\"/test\" class=\"nav-link\">
-                        <span class=\"nav-icon\">&#129514;</span>
-                        <span class=\"nav-text\">Test Monitor</span>
+                <div class=\"nav-item nav-item-gmail-auth{active_class(active_main, 'gmail-auth')}\">
+                    <a href=\"/gmail/auth\" class=\"nav-link\">
+                        <span class=\"nav-icon\">&#128273;</span>
+                        <span class=\"nav-text\">Authenticate</span>
                     </a>
-                    <span class=\"nav-tooltip\">Test Monitor</span>
+                    <span class=\"nav-tooltip\">Authenticate</span>
                 </div>
-                <div class=\"nav-item nav-item-reversao{active_class(active_main, 'reversao')}\">
-                    <a href=\"/reversao\" class=\"nav-link\">
-                        <span class=\"nav-icon\">&#128260;</span>
-                        <span class=\"nav-text\">Reversao</span>
+                <div class=\"nav-item nav-item-gmail-poll{active_class(active_main, 'gmail-poll')}\">
+                    <a href=\"/gmail/poll\" class=\"nav-link\">
+                        <span class=\"nav-icon\">&#128257;</span>
+                        <span class=\"nav-text\">Poll Attachments</span>
                     </a>
-                    <span class=\"nav-tooltip\">Reversao</span>
+                    <span class=\"nav-tooltip\">Poll Attachments</span>
                 </div>
             </div>
     """
