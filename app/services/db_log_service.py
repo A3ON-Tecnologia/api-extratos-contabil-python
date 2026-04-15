@@ -159,12 +159,16 @@ class DatabaseLogService:
 
             falha_values = ["FALHA", "ERRO"]
             falha = base_query.filter(ExtratoLog.status.in_(falha_values)).count()
+
+            # Movidos manualmente (flag boolean)
+            manually_moved = base_query.filter(ExtratoLog.manually_moved == True).count()
             
             return {
                 "total": total,
                 "sucesso": sucesso,
                 "nao_identificado": nao_identificado,
                 "falha": falha,
+                "manually_moved": manually_moved,
             }
         finally:
             db.close()
@@ -196,6 +200,9 @@ class DatabaseLogService:
 
             falha_values = ["FALHA", "ERRO"]
             falha = base_query.filter(ExtratoLog.status.in_(falha_values)).count()
+
+            # Movidos manualmente por cliente
+            manually_moved = base_query.filter(ExtratoLog.manually_moved == True).count()
 
             confianca_media = (
                 base_query.with_entities(func.avg(ExtratoLog.confianca_ia)).scalar()
@@ -231,6 +238,7 @@ class DatabaseLogService:
                 "sucesso": sucesso,
                 "nao_identificado": nao_identificado,
                 "falha": falha,
+                "manually_moved": manually_moved,
                 "taxa_sucesso": taxa_sucesso,
                 "confianca_media": round(float(confianca_media), 2) if confianca_media is not None else None,
                 "tipos_mais_comuns": [
