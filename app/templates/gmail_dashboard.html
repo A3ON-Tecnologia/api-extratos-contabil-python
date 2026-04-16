@@ -915,10 +915,13 @@
 
         async function confirmFolder() {
             if (!folderModalSelected || folderModalQueue.length === 0) return;
+
+            const itemsToProcess = [...folderModalQueue];
+            const pastaDestino = folderModalSelected;
             closeFolderModal();
 
             let done = 0;
-            for (const item of folderModalQueue) {
+            for (const item of itemsToProcess) {
                 await api('/gmail/api/download-to-folder', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
@@ -926,12 +929,12 @@
                         message_id: item.message_id,
                         attachment_id: item.attachment_id,
                         filename: item.filename,
-                        pasta_destino: folderModalSelected
+                        pasta_destino: pastaDestino
                     })
                 });
                 done++;
             }
-            showToast(`✓ ${done} arquivo(s) salvo(s) em ${folderModalSelected}`, 'success');
+            showToast(`✓ ${done} arquivo(s) salvo(s) em ${pastaDestino}`, 'success');
             clearAllAttachments();
             setTimeout(() => loadLabels(), 1500);
         }
