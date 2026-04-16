@@ -9,7 +9,16 @@ from app.services.gmail_service import GmailService
 from app.config import get_settings
 
 router = APIRouter(prefix="/gmail", tags=["gmail"])
-service = GmailService()
+
+def get_service():
+    """Lazy initialization of GmailService with error handling."""
+    try:
+        return GmailService()
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Erro ao inicializar GmailService: {e}", exc_info=True)
+        raise RuntimeError(f"Gmail não está configurado: {str(e)}") from e
 
 class ProcessAttachmentRequest(BaseModel):
     message_id: str
@@ -30,25 +39,31 @@ async def gmail_dashboard(request: Request):
     from pathlib import Path
     import re
 
-    template_path = Path(__file__).parent.parent / "templates" / "gmail_dashboard.html"
+    try:
+        template_path = Path(__file__).parent.parent / "templates" / "gmail_dashboard.html"
 
-    if not template_path.exists():
+        if not template_path.exists():
+            return HTMLResponse(
+                content=f"<html><body><h1>Erro</h1><p>Template não encontrado em {template_path}</p></body></html>",
+                status_code=500
+            )
+
+        # Injeta navbar usando a função helper do main.py
+        from app.main import _render_template_with_navbar
+
         return HTMLResponse(
-            content=f"<html><body><h1>Erro</h1><p>Template não encontrado em {template_path}</p></body></html>",
+            content=_render_template_with_navbar(
+                template_path,
+                active_main="gmail",
+                show_main=True,
+                show_extratos=True
+            )
+        )
+    except Exception as e:
+        return HTMLResponse(
+            content=f"<html><body><h1>Erro ao carregar Gmail Dashboard</h1><p>{str(e)}</p></body></html>",
             status_code=500
         )
-
-    # Injeta navbar usando a função helper do main.py
-    from app.main import _render_template_with_navbar
-
-    return HTMLResponse(
-        content=_render_template_with_navbar(
-            template_path,
-            active_main="gmail",
-            show_main=True,
-            show_extratos=True
-        )
-    )
 
 
 @router.get("/auth", response_class=HTMLResponse)
@@ -57,6 +72,7 @@ async def gmail_auth_status():
     from app.utils.template import render_tech_navbar
 
     settings = get_settings()
+    service = get_service()
     is_authenticated = service.is_authenticated()
     json_path = settings.gmail_json_path
     delegated_user = settings.gmail_delegated_user
@@ -263,6 +279,7 @@ async def gmail_auth_status():
 @router.get("/api/labels")
 async def get_labels():
     try:
+        service = get_service()
         return service.list_labels()
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -270,6 +287,7 @@ async def get_labels():
 @router.get("/api/messages")
 async def get_messages(label_id: str = Query(...)):
     try:
+        service = get_service()
         return service.list_messages(label_id)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -277,6 +295,7 @@ async def get_messages(label_id: str = Query(...)):
 @router.get("/api/attachments")
 async def get_attachments(message_id: str = Query(...)):
     try:
+        service = get_service()
         return service.get_message_attachments(message_id)
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
@@ -284,6 +303,7 @@ async def get_attachments(message_id: str = Query(...)):
 @router.post("/api/process-attachment")
 async def process_attachment(req: ProcessAttachmentRequest):
     try:
+        service = get_service()
         result = service.process_specific_attachment(
             message_id=req.message_id,
             attachment_id=req.attachment_id,
@@ -315,6 +335,7 @@ async def listar_subpastas_extratos():
 async def download_to_folder(req: DownloadToFolderRequest):
     """Baixa anexo diretamente para subpasta de EXTRATOS, sem processamento."""
     try:
+        service = get_service()
         result = service.download_attachment_to_folder(
             message_id=req.message_id,
             attachment_id=req.attachment_id,
@@ -333,6 +354,7 @@ async def download_to_folder(req: DownloadToFolderRequest):
 @router.get("/status")
 async def gmail_status():
     settings = get_settings()
+    service = get_service()
     return {
         "authenticated": service.is_authenticated(),
         "delegated_user": settings.gmail_delegated_user,
@@ -346,6 +368,7 @@ async def gmail_poll(
     max_results: int = Query(20, alias="max", description="Max messages to check")
 ):
     try:
+        service = get_service()
         saved = service.fetch_and_save_attachments(query=q, max_results=max_results)
         return JSONResponse({
             "status": "success",
@@ -360,6 +383,7 @@ async def gmail_poll_fluxo(
     max_per_label: int = Query(50, alias="max", description="Max messages to check per sub-label")
 ):
     try:
+        service = get_service()
         results = service.poll_fluxo_pdf(max_messages_per_label=max_per_label)
         return JSONResponse({
             "status": "success",
@@ -375,6 +399,7 @@ async def get_dashboard_stats():
     """Retorna estatísticas do dashboard para display."""
     from datetime import datetime
     try:
+        service = get_service()
         labels = service.list_labels()
         fluxo_labels = [l for l in labels if l.get("name", "").startswith("FLUXO PDF")]
 

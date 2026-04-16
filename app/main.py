@@ -203,9 +203,12 @@ app.include_router(extratos_test_router)
 try:
     from app.routes.gmail import router as gmail_router
     app.include_router(gmail_router)
-except Exception:
+    logger.info("✓ Rotas do Gmail registradas com sucesso")
+except Exception as e:
     # Gmail routes optional if google libs are not installed/configured
-    pass
+    logger.error(f"✗ Erro ao registrar rotas do Gmail: {e}", exc_info=True)
+    import traceback
+    traceback.print_exc()
 
 # Cache de hashes processados para idempotencia
 _processed_hashes: set[str] = set()

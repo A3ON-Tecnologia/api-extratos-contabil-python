@@ -2,6 +2,5 @@
 Rotas da API.
 """
 
-from app.routes import extratos_test
-
-__all__ = ["extratos_test"]
+# As rotas são importadas diretamente no main.py via include_router
+# Evitamos importações aqui para não causar erros de circular import
