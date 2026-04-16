@@ -3318,8 +3318,7 @@ async def assign_client_to_unidentified(payload: AssignClientRequest):
         log.cliente_cnpj = client.cnpj
         log.status = "SUCESSO"
         log.metodo_identificacao = "MANUAL"
-        if old_status == "NAO_IDENTIFICADO":
-            log.manually_moved = True
+        log.manually_moved = True
         log.arquivo_salvo = str(target_full_path)
 
         db.commit()
@@ -3448,8 +3447,8 @@ async def assign_extratos_client_to_unidentified(payload: AssignClientRequest):
         log.cliente_cnpj = client.cnpj
         log.status = "SUCESSO"
         log.metodo_identificacao = "MANUAL"
+        log.manually_moved = True
         if old_status == "NAO_IDENTIFICADO":
-            log.manually_moved = True
             if log.erro:
                 log.erro = f"{log.erro} | Atualizado manualmente"
             else:
