@@ -600,15 +600,15 @@
                     <table>
                         <thead>
                             <tr>
-                                <th>Nome antigo</th>
+                                <th>Ações</th>
                                 <th>Nome novo</th>
                                 <th>Banco</th>
                                 <th>Tipo extrato</th>
                                 <th>Status</th>
                                 <th>Data processamento</th>
-                                <th>Erro</th>
+                                <th>Nome antigo</th>
                                 <th>Local salvo</th>
-                                <th>Acoes</th>
+                                <th>Erro</th>
                             </tr>
                         </thead>
                         <tbody id="tableBody">
@@ -806,15 +806,15 @@
 
                     return `
                         <tr>
-                            <td title="${log.arquivo_original}">${log.arquivo_original}</td>
+                            <td>${actions}</td>
                             <td title="${nomeNovo}">${nomeNovo}</td>
                             <td>${banco}</td>
                             <td>${tipo}</td>
                             <td>${statusBadge}</td>
                             <td>${dataProc}</td>
-                            <td title="${erro}" class="path-cell">${erro}</td>
+                            <td title="${log.arquivo_original}">${log.arquivo_original}</td>
                             <td class="path-cell" title="${localSalvo}">${localSalvo}</td>
-                            <td>${actions}</td>
+                            <td title="${erro}" class="path-cell">${erro}</td>
                         </tr>
                     `;
                 }).join('');
