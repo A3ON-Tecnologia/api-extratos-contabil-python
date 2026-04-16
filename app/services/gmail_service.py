@@ -137,7 +137,8 @@ class GmailService:
             conta_extrato=extraction.conta,
             module="extratos",
             ano=ano,
-            mes=mes
+            mes=mes,
+            source="gmail"
         )
         
         return {

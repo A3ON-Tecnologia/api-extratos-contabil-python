@@ -102,6 +102,7 @@ class StorageService:
         module: str = "make",
         ano: int | None = None,
         mes: int | None = None,
+        source: str = "local",
     ) -> tuple[str, int, int]:
         """
         Salva o arquivo PDF no caminho correto.
@@ -151,7 +152,7 @@ class StorageService:
                 )
 
         if not target_path:
-            target_path = self.get_unidentified_path(module)
+            target_path = self.get_unidentified_path(module, source)
             if not target_path.exists():
                 logger.warning(f"Pasta NAO_IDENTIFICADOS nao encontrada, criando: {target_path}")
                 target_path.mkdir(parents=True, exist_ok=True)
@@ -218,9 +219,21 @@ class StorageService:
         mes_nome = MONTH_NAMES.get(mes, f"MES_{mes}")
         return self.get_unidentified_path(module) / str(ano) / mes_nome
 
-    def get_unidentified_path(self, module: str = "make") -> Path:
-        """Retorna o caminho base de NAO_IDENTIFICADOS conforme o modulo."""
+    def get_unidentified_path(self, module: str = "make", source: str = "local") -> Path:
+        """
+        Retorna o caminho base de NAO_IDENTIFICADOS conforme o modulo e fonte.
+
+        Args:
+            module: "extratos", "make", etc
+            source: "gmail" para arquivos do Gmail, "local" para outros
+        """
         module_norm = (module or "make").lower()
+        source_norm = (source or "local").lower()
+
+        # Se vem do Gmail, usa pasta específica
+        if source_norm == "gmail":
+            return self.settings.unidentified_gmail_path
+
         if module_norm.startswith("extra"):
             return self.settings.unidentified_extratos_path
         return self.settings.unidentified_make_path

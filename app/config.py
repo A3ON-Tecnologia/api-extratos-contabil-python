@@ -60,7 +60,8 @@ class Settings(BaseSettings):
 
     # ==================== Pastas de Não Identificados ====================
     unidentified_make_path: Path = Path(r"J:\JP Digital\000 - AUTOMAÇÕES\000 - NAO_IDENTIFICADOS\NÃO IDENTIFICADOS MAKE")
-    unidentified_extratos_path: Path = Path(r"J:\JP Digital\000 - AUTOMAÇÕES\000 - NAO_IDENTIFICADOS\NÃO IDENTIFICADOS EXTRATOS BAIXADOS")
+    unidentified_extratos_path: Path
+    unidentified_gmail_path: Path
     
     @property
     def database_url(self) -> str:
@@ -84,6 +85,7 @@ class Settings(BaseSettings):
             "watch_folder_path": self.watch_folder_path.exists(),
             "unidentified_make_path": self.unidentified_make_path.exists(),
             "unidentified_extratos_path": self.unidentified_extratos_path.exists(),
+            "unidentified_gmail_path": self.unidentified_gmail_path.exists(),
         }
 
     def validate_database_connection(self) -> dict[str, any]:
@@ -153,6 +155,7 @@ class Settings(BaseSettings):
             "port": self.port,
             "unidentified_make_path": str(self.unidentified_make_path),
             "unidentified_extratos_path": str(self.unidentified_extratos_path),
+            "unidentified_gmail_path": str(self.unidentified_gmail_path),
             "database": {
                 "host": self.db_host,
                 "port": self.db_port,
