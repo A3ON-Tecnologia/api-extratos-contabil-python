@@ -3617,6 +3617,7 @@ async def clear_all_logs():
             resultado_detalhes = resultado
         
         # 3. Emite evento de zeramento total para atualizar todos os clientes conectados
+        event_manager = get_event_manager()
         event_manager.emit_stats()
         
         return {
@@ -4373,8 +4374,9 @@ async def update_batch_logs(payload: UpdateBatchRequest):
     try:
         db_log_service = get_db_log_service()
         count = db_log_service.update_batch(payload.ids, payload.updates)
-        
+
         # Emite evento para atualizar o monitor (força reload para todos)
+        event_manager = get_event_manager()
         event_manager.emit_stats()
         
         return {
