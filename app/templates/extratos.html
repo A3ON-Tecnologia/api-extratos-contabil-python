@@ -793,8 +793,8 @@
                     const dataProc = formatDate(log.processado_em);
                     const statusBadge = formatStatus(log.status);
                     const erro = log.erro || '-';
-                    const assignBtn = currentTab === 'prod' && log.id && String(log.status || '').toUpperCase() === 'NAO_IDENTIFICADO'
-                        ? `<button class="btn success" onclick="openAssignClientModal(${log.id}, ${index})">Cliente</button>`
+                    const assignBtn = currentTab === 'prod' && log.id
+                        ? `<button class="btn success" onclick="openAssignClientModal(${log.id}, ${index})">Clientes</button>`
                         : '';
                     const viewBtn = currentTab === 'prod' && log.id
                         ? `<button class="btn" onclick="visualizar(${log.id})">Ver</button>`
