@@ -794,13 +794,13 @@
                     const statusBadge = formatStatus(log.status);
                     const erro = log.erro || '-';
                     const assignBtn = currentTab === 'prod' && log.id
-                        ? `<button class="btn success" onclick="openAssignClientModal(${log.id}, ${index})">Clientes</button>`
+                        ? `<button class="btn success" onclick="openAssignClientModal(${log.id}, ${index})" title="Reatribuir para outro cliente">👤 Clientes</button>`
                         : '';
                     const viewBtn = currentTab === 'prod' && log.id
-                        ? `<button class="btn" onclick="visualizar(${log.id})">Ver</button>`
+                        ? `<button class="btn" onclick="visualizar(${log.id})" title="Visualizar detalhes">👁️ Ver</button>`
                         : '';
                     const revertBtn = currentTab === 'prod' && log.id
-                        ? `<button class="btn danger" onclick="reverter(${log.id})">Reverter</button>`
+                        ? `<button class="btn danger" onclick="reverter(${log.id})" title="Desfazer processamento">↔️ Reverter</button>`
                         : '';
                     const actions = [assignBtn, viewBtn, revertBtn].filter(Boolean).join(' ') || '<span class="muted">-</span>';
 
