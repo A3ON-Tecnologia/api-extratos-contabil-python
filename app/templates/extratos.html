@@ -622,6 +622,19 @@
         </div>
     </div>
 
+    <!-- Modal de Visualização de PDF -->
+    <div id="viewPdfModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center; padding:1rem;">
+        <div style="width:min(90vw, 900px); height:min(90vh, 800px); background:var(--bg-card); border:1px solid var(--border-color); border-radius:0.9rem; box-shadow:0 18px 40px rgba(6, 15, 25, 0.45); overflow:hidden; display:flex; flex-direction:column;">
+            <div style="padding:1rem 1.25rem; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:space-between; gap:1rem;">
+                <h3 id="viewPdfTitle" style="font-size:1rem; margin:0;">Visualizar arquivo</h3>
+                <button class="btn" onclick="closeViewPdfModal()">✕ Fechar</button>
+            </div>
+            <div id="viewPdfContainer" style="flex:1; overflow:auto; background:var(--bg-secondary);">
+                <div style="display:flex; align-items:center; justify-content:center; height:100%; color:var(--text-secondary);">Carregando...</div>
+            </div>
+        </div>
+    </div>
+
     <div id="assignClientModal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center; padding:1rem;">
         <div style="width:min(560px, 100%); background:var(--bg-card); border:1px solid var(--border-color); border-radius:0.9rem; box-shadow:0 18px 40px rgba(6, 15, 25, 0.45); overflow:hidden;">
             <div style="padding:1rem 1.25rem; border-bottom:1px solid var(--border-color); display:flex; align-items:center; justify-content:space-between; gap:1rem;">
@@ -1086,8 +1099,36 @@
             }
         }
 
-        function visualizar(logId) {
-            window.open(`/extratos/logs/${logId}/view`, '_blank');
+        async function visualizar(logId) {
+            const modal = document.getElementById('viewPdfModal');
+            const container = document.getElementById('viewPdfContainer');
+            const title = document.getElementById('viewPdfTitle');
+
+            container.innerHTML = '<div style="display:flex; align-items:center; justify-content:center; height:100%; color:var(--text-secondary);">Carregando...</div>';
+            modal.style.display = 'flex';
+
+            try {
+                const response = await fetch(`/extratos/logs/${logId}/view`);
+                if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+                const html = await response.text();
+                const log = currentLogs.find(l => l.id === logId);
+                const fileName = log?.arquivo_original || 'Arquivo';
+
+                title.textContent = `📄 ${fileName}`;
+                container.innerHTML = html;
+            } catch (error) {
+                console.error('Erro ao carregar arquivo:', error);
+                container.innerHTML = `<div style="display:flex; align-items:center; justify-content:center; height:100%; flex-direction:column; gap:1rem; color:var(--text-secondary);">
+                    <div>❌ Erro ao carregar arquivo</div>
+                    <div style="font-size:0.85rem;">${error.message}</div>
+                </div>`;
+            }
+        }
+
+        function closeViewPdfModal() {
+            document.getElementById('viewPdfModal').style.display = 'none';
+            document.getElementById('viewPdfContainer').innerHTML = '';
         }
 
         tabs.forEach(tab => {
