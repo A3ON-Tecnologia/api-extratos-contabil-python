@@ -183,6 +183,46 @@ class GmailService:
                         results.append(res)
         return results
 
+    def download_attachment_to_folder(
+        self,
+        message_id: str,
+        attachment_id: str,
+        filename: str,
+        pasta_destino: str,
+    ) -> dict:
+        """Baixa anexo diretamente para subpasta de EXTRATOS (sem LLM/matching)."""
+        # Baixa o arquivo do Gmail
+        creds = self.load_credentials()
+        svc = self._build_service(creds)
+        att = svc.users().messages().attachments().get(
+            userId="me", messageId=message_id, id=attachment_id
+        ).execute()
+        data = base64.urlsafe_b64decode(att.get("data", ""))
+
+        # Valida pasta destino (deve ser subpasta de watch_folder_path)
+        watch_path = Path(self.settings.watch_folder_path)
+        target_dir = watch_path / pasta_destino
+        if not target_dir.exists():
+            target_dir.mkdir(parents=True, exist_ok=True)
+
+        # Salva na pasta escolhida, garantindo nome único
+        dest_file = target_dir / filename
+        if dest_file.exists():
+            stem = dest_file.stem
+            suffix = dest_file.suffix
+            i = 1
+            while dest_file.exists():
+                dest_file = target_dir / f"{stem}_{i}{suffix}"
+                i += 1
+
+        dest_file.write_bytes(data)
+        logger.info(f"Anexo salvo: {dest_file}")
+        return {
+            "path": str(dest_file),
+            "pasta": pasta_destino,
+            "filename": dest_file.name
+        }
+
     def is_authenticated(self) -> bool:
         json_path = self.settings.gmail_json_path
         return bool(json_path and Path(json_path).exists())

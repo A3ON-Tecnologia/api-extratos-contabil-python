@@ -18,6 +18,12 @@ class ProcessAttachmentRequest(BaseModel):
     mes: int | None = None
     ano: int | None = None
 
+class DownloadToFolderRequest(BaseModel):
+    message_id: str
+    attachment_id: str
+    filename: str
+    pasta_destino: str
+
 @router.get("/", response_class=HTMLResponse)
 async def gmail_dashboard(request: Request):
     """Serve o novo Dashboard do Gmail com navbar injetada."""
@@ -284,6 +290,36 @@ async def process_attachment(req: ProcessAttachmentRequest):
             filename=req.filename,
             ano=req.ano,
             mes=req.mes
+        )
+        return {"status": "success", "result": result}
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+@router.get("/api/subpastas-extratos")
+async def listar_subpastas_extratos():
+    """Lista as subpastas disponíveis em watch_folder_path."""
+    try:
+        settings = get_settings()
+        watch_path = Path(settings.watch_folder_path)
+        if not watch_path.exists():
+            return {"pastas": []}
+        pastas = sorted([
+            p.name for p in watch_path.iterdir()
+            if p.is_dir() and not p.name.startswith("_")
+        ])
+        return {"pastas": pastas}
+    except Exception as e:
+        return JSONResponse({"status": "error", "message": str(e)}, status_code=500)
+
+@router.post("/api/download-to-folder")
+async def download_to_folder(req: DownloadToFolderRequest):
+    """Baixa anexo diretamente para subpasta de EXTRATOS, sem processamento."""
+    try:
+        result = service.download_attachment_to_folder(
+            message_id=req.message_id,
+            attachment_id=req.attachment_id,
+            filename=req.filename,
+            pasta_destino=req.pasta_destino,
         )
         return {"status": "success", "result": result}
     except Exception as e:

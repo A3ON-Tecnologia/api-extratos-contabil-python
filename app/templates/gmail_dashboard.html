@@ -653,6 +653,25 @@
 
     <div class="toast-container" id="toast-container"></div>
 
+    <!-- FOLDER MODAL -->
+    <div id="folderModal" style="display:none; position:fixed; inset:0;
+         background:rgba(0,0,0,0.75); z-index:2000; align-items:center;
+         justify-content:center; padding:1rem; backdrop-filter:blur(4px);">
+      <div style="background:#111b2a; border:1px solid rgba(34,211,238,0.3);
+           border-radius:0.75rem; max-width:440px; width:100%; padding:1.5rem;
+           display:flex; flex-direction:column; gap:1rem; animation:scaleIn .15s ease;">
+        <h3 style="font-size:1.1rem; color:#f8fafc;">Escolher pasta de destino</h3>
+        <p style="font-size:0.82rem; color:#94a3b8;">
+          Arquivo: <strong id="folderModalName" style="color:#f8fafc;">-</strong>
+        </p>
+        <div id="folderList" style="display:flex; flex-direction:column; gap:0.4rem; max-height:280px; overflow-y:auto;"></div>
+        <div style="display:flex; justify-content:flex-end; gap:0.75rem; margin-top:0.5rem;">
+          <button onclick="closeFolderModal()" style="padding:0.5rem 1rem; border:1px solid rgba(34,211,238,0.3); background:#111b2a; color:#94a3b8; border-radius:0.375rem; cursor:pointer; font-size:0.85rem;">Cancelar</button>
+          <button id="folderConfirmBtn" onclick="confirmFolder()" disabled style="padding:0.5rem 1rem; border:none; background:linear-gradient(135deg,rgba(34,211,238,0.4),rgba(45,212,191,0.4)); color:#f8fafc; border-radius:0.375rem; cursor:pointer; font-size:0.85rem; font-weight:600;">Confirmar</button>
+        </div>
+      </div>
+    </div>
+
     <script>
         let currentLabelId = null;
         let currentLabelName = null;
@@ -843,26 +862,86 @@
             showToast('Seleção limpa', 'info', 1500);
         }
 
+        // ===== FOLDER MODAL STATE =====
+        let folderModalQueue = [];
+        let folderModalSelected = null;
+        let _subpastasCache = null;
+
+        async function getSubpastas() {
+            if (_subpastasCache) return _subpastasCache;
+            const r = await api('/gmail/api/subpastas-extratos');
+            _subpastasCache = r.pastas || [];
+            return _subpastasCache;
+        }
+
+        async function openFolderModal(items, singleFilename = null) {
+            folderModalQueue = items;
+            folderModalSelected = null;
+            document.getElementById('folderModalName').textContent =
+                singleFilename || `${items.length} arquivo(s)`;
+
+            const pastas = await getSubpastas();
+            const list = document.getElementById('folderList');
+            list.innerHTML = pastas.map(p => `
+                <div class="folder-option" onclick="selectFolder(this, '${p}')"
+                     style="padding:0.6rem 1rem; border-radius:0.5rem; cursor:pointer;
+                            border:1px solid rgba(34,211,238,0.2); color:#94a3b8; font-size:0.9rem;">
+                    📁 ${p}
+                </div>
+            `).join('');
+
+            document.getElementById('folderConfirmBtn').disabled = true;
+            document.getElementById('folderModal').style.display = 'flex';
+        }
+
+        function selectFolder(el, pasta) {
+            document.querySelectorAll('.folder-option').forEach(e => {
+                e.style.background = '';
+                e.style.color = '#94a3b8';
+                e.style.borderColor = 'rgba(34,211,238,0.2)';
+            });
+            el.style.background = 'rgba(34,211,238,0.12)';
+            el.style.color = '#f8fafc';
+            el.style.borderColor = 'rgba(34,211,238,0.5)';
+            folderModalSelected = pasta;
+            document.getElementById('folderConfirmBtn').disabled = false;
+        }
+
+        function closeFolderModal() {
+            document.getElementById('folderModal').style.display = 'none';
+            folderModalQueue = [];
+            folderModalSelected = null;
+        }
+
+        async function confirmFolder() {
+            if (!folderModalSelected || folderModalQueue.length === 0) return;
+            closeFolderModal();
+
+            let done = 0;
+            for (const item of folderModalQueue) {
+                await api('/gmail/api/download-to-folder', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        message_id: item.message_id,
+                        attachment_id: item.attachment_id,
+                        filename: item.filename,
+                        pasta_destino: folderModalSelected
+                    })
+                });
+                done++;
+            }
+            showToast(`✓ ${done} arquivo(s) salvo(s) em ${folderModalSelected}`, 'success');
+            clearAllAttachments();
+            setTimeout(() => loadLabels(), 1500);
+        }
+
         // ===== PROCESS ONE =====
         async function processOne(msgId, attId, filename, label) {
-            if (!confirm(`Processar "${filename}"?`)) return;
-
-            const match = label.match(/(\d{2})-(\d{4})/);
-            const res = await api('/gmail/api/process-attachment', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    message_id: msgId,
-                    attachment_id: attId,
-                    filename: filename,
-                    mes: match ? parseInt(match[1]) : null,
-                    ano: match ? parseInt(match[2]) : null
-                })
-            });
-
-            if (res?.status === 'success') {
-                showToast(`✓ ${res.result.cliente || 'Processado'}`, 'success');
-            }
+            await openFolderModal(
+                [{ message_id: msgId, attachment_id: attId, filename }],
+                filename
+            );
         }
 
         // ===== PROCESS SELECTED =====
@@ -878,33 +957,8 @@
                 };
             });
 
-            if (!confirm(`Processar ${items.length} arquivo(s)?`)) return;
-
-            const btn = document.getElementById('btn-process-selected');
-            const original = btn.innerHTML;
-            let done = 0;
-
-            for (const item of items) {
-                const match = item.label.match(/(\d{2})-(\d{4})/);
-                await api('/gmail/api/process-attachment', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        message_id: item.message_id,
-                        attachment_id: item.attachment_id,
-                        filename: item.filename,
-                        mes: match ? parseInt(match[1]) : null,
-                        ano: match ? parseInt(match[2]) : null
-                    })
-                });
-                done++;
-                btn.innerHTML = `<i class="fas fa-play"></i> ${done}/${items.length}`;
-            }
-
-            btn.innerHTML = original;
-            showToast(`✓ ${done} arquivo(s) processado(s)!`, 'success');
-            clearAllAttachments();
-            setTimeout(() => loadLabels(), 1500);
+            if (items.length === 0) return;
+            await openFolderModal(items);
         });
 
         // ===== KEYBOARD SHORTCUTS =====
