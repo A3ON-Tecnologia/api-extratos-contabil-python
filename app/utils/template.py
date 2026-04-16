@@ -39,13 +39,6 @@ def render_tech_navbar(
                     </a>
                     <span class=\"nav-tooltip\">Authenticate</span>
                 </div>
-                <div class=\"nav-item nav-item-gmail-poll{active_class(active_main, 'gmail-poll')}\">
-                    <a href=\"/gmail/poll\" class=\"nav-link\">
-                        <span class=\"nav-icon\">&#128257;</span>
-                        <span class=\"nav-text\">Poll Attachments</span>
-                    </a>
-                    <span class=\"nav-tooltip\">Poll Attachments</span>
-                </div>
             </div>
     """
 
